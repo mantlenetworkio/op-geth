@@ -31,6 +31,8 @@ type DepositTx struct {
 	From common.Address
 	// nil means contract creation
 	To *common.Address `rlp:"nil"`
+	// EthValue means L2 BVM_ETH mint tag, nil means that there is no need to mint BVM_ETH.
+	EthValue *big.Int `rlp:"nil"`
 	// Mint is minted on L2, locked on L1, nil if no minting.
 	Mint *big.Int `rlp:"nil"`
 	// Value is transferred from L2 balance, executed after Mint (if any)
