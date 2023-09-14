@@ -65,7 +65,7 @@ func (tx *DepositTx) copy() TxData {
 		cpy.Value.Set(tx.Value)
 	}
 	if tx.EthValue != nil {
-		cpy.EthValue.Set(tx.Value)
+		cpy.EthValue.Set(tx.EthValue)
 	}
 	return cpy
 }

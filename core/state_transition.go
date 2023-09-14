@@ -18,7 +18,6 @@ package core
 
 import (
 	"fmt"
-	"log"
 	"math"
 	"math/big"
 
@@ -154,7 +153,6 @@ type Message struct {
 
 // TransactionToMessage converts a transaction into a Message.
 func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.Int) (*Message, error) {
-	log.Printf("!!!!!!!!!!!!!!  tx2msg : ethvalue = %v", tx.ETHValue())
 	msg := &Message{
 		Nonce:             tx.Nonce(),
 		GasLimit:          tx.Gas(),
@@ -354,26 +352,13 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 		st.state.AddBalance(st.msg.From, mint)
 	}
 	//add eth value
-	if st.msg.ETHValue != nil && st.msg.ETHValue.Uint64() != 0 {
-		log.Printf("debug----- ethvalue = %v", st.msg.ETHValue.Uint64())
-	} else {
-		log.Printf("debug----- ethvalue is nil ")
-
-	}
-
 	if ethValue := st.msg.ETHValue; ethValue != nil && ethValue.Cmp(big.NewInt(0)) != 0 {
 		BVM_ETH := common.HexToAddress(BVM_ETH_ADDR)
-
 		key := getBVMETHBalanceKey(*st.msg.To)
 		value := st.state.GetState(BVM_ETH, key)
-		log.Printf("debug----- to address= %v", st.msg.To.Hex())
-		log.Printf("debug----- to address value = %v", value.Big().Uint64())
-		log.Printf("debug----- bvm address value = %v", BVM_ETH.Hex())
-
 		bal := value.Big()
 		bal = bal.Add(bal, ethValue)
 		st.state.SetState(BVM_ETH, key, common.BigToHash(bal))
-		log.Printf("kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk")
 		//st.state.AddLog()
 		//types.Log{}
 	}
@@ -556,6 +541,7 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 func (st *StateTransition) gasUsed() uint64 {
 	return st.initialGas - st.gasRemaining
 }
+
 func getBVMETHBalanceKey(addr common.Address) common.Hash {
 	position := common.Big0
 	hasher := sha3.NewLegacyKeccak256()
