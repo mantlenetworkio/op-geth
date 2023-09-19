@@ -353,12 +353,9 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	}
 	//add eth value
 	if ethValue := st.msg.ETHValue; ethValue != nil && ethValue.Cmp(big.NewInt(0)) != 0 {
-		BVM_ETH := common.HexToAddress(BVM_ETH_ADDR)
-		key := getBVMETHBalanceKey(*st.msg.To)
-		value := st.state.GetState(BVM_ETH, key)
-		bal := value.Big()
-		bal = bal.Add(bal, ethValue)
-		st.state.SetState(BVM_ETH, key, common.BigToHash(bal))
+		st.addBVMETHBalance(ethValue)
+		st.addBVMETHTotalSupply(ethValue)
+		st.generateMintEvent(*st.msg.To, ethValue)
 		//st.state.AddLog()
 		//types.Log{}
 	}
@@ -542,6 +539,24 @@ func (st *StateTransition) gasUsed() uint64 {
 	return st.initialGas - st.gasRemaining
 }
 
+func (st *StateTransition) addBVMETHBalance(ethValue *big.Int) {
+	BVM_ETH := common.HexToAddress(BVM_ETH_ADDR)
+	key := getBVMETHBalanceKey(*st.msg.To)
+	value := st.state.GetState(BVM_ETH, key)
+	bal := value.Big()
+	bal = bal.Add(bal, ethValue)
+	st.state.SetState(BVM_ETH, key, common.BigToHash(bal))
+}
+
+func (st *StateTransition) addBVMETHTotalSupply(ethValue *big.Int) {
+	BVM_ETH := common.HexToAddress(BVM_ETH_ADDR)
+	key := getBVMETHTotalSupplyKey()
+	value := st.state.GetState(BVM_ETH, key)
+	bal := value.Big()
+	bal = bal.Add(bal, ethValue)
+	st.state.SetState(BVM_ETH, key, common.BigToHash(bal))
+}
+
 func getBVMETHBalanceKey(addr common.Address) common.Hash {
 	position := common.Big0
 	hasher := sha3.NewLegacyKeccak256()
@@ -549,4 +564,30 @@ func getBVMETHBalanceKey(addr common.Address) common.Hash {
 	hasher.Write(common.LeftPadBytes(position.Bytes(), 32))
 	digest := hasher.Sum(nil)
 	return common.BytesToHash(digest)
+}
+
+func getBVMETHTotalSupplyKey() common.Hash {
+	position := common.Big2
+	hasher := sha3.NewLegacyKeccak256()
+	hasher.Write(common.LeftPadBytes(position.Bytes(), 32))
+	digest := hasher.Sum(nil)
+	return common.BytesToHash(digest)
+}
+
+func (st *StateTransition) generateMintEvent(mintAddress common.Address, mintValue *big.Int) {
+	// keccak("Mint(address,uint256)") = "0x0f6798a560793a54c3bcfe86a93cde1e73087d944c0ea20544137d4121396885"
+	methodHash := common.HexToHash("0x0f6798a560793a54c3bcfe86a93cde1e73087d944c0ea20544137d4121396885")
+	topics := make([]common.Hash, 2)
+	topics[0] = methodHash
+	topics[1] = mintAddress.Hash()
+	//data means the mint amount in MINT EVENT.
+	d := common.HexToHash(common.Bytes2Hex(mintValue.Bytes())).Bytes()
+	st.evm.StateDB.AddLog(&types.Log{
+		Address: common.HexToAddress(BVM_ETH_ADDR),
+		Topics:  topics,
+		Data:    d,
+		// This is a non-consensus field, but assigned here because
+		// core/state doesn't know the current block number.
+		BlockNumber: st.evm.Context.BlockNumber.Uint64(),
+	})
 }
