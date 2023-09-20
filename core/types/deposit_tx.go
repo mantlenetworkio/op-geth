@@ -33,14 +33,14 @@ type DepositTx struct {
 	To *common.Address `rlp:"nil"`
 	// Mint is minted on L2, locked on L1, nil if no minting.
 	Mint *big.Int `rlp:"nil"`
-	// EthValue means L2 BVM_ETH mint tag, nil means that there is no need to mint BVM_ETH.
-	EthValue *big.Int `rlp:"nil"`
 	// Value is transferred from L2 balance, executed after Mint (if any)
 	Value *big.Int
 	// gas limit
 	Gas uint64
 	// Field indicating if this transaction is exempt from the L2 gas limit.
 	IsSystemTransaction bool
+	// EthValue means L2 BVM_ETH mint tag, nil means that there is no need to mint BVM_ETH.
+	EthValue *big.Int `rlp:"nil"`
 	// Normal Tx data
 	Data []byte
 }
@@ -56,7 +56,7 @@ func (tx *DepositTx) copy() TxData {
 		Gas:                 tx.Gas,
 		IsSystemTransaction: tx.IsSystemTransaction,
 		Data:                common.CopyBytes(tx.Data),
-		EthValue:            new(big.Int),
+		EthValue:            nil,
 	}
 	if tx.Mint != nil {
 		cpy.Mint = new(big.Int).Set(tx.Mint)
@@ -65,7 +65,7 @@ func (tx *DepositTx) copy() TxData {
 		cpy.Value.Set(tx.Value)
 	}
 	if tx.EthValue != nil {
-		cpy.EthValue.Set(tx.EthValue)
+		cpy.EthValue = new(big.Int).Set(tx.EthValue)
 	}
 	return cpy
 }

@@ -355,9 +355,7 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	if ethValue := st.msg.ETHValue; ethValue != nil && ethValue.Cmp(big.NewInt(0)) != 0 {
 		st.addBVMETHBalance(ethValue)
 		st.addBVMETHTotalSupply(ethValue)
-		st.generateMintEvent(*st.msg.To, ethValue)
-		//st.state.AddLog()
-		//types.Log{}
+		st.generateBVMETHMintEvent(*st.msg.To, ethValue)
 	}
 	snap := st.state.Snapshot()
 
@@ -540,21 +538,21 @@ func (st *StateTransition) gasUsed() uint64 {
 }
 
 func (st *StateTransition) addBVMETHBalance(ethValue *big.Int) {
-	BVM_ETH := common.HexToAddress(BVM_ETH_ADDR)
+	bvmEth := common.HexToAddress(BVM_ETH_ADDR)
 	key := getBVMETHBalanceKey(*st.msg.To)
-	value := st.state.GetState(BVM_ETH, key)
+	value := st.state.GetState(bvmEth, key)
 	bal := value.Big()
 	bal = bal.Add(bal, ethValue)
-	st.state.SetState(BVM_ETH, key, common.BigToHash(bal))
+	st.state.SetState(bvmEth, key, common.BigToHash(bal))
 }
 
 func (st *StateTransition) addBVMETHTotalSupply(ethValue *big.Int) {
-	BVM_ETH := common.HexToAddress(BVM_ETH_ADDR)
+	bvmEth := common.HexToAddress(BVM_ETH_ADDR)
 	key := getBVMETHTotalSupplyKey()
-	value := st.state.GetState(BVM_ETH, key)
+	value := st.state.GetState(bvmEth, key)
 	bal := value.Big()
 	bal = bal.Add(bal, ethValue)
-	st.state.SetState(BVM_ETH, key, common.BigToHash(bal))
+	st.state.SetState(bvmEth, key, common.BigToHash(bal))
 }
 
 func getBVMETHBalanceKey(addr common.Address) common.Hash {
@@ -567,14 +565,10 @@ func getBVMETHBalanceKey(addr common.Address) common.Hash {
 }
 
 func getBVMETHTotalSupplyKey() common.Hash {
-	position := common.Big2
-	hasher := sha3.NewLegacyKeccak256()
-	hasher.Write(common.LeftPadBytes(position.Bytes(), 32))
-	digest := hasher.Sum(nil)
-	return common.BytesToHash(digest)
+	return common.BytesToHash(common.Big2.Bytes())
 }
 
-func (st *StateTransition) generateMintEvent(mintAddress common.Address, mintValue *big.Int) {
+func (st *StateTransition) generateBVMETHMintEvent(mintAddress common.Address, mintValue *big.Int) {
 	// keccak("Mint(address,uint256)") = "0x0f6798a560793a54c3bcfe86a93cde1e73087d944c0ea20544137d4121396885"
 	methodHash := common.HexToHash("0x0f6798a560793a54c3bcfe86a93cde1e73087d944c0ea20544137d4121396885")
 	topics := make([]common.Hash, 2)
