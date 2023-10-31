@@ -27,7 +27,6 @@ import (
 	cmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 
@@ -301,46 +300,17 @@ func (st *StateTransition) buyGas() error {
 }
 
 func (st *StateTransition) applyMetxTransaction() error {
-	if len(st.msg.Data) <= len(metaTxPrefix) {
-		return nil
-	}
-	if !bytes.Equal(st.msg.Data[:metaTxPrefixLength], metaTxPrefix) {
-		return nil
-	}
-	var metaData types.MetaTransactionData
-	err := rlp.DecodeBytes(st.msg.Data[metaTxPrefixLength:], &metaData)
-	if err != nil {
-		log.Error("decode meta-tx data failed", "err", err.Error())
-		return err
-	}
-	if metaData.ExpireHeight < st.evm.Context.BlockNumber.Uint64() {
-		log.Error("Expired meta transaction",
-			"currentHeight", st.evm.Context.BlockNumber.Uint64(), "expireHeight", metaData.ExpireHeight)
-		return fmt.Errorf("expired meta transaction, currentHeight %d, expireHeight %d",
-			st.evm.Context.BlockNumber.Uint64(), metaData.ExpireHeight)
-	}
-
-	metaTxSignData := &types.MetaTransactionSignData{
-		ChainID:      st.evm.ChainConfig().ChainID,
-		Nonce:        st.msg.Nonce,
-		GasTipCap:    st.msg.GasTipCap,
-		GasFeeCap:    st.msg.GasFeeCap,
-		Gas:          st.msg.GasLimit,
-		To:           st.msg.To,
-		Value:        st.msg.Value,
-		Data:         metaData.Payload,
-		AccessList:   st.msg.AccessList,
-		ExpireHeight: metaData.ExpireHeight,
-	}
-
-	gasFeeSponsor, err := types.RecoverPlain(metaTxSignData.Hash(), metaData.R, metaData.S, metaData.V, true)
+	metaTxParams, err := figureOutMetaTxParams(st.msg, st.evm.Context.BlockNumber.Uint64(), st.evm.ChainConfig().ChainID)
 	if err != nil {
 		return err
 	}
 
-	st.msg.GasFeeSponsor = gasFeeSponsor
-	st.msg.Data = metaData.Payload
+	if metaTxParams == nil {
+		return nil
+	}
 
+	st.msg.GasFeeSponsor = metaTxParams.GasFeeSponsor
+	st.msg.Data = metaTxParams.Payload
 	return nil
 }
 
@@ -661,4 +631,46 @@ func (st *StateTransition) generateBVMETHMintEvent(mintAddress common.Address, m
 		// core/state doesn't know the current block number.
 		BlockNumber: st.evm.Context.BlockNumber.Uint64(),
 	})
+}
+
+func figureOutMetaTxParams(msg *Message, currentHeight uint64, chainId *big.Int) (*types.MetaTxParams, error) {
+	if len(msg.Data) <= len(metaTxPrefix) {
+		return nil, nil
+	}
+	if !bytes.Equal(msg.Data[:metaTxPrefixLength], metaTxPrefix) {
+		return nil, nil
+	}
+
+	var metaTxData types.MetaTxData
+	err := rlp.DecodeBytes(msg.Data[metaTxPrefixLength:], &metaTxData)
+	if err != nil {
+		return nil, err
+	}
+
+	if metaTxData.ExpireHeight < currentHeight {
+		return nil, types.ErrExpiredMetaTx
+	}
+
+	metaTxSignData := &types.MetaTxSignData{
+		ChainID:      chainId,
+		Nonce:        msg.Nonce,
+		GasTipCap:    msg.GasTipCap,
+		GasFeeCap:    msg.GasFeeCap,
+		Gas:          msg.GasLimit,
+		To:           msg.To,
+		Value:        msg.Value,
+		Data:         metaTxData.Payload,
+		AccessList:   msg.AccessList,
+		ExpireHeight: metaTxData.ExpireHeight,
+	}
+
+	gasFeeSponsor, err := types.RecoverPlain(metaTxSignData.Hash(), metaTxData.Signature)
+	if err != nil {
+		return nil, types.ErrInvalidGasFeeSponsorSig
+	}
+
+	return &types.MetaTxParams{
+		Payload:       metaTxData.Payload,
+		GasFeeSponsor: gasFeeSponsor,
+	}, nil
 }

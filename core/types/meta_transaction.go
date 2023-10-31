@@ -1,21 +1,29 @@
 package types
 
 import (
+	"errors"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 )
 
-type MetaTransactionData struct {
+var (
+	ErrInvalidGasFeeSponsorSig = errors.New("invalid gas fee sponsor signature")
+	ErrExpiredMetaTx           = errors.New("expired meta transaction")
+)
+
+type MetaTxData struct {
 	ExpireHeight uint64
 	Payload      []byte
-	// Signature values
-	V *big.Int
-	R *big.Int
-	S *big.Int
+	Signature    []byte
 }
 
-type MetaTransactionSignData struct {
+type MetaTxParams struct {
+	Payload       []byte
+	GasFeeSponsor common.Address
+}
+
+type MetaTxSignData struct {
 	ChainID      *big.Int
 	Nonce        uint64
 	GasTipCap    *big.Int
@@ -28,6 +36,6 @@ type MetaTransactionSignData struct {
 	ExpireHeight uint64
 }
 
-func (metaTxSignData *MetaTransactionSignData) Hash() common.Hash {
+func (metaTxSignData *MetaTxSignData) Hash() common.Hash {
 	return rlpHash(metaTxSignData)
 }
