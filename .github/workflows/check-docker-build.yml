@@ -23,9 +23,14 @@ jobs:
           URL="https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files"
           response=$(curl -H 'authorization: Bearer ${{ secrets.PAT }}' -H "Accept: application/vnd.github.v3+json" -s -X GET -G $URL)
           UPDATEFILE_DIR=$(echo "${response}" | jq -r '.[] | .filename')
-          for i in ${UPDATEFILE_DIR};do
+          echo $UPDATEFILE_DIR
+          for i in ${UPDATEFILE_DIR}
+          do
+            echo $i
             echo $i |grep Dockerfile
-            if [[ $? == 0 ]];then
+            if [[ $? == 0 ]]
+            then
+               echo "if"
                image=$(echo $i | tr '[:upper:]' '[:lower:]')
                cmd="docker build -f $i -t $image:v1 ."
                echo $cmd;$cmd
