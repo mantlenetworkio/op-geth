@@ -28,7 +28,7 @@ jobs:
           for i in ${UPDATEFILE_DIR};do
             echo $i |grep Dockerfile
             if [[ $? == 0 ]]
-                cmd="docker build -f UPDATEFILE_DIR -t build-check:v1 ."
+                cmd="docker build -f UPDATEFILE_DIR -t $i:v1 ."
                 echo $cmd;$cmd
             fi
           done
