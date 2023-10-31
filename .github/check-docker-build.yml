@@ -7,8 +7,7 @@ on:
       - 'releases/**'
     paths:
       - 'Dockerfile'
-      - '**Dockerfile'
-      - '**Dockerfile**'
+      - '**'
 jobs:
   CheckBuild:
     runs-on: ubuntu-latest
