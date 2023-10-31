@@ -313,6 +313,13 @@ func (st *StateTransition) applyMetxTransaction() error {
 		log.Error("decode meta-tx data failed", "err", err.Error())
 		return err
 	}
+	if metaData.ExpireHeight < st.evm.Context.BlockNumber.Uint64() {
+		log.Error("Expired meta transaction",
+			"currentHeight", st.evm.Context.BlockNumber.Uint64(), "expireHeight", metaData.ExpireHeight)
+		return fmt.Errorf("expired meta transaction, currentHeight %d, expireHeight %d",
+			st.evm.Context.BlockNumber.Uint64(), metaData.ExpireHeight)
+	}
+
 	metaTxSignData := &types.MetaTransactionSignData{
 		ChainID:      st.evm.ChainConfig().ChainID,
 		Nonce:        st.msg.Nonce,
