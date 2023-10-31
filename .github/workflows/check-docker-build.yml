@@ -20,19 +20,16 @@ jobs:
         uses: docker/setup-buildx-action@v3
       - name: Checking Docker Build
         run: |
-          docker version
-          curl --version
           URL="https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files"
           response=$(curl -H 'authorization: Bearer ${{ secrets.PAT }}' -H "Accept: application/vnd.github.v3+json" -s -X GET -G $URL)
           UPDATEFILE_DIR=$(echo "${response}" | jq -r '.[] | .filename')
-          echo "$UPDATEFILE_DIR"
           for i in ${UPDATEFILE_DIR};do
             echo $i |grep Dockerfile
             if [[ $? == 0 ]];then
                image=$(echo $i | tr '[:upper:]' '[:lower:]')
-               cmd="docker build -f $UPDATEFILE_DIR -t $image:v1 ."
+               cmd="docker build -f $i -t $image:v1 ."
                echo $cmd;$cmd
             else
-               echo "xxxxxxxxxxxx"
+               echo "no dockerfile to build"
             fi
           done
