@@ -29,7 +29,7 @@ type MetaTxParams struct {
 
 	// In tx simulation, Signature will be empty, user can specify GasFeeSponsor to sponsor gas fee
 	GasFeeSponsor common.Address
-	Signature     []byte
+	Signature     []byte // TODO use R S V instead
 }
 
 type MetaTxSignData struct {
@@ -63,6 +63,7 @@ func DecodeMetaTxParams(txData []byte) (*MetaTxParams, error) {
 }
 
 func DecodeAndVerifyMetaTxParams(tx *Transaction) (*MetaTxParams, error) {
+	// TODO add cache
 	if tx.Type() != DynamicFeeTxType {
 		return nil, nil
 	}

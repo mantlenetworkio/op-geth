@@ -717,7 +717,11 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 			sum.Sub(sum, replL1Cost)
 		}
 		if balance.Cmp(sum) < 0 {
-			log.Trace("Replacing transactions would overdraft", "sender", from, "balance", pool.currentState.GetBalance(from), "required", sum)
+			if metaTxParams != nil {
+				log.Trace("Replacing transactions would overdraft", "gasFeeSponsor", metaTxParams.GasFeeSponsor, "balance", balance, "required", sum)
+			} else {
+				log.Trace("Replacing transactions would overdraft", "sender", from, "balance", balance, "required", sum)
+			}
 			return ErrOverdraft
 		}
 	}
@@ -1478,8 +1482,20 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) []*types.Trans
 		if !list.Empty() {
 			// Reduce the cost-cap by L1 rollup cost of the first tx if necessary. Other txs will get filtered out afterwards.
 			el := list.txs.FirstElement()
-			if l1Cost := pool.l1CostFn(el.RollupDataGas(), el.IsDepositTx()); l1Cost != nil {
+			metaTxParams, err := types.DecodeAndVerifyMetaTxParams(el)
+			if err != nil {
+				continue
+			}
+			l1Cost := pool.l1CostFn(el.RollupDataGas(), el.IsDepositTx())
+			if l1Cost != nil {
 				balance = new(big.Int).Sub(balance, l1Cost) // negative big int is fine
+			}
+			if metaTxParams != nil {
+				balanceOfSponsor := pool.currentState.GetBalance(metaTxParams.GasFeeSponsor)
+				txTotalCost := new(big.Int).Add(el.Cost(), l1Cost)
+				if balanceOfSponsor.Cmp(txTotalCost) >= 0 {
+					balance = new(big.Int).Add(balance, txTotalCost)
+				}
 			}
 		}
 		// Drop all transactions that are too costly (low balance or out of gas)
@@ -1683,8 +1699,20 @@ func (pool *TxPool) demoteUnexecutables() {
 		if !list.Empty() {
 			// Reduce the cost-cap by L1 rollup cost of the first tx if necessary. Other txs will get filtered out afterwards.
 			el := list.txs.FirstElement()
-			if l1Cost := pool.l1CostFn(el.RollupDataGas(), el.IsDepositTx()); l1Cost != nil {
+			metaTxParams, err := types.DecodeAndVerifyMetaTxParams(el)
+			if err != nil {
+				continue
+			}
+			l1Cost := pool.l1CostFn(el.RollupDataGas(), el.IsDepositTx())
+			if l1Cost != nil {
 				balance = new(big.Int).Sub(balance, l1Cost) // negative big int is fine
+			}
+			if metaTxParams != nil {
+				balanceOfSponsor := pool.currentState.GetBalance(metaTxParams.GasFeeSponsor)
+				txTotalCost := new(big.Int).Add(el.Cost(), l1Cost)
+				if balanceOfSponsor.Cmp(txTotalCost) >= 0 {
+					balance = new(big.Int).Add(balance, txTotalCost)
+				}
 			}
 		}
 		// Drop all transactions that are too costly (low balance or out of gas), and queue any invalids back for later
