@@ -379,9 +379,19 @@ func (pool *TxPool) validateTx(ctx context.Context, tx *types.Transaction) error
 		return txpool.ErrNegativeValue
 	}
 
+	metaTxParams, err := types.DecodeMetaTxParams(tx, false)
+	if err != nil {
+		return err
+	}
+	var balance *big.Int
+	if metaTxParams != nil {
+		balance = currentState.GetBalance(metaTxParams.GasFeeSponsor)
+	} else {
+		balance = currentState.GetBalance(from)
+	}
 	// Transactor should have enough funds to cover the costs
 	// cost == V + GP * GL
-	if b := currentState.GetBalance(from); b.Cmp(tx.Cost()) < 0 {
+	if b := balance; b.Cmp(tx.Cost()) < 0 {
 		return core.ErrInsufficientFunds
 	}
 

@@ -17,31 +17,20 @@
 package core
 
 import (
-	"bytes"
 	"fmt"
 	"math"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	cmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/rlp"
-
 	"golang.org/x/crypto/sha3"
-)
-
-const (
-	metaTxPrefixLength = 32
 )
 
 var (
 	BVM_ETH_ADDR = common.HexToAddress("0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111")
-
-	// ASCII code of "MantleMetaTxPrefix"
-	metaTxPrefix, _ = hexutil.Decode("0x00000000000000000000000000004D616E746C654D6574615478507265666978")
 )
 
 // ExecutionResult includes all output after executing given evm
@@ -161,12 +150,16 @@ type Message struct {
 	IsDepositTx   bool                // IsDepositTx indicates the message is force-included and can persist a mint.
 	Mint          *big.Int            // Mint is the amount to mint before EVM processing, or nil if there is no minting.
 	ETHValue      *big.Int            // ETHValue is the amount to mint BVM_ETH before EVM processing, or nil if there is no minting.
-	GasFeeSponsor common.Address      // GasFeeSponsor is an address which will sponsor gas fee for msg.From.
+	MetaTxParams  *types.MetaTxParams // MetaTxParams contains necessary parameter to sponsor gas fee for msg.From.
 	RollupDataGas types.RollupGasData // RollupDataGas indicates the rollup cost of the message, 0 if not a rollup or no cost.
 }
 
 // TransactionToMessage converts a transaction into a Message.
 func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.Int) (*Message, error) {
+	metaTxParams, err := types.DecodeMetaTxParams(tx, false)
+	if err != nil {
+		return nil, err
+	}
 	msg := &Message{
 		Nonce:             tx.Nonce(),
 		GasLimit:          tx.Gas(),
@@ -182,13 +175,13 @@ func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.In
 		Mint:              tx.Mint(),
 		RollupDataGas:     tx.RollupDataGas(),
 		ETHValue:          tx.ETHValue(),
+		MetaTxParams:      metaTxParams,
 		SkipAccountChecks: false,
 	}
 	// If baseFee provided, set gasPrice to effectiveGasPrice.
 	if baseFee != nil {
 		msg.GasPrice = cmath.BigMin(msg.GasPrice.Add(msg.GasTipCap, baseFee), msg.GasFeeCap)
 	}
-	var err error
 	msg.From, err = types.Sender(s, tx)
 	return msg, err
 }
@@ -254,7 +247,7 @@ func (st *StateTransition) to() common.Address {
 }
 
 func (st *StateTransition) buyGas() error {
-	if err := st.applyMetxTransaction(); err != nil {
+	if err := st.applyMetaTransaction(); err != nil {
 		return err
 	}
 	mgval := new(big.Int).SetUint64(st.msg.GasLimit)
@@ -275,9 +268,9 @@ func (st *StateTransition) buyGas() error {
 			balanceCheck.Add(balanceCheck, l1Cost)
 		}
 	}
-	if st.msg.GasFeeSponsor != (common.Address{}) {
-		if have, want := st.state.GetBalance(st.msg.GasFeeSponsor), balanceCheck; have.Cmp(want) < 0 {
-			return fmt.Errorf("%w: gasFeeSponsor %v have %v want %v", ErrInsufficientFunds, st.msg.GasFeeSponsor.Hex(), have, want)
+	if st.msg.MetaTxParams != nil {
+		if have, want := st.state.GetBalance(st.msg.MetaTxParams.GasFeeSponsor), balanceCheck; have.Cmp(want) < 0 {
+			return fmt.Errorf("%w: gasFeeSponsor %v have %v want %v", ErrInsufficientFunds, st.msg.MetaTxParams.GasFeeSponsor.Hex(), have, want)
 		}
 	} else {
 		if have, want := st.state.GetBalance(st.msg.From), balanceCheck; have.Cmp(want) < 0 {
@@ -291,26 +284,23 @@ func (st *StateTransition) buyGas() error {
 	st.gasRemaining += st.msg.GasLimit
 
 	st.initialGas = st.msg.GasLimit
-	if st.msg.GasFeeSponsor != (common.Address{}) {
-		st.state.SubBalance(st.msg.GasFeeSponsor, mgval)
+	if st.msg.MetaTxParams != nil {
+		st.state.SubBalance(st.msg.MetaTxParams.GasFeeSponsor, mgval)
 	} else {
 		st.state.SubBalance(st.msg.From, mgval)
 	}
 	return nil
 }
 
-func (st *StateTransition) applyMetxTransaction() error {
-	metaTxParams, err := figureOutMetaTxParams(st.msg, st.evm.Context.BlockNumber.Uint64(), st.evm.ChainConfig().ChainID)
-	if err != nil {
-		return err
-	}
-
-	if metaTxParams == nil {
+func (st *StateTransition) applyMetaTransaction() error {
+	if st.msg.MetaTxParams == nil {
 		return nil
 	}
+	if st.msg.MetaTxParams.ExpireHeight < st.evm.Context.BlockNumber.Uint64() {
+		return types.ErrExpiredMetaTx
+	}
 
-	st.msg.GasFeeSponsor = metaTxParams.GasFeeSponsor
-	st.msg.Data = metaTxParams.Payload
+	st.msg.Data = st.msg.MetaTxParams.Payload
 	return nil
 }
 
@@ -568,8 +558,8 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 
 	// Return ETH for remaining gas, exchanged at the original rate.
 	remaining := new(big.Int).Mul(new(big.Int).SetUint64(st.gasRemaining), st.msg.GasPrice)
-	if st.msg.GasFeeSponsor != (common.Address{}) {
-		st.state.AddBalance(st.msg.GasFeeSponsor, remaining)
+	if st.msg.MetaTxParams != nil {
+		st.state.AddBalance(st.msg.MetaTxParams.GasFeeSponsor, remaining)
 	} else {
 		st.state.AddBalance(st.msg.From, remaining)
 	}
@@ -629,52 +619,4 @@ func (st *StateTransition) generateBVMETHMintEvent(mintAddress common.Address, m
 		// core/state doesn't know the current block number.
 		BlockNumber: st.evm.Context.BlockNumber.Uint64(),
 	})
-}
-
-func figureOutMetaTxParams(msg *Message, currentHeight uint64, chainId *big.Int) (*types.MetaTxParams, error) {
-	if len(msg.Data) <= len(metaTxPrefix) {
-		return nil, nil
-	}
-	if !bytes.Equal(msg.Data[:metaTxPrefixLength], metaTxPrefix) {
-		return nil, nil
-	}
-
-	var metaTxData types.MetaTxData
-	err := rlp.DecodeBytes(msg.Data[metaTxPrefixLength:], &metaTxData)
-	if err != nil {
-		return nil, err
-	}
-
-	if metaTxData.ExpireHeight < currentHeight {
-		return nil, types.ErrExpiredMetaTx
-	}
-
-	metaTxSignData := &types.MetaTxSignData{
-		ChainID:      chainId,
-		Nonce:        msg.Nonce,
-		GasTipCap:    msg.GasTipCap,
-		GasFeeCap:    msg.GasFeeCap,
-		Gas:          msg.GasLimit,
-		To:           msg.To,
-		Value:        msg.Value,
-		Data:         metaTxData.Payload,
-		AccessList:   msg.AccessList,
-		ExpireHeight: metaTxData.ExpireHeight,
-	}
-
-	if !msg.SkipAccountChecks {
-		gasFeeSponsorSigner, err := types.RecoverPlain(metaTxSignData.Hash(), metaTxData.Signature)
-		if err != nil {
-			return nil, types.ErrInvalidGasFeeSponsorSig
-		}
-
-		if gasFeeSponsorSigner != metaTxData.GasFeeSponsor {
-			return nil, types.ErrGasFeeSponsorMismatch
-		}
-	}
-
-	return &types.MetaTxParams{
-		Payload:       metaTxData.Payload,
-		GasFeeSponsor: metaTxData.GasFeeSponsor,
-	}, nil
 }

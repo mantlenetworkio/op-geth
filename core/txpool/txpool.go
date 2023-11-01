@@ -688,7 +688,18 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	if l1Cost := pool.l1CostFn(tx.RollupDataGas(), tx.IsDepositTx()); l1Cost != nil { // add rollup cost
 		cost = cost.Add(cost, l1Cost)
 	}
-	balance := pool.currentState.GetBalance(from)
+
+	metaTxParams, err := types.DecodeMetaTxParams(tx, false)
+	if err != nil {
+		return err
+	}
+	var balance *big.Int
+	if metaTxParams != nil {
+		balance = pool.currentState.GetBalance(metaTxParams.GasFeeSponsor)
+	} else {
+		balance = pool.currentState.GetBalance(from)
+	}
+
 	if balance.Cmp(cost) < 0 {
 		return core.ErrInsufficientFunds
 	}
