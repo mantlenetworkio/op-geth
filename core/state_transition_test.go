@@ -16,12 +16,13 @@ import (
 )
 
 var (
-	userKey, _          = crypto.HexToECDSA("eef77acb6c6a6eebc5b363a475ac583ec7eccdb42b6481424c60f59aa326547f")
-	gasFeeSponsorKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	userKey, _           = crypto.HexToECDSA("eef77acb6c6a6eebc5b363a475ac583ec7eccdb42b6481424c60f59aa326547f")
+	gasFeeSponsorKey1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	gasFeeSponsorKey2, _ = crypto.HexToECDSA("0288ef00023598499cb6c940146d050d2b1fb914198c327f76aad590bead68b6")
 )
 
 func TestFigureOutMetaTxParams(t *testing.T) {
-	gasFeeSponsorPublicKey := gasFeeSponsorKey.Public()
+	gasFeeSponsorPublicKey := gasFeeSponsorKey1.Public()
 	pubKeyECDSA, _ := gasFeeSponsorPublicKey.(*ecdsa.PublicKey)
 	gasFeeSponsorAddr := crypto.PubkeyToAddress(*pubKeyECDSA)
 
@@ -54,13 +55,14 @@ func TestFigureOutMetaTxParams(t *testing.T) {
 		ExpireHeight: expireHeight,
 	}
 
-	sig, err := crypto.Sign(metaTxSignData.Hash().Bytes(), gasFeeSponsorKey)
+	sponsorSig, err := crypto.Sign(metaTxSignData.Hash().Bytes(), gasFeeSponsorKey1)
 	require.NoError(t, err)
 
 	metaTxData := &types.MetaTxData{
-		ExpireHeight: expireHeight,
-		Payload:      metaTxSignData.Data,
-		Signature:    sig,
+		ExpireHeight:  expireHeight,
+		Payload:       metaTxSignData.Data,
+		GasFeeSponsor: gasFeeSponsorAddr,
+		Signature:     sponsorSig,
 	}
 
 	metaTxDataBz, err := rlp.EncodeToBytes(metaTxData)
@@ -69,9 +71,9 @@ func TestFigureOutMetaTxParams(t *testing.T) {
 	dynamicTx.Data = append(metaTxPrefix, metaTxDataBz...)
 	tx := types.NewTx(dynamicTx)
 	signer := types.LatestSignerForChainID(chainId)
-	signature, err := crypto.Sign(signer.Hash(tx).Bytes(), userKey)
+	txSignature, err := crypto.Sign(signer.Hash(tx).Bytes(), userKey)
 	require.NoError(t, err)
-	tx, err = tx.WithSignature(signer, signature)
+	tx, err = tx.WithSignature(signer, txSignature)
 	require.NoError(t, err)
 
 	// test expected metaTx
@@ -88,6 +90,34 @@ func TestFigureOutMetaTxParams(t *testing.T) {
 	require.Equal(t, gasFeeSponsorAddr.String(), metaTxParams.GasFeeSponsor.String())
 	require.Equal(t, hexutil.Encode(data), hexutil.Encode(metaTxParams.Payload))
 
+	// Test SkipAccountChecks
+	metaTxData = &types.MetaTxData{
+		ExpireHeight:  expireHeight,
+		Payload:       metaTxSignData.Data,
+		GasFeeSponsor: gasFeeSponsorAddr,
+	}
+
+	metaTxDataBz, err = rlp.EncodeToBytes(metaTxData)
+	require.NoError(t, err)
+
+	dynamicTx.Data = append(metaTxPrefix, metaTxDataBz...)
+	tx = types.NewTx(dynamicTx)
+	txSignature, err = crypto.Sign(signer.Hash(tx).Bytes(), userKey)
+	require.NoError(t, err)
+	tx, err = tx.WithSignature(signer, txSignature)
+	require.NoError(t, err)
+
+	msg, err = TransactionToMessage(tx, types.MakeSigner(cfg, currentHeight), baseFee)
+	require.NoError(t, err)
+
+	msg.SkipAccountChecks = true
+
+	metaTxParams, err = figureOutMetaTxParams(msg, currentHeight.Uint64(), chainId)
+	require.NoError(t, err)
+
+	require.Equal(t, gasFeeSponsorAddr.String(), metaTxParams.GasFeeSponsor.String())
+	require.Equal(t, hexutil.Encode(data), hexutil.Encode(metaTxParams.Payload))
+
 	// Test ErrExpiredMetaTx
 	currentHeight = big.NewInt(20_000_011)
 
@@ -98,11 +128,12 @@ func TestFigureOutMetaTxParams(t *testing.T) {
 	require.Equal(t, err, types.ErrExpiredMetaTx)
 
 	// Test ErrInvalidGasFeeSponsorSig
-	sig[len(sig)-1] = sig[len(sig)-1] + 1 // modify signature
+	sponsorSig[len(sponsorSig)-1] = sponsorSig[len(sponsorSig)-1] + 1 // modify signature
 	metaTxData = &types.MetaTxData{
-		ExpireHeight: expireHeight,
-		Payload:      metaTxSignData.Data,
-		Signature:    sig,
+		ExpireHeight:  expireHeight,
+		Payload:       metaTxSignData.Data,
+		GasFeeSponsor: gasFeeSponsorAddr,
+		Signature:     sponsorSig,
 	}
 
 	metaTxDataBz, err = rlp.EncodeToBytes(metaTxData)
@@ -110,9 +141,9 @@ func TestFigureOutMetaTxParams(t *testing.T) {
 
 	dynamicTx.Data = append(metaTxPrefix, metaTxDataBz...)
 	tx = types.NewTx(dynamicTx)
-	signature, err = crypto.Sign(signer.Hash(tx).Bytes(), userKey)
+	txSignature, err = crypto.Sign(signer.Hash(tx).Bytes(), userKey)
 	require.NoError(t, err)
-	tx, err = tx.WithSignature(signer, signature)
+	tx, err = tx.WithSignature(signer, txSignature)
 	require.NoError(t, err)
 
 	currentHeight = big.NewInt(20_000_009)
@@ -121,4 +152,32 @@ func TestFigureOutMetaTxParams(t *testing.T) {
 
 	_, err = figureOutMetaTxParams(msg, currentHeight.Uint64(), chainId)
 	require.Equal(t, err, types.ErrInvalidGasFeeSponsorSig)
+
+	// Test ErrGasFeeSponsorMismatch
+	sponsorSig, err = crypto.Sign(metaTxSignData.Hash().Bytes(), gasFeeSponsorKey2)
+	require.NoError(t, err)
+
+	metaTxData = &types.MetaTxData{
+		ExpireHeight:  expireHeight,
+		Payload:       metaTxSignData.Data,
+		GasFeeSponsor: gasFeeSponsorAddr,
+		Signature:     sponsorSig,
+	}
+
+	metaTxDataBz, err = rlp.EncodeToBytes(metaTxData)
+	require.NoError(t, err)
+
+	dynamicTx.Data = append(metaTxPrefix, metaTxDataBz...)
+	tx = types.NewTx(dynamicTx)
+	txSignature, err = crypto.Sign(signer.Hash(tx).Bytes(), userKey)
+	require.NoError(t, err)
+	tx, err = tx.WithSignature(signer, txSignature)
+	require.NoError(t, err)
+
+	currentHeight = big.NewInt(20_000_009)
+	msg, err = TransactionToMessage(tx, types.MakeSigner(cfg, currentHeight), baseFee)
+	require.NoError(t, err)
+
+	_, err = figureOutMetaTxParams(msg, currentHeight.Uint64(), chainId)
+	require.Equal(t, err, types.ErrGasFeeSponsorMismatch)
 }

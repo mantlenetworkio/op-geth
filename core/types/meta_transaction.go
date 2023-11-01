@@ -8,14 +8,18 @@ import (
 )
 
 var (
-	ErrInvalidGasFeeSponsorSig = errors.New("invalid gas fee sponsor signature")
 	ErrExpiredMetaTx           = errors.New("expired meta transaction")
+	ErrInvalidGasFeeSponsorSig = errors.New("invalid gas fee sponsor signature")
+	ErrGasFeeSponsorMismatch   = errors.New("gas fee sponsor address is mismatch with signature")
 )
 
 type MetaTxData struct {
 	ExpireHeight uint64
 	Payload      []byte
-	Signature    []byte
+
+	// In tx simulation, Signature will be empty, user can specify GasFeeSponsor to sponsor gas fee
+	GasFeeSponsor common.Address
+	Signature     []byte
 }
 
 type MetaTxParams struct {

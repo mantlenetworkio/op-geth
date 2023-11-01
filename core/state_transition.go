@@ -569,10 +569,8 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 	// Return ETH for remaining gas, exchanged at the original rate.
 	remaining := new(big.Int).Mul(new(big.Int).SetUint64(st.gasRemaining), st.msg.GasPrice)
 	if st.msg.GasFeeSponsor != (common.Address{}) {
-
 		st.state.AddBalance(st.msg.GasFeeSponsor, remaining)
 	} else {
-
 		st.state.AddBalance(st.msg.From, remaining)
 	}
 
@@ -664,13 +662,19 @@ func figureOutMetaTxParams(msg *Message, currentHeight uint64, chainId *big.Int)
 		ExpireHeight: metaTxData.ExpireHeight,
 	}
 
-	gasFeeSponsor, err := types.RecoverPlain(metaTxSignData.Hash(), metaTxData.Signature)
-	if err != nil {
-		return nil, types.ErrInvalidGasFeeSponsorSig
+	if !msg.SkipAccountChecks {
+		gasFeeSponsorSigner, err := types.RecoverPlain(metaTxSignData.Hash(), metaTxData.Signature)
+		if err != nil {
+			return nil, types.ErrInvalidGasFeeSponsorSig
+		}
+
+		if gasFeeSponsorSigner != metaTxData.GasFeeSponsor {
+			return nil, types.ErrGasFeeSponsorMismatch
+		}
 	}
 
 	return &types.MetaTxParams{
 		Payload:       metaTxData.Payload,
-		GasFeeSponsor: gasFeeSponsor,
+		GasFeeSponsor: metaTxData.GasFeeSponsor,
 	}, nil
 }
