@@ -689,7 +689,7 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 		cost = cost.Add(cost, l1Cost)
 	}
 
-	metaTxParams, err := types.DecodeMetaTxParams(tx, false)
+	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx)
 	if err != nil {
 		return err
 	}

@@ -45,12 +45,7 @@ type MetaTxSignData struct {
 	ExpireHeight uint64
 }
 
-func DecodeMetaTxParams(tx *Transaction, skipSigChecks bool) (*MetaTxParams, error) {
-	if tx.Type() != DynamicFeeTxType {
-		return nil, nil
-	}
-
-	txData := tx.Data()
+func DecodeMetaTxParams(txData []byte) (*MetaTxParams, error) {
 	if len(txData) <= len(MetaTxPrefix) {
 		return nil, nil
 	}
@@ -62,6 +57,22 @@ func DecodeMetaTxParams(tx *Transaction, skipSigChecks bool) (*MetaTxParams, err
 	err := rlp.DecodeBytes(txData[MetaTxPrefixLength:], &metaTxParams)
 	if err != nil {
 		return nil, err
+	}
+
+	return &metaTxParams, nil
+}
+
+func DecodeAndVerifyMetaTxParams(tx *Transaction) (*MetaTxParams, error) {
+	if tx.Type() != DynamicFeeTxType {
+		return nil, nil
+	}
+
+	metaTxParams, err := DecodeMetaTxParams(tx.Data())
+	if err != nil {
+		return nil, err
+	}
+	if metaTxParams == nil {
+		return nil, nil
 	}
 
 	metaTxSignData := &MetaTxSignData{
@@ -77,18 +88,16 @@ func DecodeMetaTxParams(tx *Transaction, skipSigChecks bool) (*MetaTxParams, err
 		ExpireHeight: metaTxParams.ExpireHeight,
 	}
 
-	if !skipSigChecks {
-		gasFeeSponsorSigner, err := RecoverPlain(metaTxSignData.Hash(), metaTxParams.Signature)
-		if err != nil {
-			return nil, ErrInvalidGasFeeSponsorSig
-		}
-
-		if gasFeeSponsorSigner != metaTxParams.GasFeeSponsor {
-			return nil, ErrGasFeeSponsorMismatch
-		}
+	gasFeeSponsorSigner, err := RecoverPlain(metaTxSignData.Hash(), metaTxParams.Signature)
+	if err != nil {
+		return nil, ErrInvalidGasFeeSponsorSig
 	}
 
-	return &metaTxParams, nil
+	if gasFeeSponsorSigner != metaTxParams.GasFeeSponsor {
+		return nil, ErrGasFeeSponsorMismatch
+	}
+
+	return metaTxParams, nil
 }
 
 func (metaTxSignData *MetaTxSignData) Hash() common.Hash {

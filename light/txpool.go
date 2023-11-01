@@ -379,7 +379,7 @@ func (pool *TxPool) validateTx(ctx context.Context, tx *types.Transaction) error
 		return txpool.ErrNegativeValue
 	}
 
-	metaTxParams, err := types.DecodeMetaTxParams(tx, false)
+	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx)
 	if err != nil {
 		return err
 	}

@@ -89,7 +89,46 @@ func generateMetaTxDataWithMockSig(dynamicTx *DynamicFeeTx, expireHeight uint64,
 	return append(MetaTxPrefix, metaTxDataBz...), nil
 }
 
-func TestFigureOutMetaTxParams(t *testing.T) {
+func TestDecodeMetaTxParams(t *testing.T) {
+	gasFeeSponsorPublicKey := gasFeeSponsorKey1.Public()
+	pubKeyECDSA, _ := gasFeeSponsorPublicKey.(*ecdsa.PublicKey)
+	gasFeeSponsorAddr := crypto.PubkeyToAddress(*pubKeyECDSA)
+
+	chainId := big.NewInt(1)
+	depositABICalldata, _ := hexutil.Decode("0xd0e30db0")
+	to := common.HexToAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+	expireHeight := uint64(20_000_010)
+	dynamicTx := &DynamicFeeTx{
+		ChainID:    chainId,
+		Nonce:      100,
+		GasTipCap:  big.NewInt(1e9),
+		GasFeeCap:  big.NewInt(1e15),
+		Gas:        4700000,
+		To:         &to,
+		Value:      big.NewInt(1e18),
+		Data:       depositABICalldata,
+		AccessList: nil,
+	}
+
+	metaTxData := &MetaTxParams{
+		ExpireHeight:  expireHeight,
+		Payload:       depositABICalldata,
+		GasFeeSponsor: gasFeeSponsorAddr,
+	}
+
+	metaTxDataBz, err := rlp.EncodeToBytes(metaTxData)
+	require.NoError(t, err)
+
+	dynamicTx.Data = append(MetaTxPrefix, metaTxDataBz...)
+
+	metaTxParams, err := DecodeMetaTxParams(dynamicTx.Data)
+	require.NoError(t, err)
+
+	require.Equal(t, gasFeeSponsorAddr.String(), metaTxParams.GasFeeSponsor.String())
+	require.Equal(t, hexutil.Encode(depositABICalldata), hexutil.Encode(metaTxParams.Payload))
+}
+
+func TestDecodeAndVerifyMetaTxParams(t *testing.T) {
 	gasFeeSponsorPublicKey := gasFeeSponsorKey1.Public()
 	pubKeyECDSA, _ := gasFeeSponsorPublicKey.(*ecdsa.PublicKey)
 	gasFeeSponsorAddr := crypto.PubkeyToAddress(*pubKeyECDSA)
@@ -122,26 +161,7 @@ func TestFigureOutMetaTxParams(t *testing.T) {
 	require.NoError(t, err)
 
 	// test normal metaTx
-	metaTxParams, err := DecodeMetaTxParams(signedTx, false)
-	require.NoError(t, err)
-
-	require.Equal(t, gasFeeSponsorAddr.String(), metaTxParams.GasFeeSponsor.String())
-	require.Equal(t, hexutil.Encode(depositABICalldata), hexutil.Encode(metaTxParams.Payload))
-
-	// Test SkipAccountChecks
-	metaTxData := &MetaTxParams{
-		ExpireHeight:  expireHeight,
-		Payload:       depositABICalldata,
-		GasFeeSponsor: gasFeeSponsorAddr,
-	}
-
-	metaTxDataBz, err := rlp.EncodeToBytes(metaTxData)
-	require.NoError(t, err)
-
-	dynamicTx.Data = append(MetaTxPrefix, metaTxDataBz...)
-	tx = NewTx(dynamicTx)
-
-	metaTxParams, err = DecodeMetaTxParams(tx, true)
+	metaTxParams, err := DecodeAndVerifyMetaTxParams(signedTx)
 	require.NoError(t, err)
 
 	require.Equal(t, gasFeeSponsorAddr.String(), metaTxParams.GasFeeSponsor.String())
@@ -159,7 +179,7 @@ func TestFigureOutMetaTxParams(t *testing.T) {
 	signedTx, err = tx.WithSignature(signer, txSignature)
 	require.NoError(t, err)
 
-	_, err = DecodeMetaTxParams(signedTx, false)
+	_, err = DecodeAndVerifyMetaTxParams(signedTx)
 	require.Equal(t, err, ErrInvalidGasFeeSponsorSig)
 
 	// Test ErrGasFeeSponsorMismatch
@@ -174,6 +194,6 @@ func TestFigureOutMetaTxParams(t *testing.T) {
 	signedTx, err = tx.WithSignature(signer, txSignature)
 	require.NoError(t, err)
 
-	_, err = DecodeMetaTxParams(signedTx, false)
+	_, err = DecodeAndVerifyMetaTxParams(signedTx)
 	require.Equal(t, err, ErrGasFeeSponsorMismatch)
 }
