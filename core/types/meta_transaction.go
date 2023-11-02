@@ -29,7 +29,10 @@ type MetaTxParams struct {
 
 	// In tx simulation, Signature will be empty, user can specify GasFeeSponsor to sponsor gas fee
 	GasFeeSponsor common.Address
-	Signature     []byte // TODO use R S V instead
+	// Signature values
+	V *big.Int
+	R *big.Int
+	S *big.Int
 }
 
 type MetaTxSignData struct {
@@ -63,9 +66,15 @@ func DecodeMetaTxParams(txData []byte) (*MetaTxParams, error) {
 }
 
 func DecodeAndVerifyMetaTxParams(tx *Transaction) (*MetaTxParams, error) {
-	// TODO add cache
 	if tx.Type() != DynamicFeeTxType {
 		return nil, nil
+	}
+
+	if mtp := tx.metaTxParams.Load(); mtp != nil {
+		mtpCache, ok := mtp.(*MetaTxParams)
+		if ok {
+			return mtpCache, nil
+		}
 	}
 
 	metaTxParams, err := DecodeMetaTxParams(tx.Data())
@@ -89,7 +98,7 @@ func DecodeAndVerifyMetaTxParams(tx *Transaction) (*MetaTxParams, error) {
 		ExpireHeight: metaTxParams.ExpireHeight,
 	}
 
-	gasFeeSponsorSigner, err := RecoverPlain(metaTxSignData.Hash(), metaTxParams.Signature)
+	gasFeeSponsorSigner, err := recoverPlain(metaTxSignData.Hash(), metaTxParams.R, metaTxParams.S, metaTxParams.V, true)
 	if err != nil {
 		return nil, ErrInvalidGasFeeSponsorSig
 	}
@@ -97,6 +106,8 @@ func DecodeAndVerifyMetaTxParams(tx *Transaction) (*MetaTxParams, error) {
 	if gasFeeSponsorSigner != metaTxParams.GasFeeSponsor {
 		return nil, ErrGasFeeSponsorMismatch
 	}
+
+	tx.metaTxParams.Store(metaTxParams)
 
 	return metaTxParams, nil
 }

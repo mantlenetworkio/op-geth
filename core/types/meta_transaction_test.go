@@ -38,11 +38,15 @@ func generateMetaTxData(dynamicTx *DynamicFeeTx, expireHeight uint64,
 		return nil, err
 	}
 
+	r, s, v := decodeSignature(sponsorSig)
+
 	metaTxData := &MetaTxParams{
 		ExpireHeight:  expireHeight,
 		Payload:       metaTxSignData.Data,
 		GasFeeSponsor: gasFeeSponsorAddr,
-		Signature:     sponsorSig,
+		R:             r,
+		S:             s,
+		V:             v,
 	}
 
 	metaTxDataBz, err := rlp.EncodeToBytes(metaTxData)
@@ -74,11 +78,15 @@ func generateMetaTxDataWithMockSig(dynamicTx *DynamicFeeTx, expireHeight uint64,
 	}
 
 	sponsorSig[len(sponsorSig)-1] = sponsorSig[len(sponsorSig)-1] + 1
+
+	r, s, v := decodeSignature(sponsorSig)
 	metaTxData := &MetaTxParams{
 		ExpireHeight:  expireHeight,
 		Payload:       metaTxSignData.Data,
 		GasFeeSponsor: gasFeeSponsorAddr,
-		Signature:     sponsorSig,
+		R:             r,
+		S:             s,
+		V:             v,
 	}
 
 	metaTxDataBz, err := rlp.EncodeToBytes(metaTxData)

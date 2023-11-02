@@ -490,22 +490,6 @@ func decodeSignature(sig []byte) (r, s, v *big.Int) {
 	return r, s, v
 }
 
-func RecoverPlain(sigHash common.Hash, signature []byte) (common.Address, error) {
-	if len(signature) != crypto.SignatureLength {
-		return common.Address{}, errors.New("invalid signature")
-	}
-	pub, err := crypto.Ecrecover(sigHash[:], signature)
-	if err != nil {
-		return common.Address{}, err
-	}
-	if len(pub) == 0 || pub[0] != 4 {
-		return common.Address{}, errors.New("invalid public key")
-	}
-	var addr common.Address
-	copy(addr[:], crypto.Keccak256(pub[1:])[12:])
-	return addr, nil
-}
-
 func recoverPlain(sighash common.Hash, R, S, Vb *big.Int, homestead bool) (common.Address, error) {
 	if Vb.BitLen() > 8 {
 		return common.Address{}, ErrInvalidSig
