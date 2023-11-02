@@ -695,10 +695,10 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	}
 	var balance *big.Int
 	if metaTxParams != nil {
-		balance = pool.currentState.GetBalance(metaTxParams.GasFeeSponsor)
 		if metaTxParams.ExpireHeight < pool.chain.CurrentBlock().Number.Uint64() {
 			return types.ErrExpiredMetaTx
 		}
+		balance = pool.currentState.GetBalance(metaTxParams.GasFeeSponsor)
 	} else {
 		balance = pool.currentState.GetBalance(from)
 	}
@@ -1479,7 +1479,11 @@ func (pool *TxPool) validateMetaTxList(list *list) ([]*types.Transaction, *big.I
 			invalidMetaTxs = append(invalidMetaTxs, tx)
 		}
 		if pool.currentState.GetBalance(metaTxParams.GasFeeSponsor).Cmp(tx.Cost()) >= 0 {
-			sponsorCostSum = new(big.Int).Add(tx.Cost(), sponsorCostSum)
+			sponsorCostSum = new(big.Int).Add(sponsorCostSum, tx.Cost())
+		}
+		l1Cost := pool.l1CostFn(tx.RollupDataGas(), tx.IsDepositTx())
+		if l1Cost != nil {
+			sponsorCostSum = new(big.Int).Add(sponsorCostSum, l1Cost) // gas fee sponsor must sponsor additional l1Cost fee
 		}
 	}
 	return invalidMetaTxs, sponsorCostSum
@@ -1504,23 +1508,22 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) []*types.Trans
 			hash := tx.Hash()
 			pool.all.Remove(hash)
 		}
+		log.Trace("Removed old queued transactions", "count", len(forwards))
 		invalidMetaTxs, sponsorCostSum := pool.validateMetaTxList(list)
 		for _, tx := range invalidMetaTxs {
 			list.Remove(tx)
 			hash := tx.Hash()
 			pool.all.Remove(hash)
-			log.Info("Removed invalid queued meta transaction", "hash", hash)
 		}
-		log.Trace("Removed old queued transactions", "count", len(forwards))
+		log.Trace("Removed invalid queued meta transaction", "count", len(invalidMetaTxs))
 		balance := pool.currentState.GetBalance(addr)
+		balance = new(big.Int).Add(balance, sponsorCostSum)
 		if !list.Empty() {
 			// Reduce the cost-cap by L1 rollup cost of the first tx if necessary. Other txs will get filtered out afterwards.
 			el := list.txs.FirstElement()
-			l1Cost := pool.l1CostFn(el.RollupDataGas(), el.IsDepositTx())
-			if l1Cost != nil {
+			if l1Cost := pool.l1CostFn(el.RollupDataGas(), el.IsDepositTx()); l1Cost != nil {
 				balance = new(big.Int).Sub(balance, l1Cost) // negative big int is fine
 			}
-			balance = new(big.Int).Add(balance, sponsorCostSum)
 		}
 		// Drop all transactions that are too costly (low balance or out of gas)
 		drops, _ := list.Filter(balance, pool.currentMaxGas)
@@ -1724,17 +1727,16 @@ func (pool *TxPool) demoteUnexecutables() {
 			list.Remove(tx)
 			hash := tx.Hash()
 			pool.all.Remove(hash)
-			log.Info("Removed invalid pending meta transaction", "hash", hash)
+			log.Trace("Removed invalid pending meta transaction", "hash", hash)
 		}
 		balance := pool.currentState.GetBalance(addr)
+		balance = new(big.Int).Add(balance, sponsorCostSum)
 		if !list.Empty() {
 			// Reduce the cost-cap by L1 rollup cost of the first tx if necessary. Other txs will get filtered out afterwards.
 			el := list.txs.FirstElement()
-			l1Cost := pool.l1CostFn(el.RollupDataGas(), el.IsDepositTx())
-			if l1Cost != nil {
+			if l1Cost := pool.l1CostFn(el.RollupDataGas(), el.IsDepositTx()); l1Cost != nil {
 				balance = new(big.Int).Sub(balance, l1Cost) // negative big int is fine
 			}
-			balance = new(big.Int).Add(balance, sponsorCostSum)
 		}
 		// Drop all transactions that are too costly (low balance or out of gas), and queue any invalids back for later
 		drops, invalids := list.Filter(balance, pool.currentMaxGas)
