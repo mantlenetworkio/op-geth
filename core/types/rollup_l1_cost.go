@@ -20,6 +20,7 @@ import (
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -46,9 +47,10 @@ type StateGetter interface {
 type L1CostFunc func(blockNum uint64, blockTime uint64, dataGas RollupGasData, isDepositTx bool) *big.Int
 
 var (
-	L1BaseFeeSlot = common.BigToHash(big.NewInt(1))
-	OverheadSlot  = common.BigToHash(big.NewInt(5))
-	ScalarSlot    = common.BigToHash(big.NewInt(6))
+	L1BaseFeeSlot  = common.BigToHash(big.NewInt(1))
+	OverheadSlot   = common.BigToHash(big.NewInt(5))
+	ScalarSlot     = common.BigToHash(big.NewInt(6))
+	TokenRatioSlot = common.BigToHash(big.NewInt(7))
 )
 
 var L1BlockAddr = common.HexToAddress("0x4200000000000000000000000000000000000015")
@@ -58,26 +60,29 @@ var L1BlockAddr = common.HexToAddress("0x420000000000000000000000000000000000001
 // It returns nil if there is no applicable cost function.
 func NewL1CostFunc(config *params.ChainConfig, statedb StateGetter) L1CostFunc {
 	cacheBlockNum := ^uint64(0)
-	var l1BaseFee, overhead, scalar *big.Int
+	var l1BaseFee, overhead, scalar, tokenRatio *big.Int
 	return func(blockNum uint64, blockTime uint64, dataGas RollupGasData, isDepositTx bool) *big.Int {
 		rollupDataGas := dataGas.DataGas(blockTime, config) // Only fake txs for RPC view-calls are 0.
 		if config.Optimism == nil || isDepositTx || rollupDataGas == 0 {
-			return nil
+			return common.Big0
 		}
 		if blockNum != cacheBlockNum {
 			l1BaseFee = statedb.GetState(L1BlockAddr, L1BaseFeeSlot).Big()
 			overhead = statedb.GetState(L1BlockAddr, OverheadSlot).Big()
 			scalar = statedb.GetState(L1BlockAddr, ScalarSlot).Big()
+			tokenRatio = statedb.GetState(L1BlockAddr, TokenRatioSlot).Big()
 			cacheBlockNum = blockNum
 		}
-		return L1Cost(rollupDataGas, l1BaseFee, overhead, scalar)
+		log.Info("L1Cost", "rollupDataGas", rollupDataGas, "l1BaseFee", l1BaseFee, "overhead", overhead, "scalar", scalar, "tokenRatio", tokenRatio)
+		return L1Cost(rollupDataGas, l1BaseFee, overhead, scalar, tokenRatio)
 	}
 }
 
-func L1Cost(rollupDataGas uint64, l1BaseFee, overhead, scalar *big.Int) *big.Int {
+func L1Cost(rollupDataGas uint64, l1BaseFee, overhead, scalar, tokenRatio *big.Int) *big.Int {
 	l1GasUsed := new(big.Int).SetUint64(rollupDataGas)
 	l1GasUsed = l1GasUsed.Add(l1GasUsed, overhead)
 	l1Cost := l1GasUsed.Mul(l1GasUsed, l1BaseFee)
 	l1Cost = l1Cost.Mul(l1Cost, scalar)
+	l1Cost = l1Cost.Mul(l1Cost, tokenRatio)
 	return l1Cost.Div(l1Cost, big.NewInt(1_000_000))
 }

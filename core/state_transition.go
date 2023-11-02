@@ -25,6 +25,7 @@ import (
 	cmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 
 	"golang.org/x/crypto/sha3"
@@ -126,6 +127,14 @@ func toWordSize(size uint64) uint64 {
 	return (size + 31) / 32
 }
 
+type RunMode uint8
+
+const (
+	CommitMode RunMode = iota
+	GasEstimationMode
+	EthcallMode
+)
+
 // A Message contains the data derived from a single transaction that is relevant to state
 // processing.
 type Message struct {
@@ -150,6 +159,9 @@ type Message struct {
 	Mint          *big.Int            // Mint is the amount to mint before EVM processing, or nil if there is no minting.
 	ETHValue      *big.Int            // ETHValue is the amount to mint BVM_ETH before EVM processing, or nil if there is no minting.
 	RollupDataGas types.RollupGasData // RollupDataGas indicates the rollup cost of the message, 0 if not a rollup or no cost.
+
+	// runMode
+	RunMode RunMode
 }
 
 // TransactionToMessage converts a transaction into a Message.
@@ -178,6 +190,35 @@ func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.In
 	var err error
 	msg.From, err = types.Sender(s, tx)
 	return msg, err
+}
+
+//type CommonTx struct {
+//	Nonce     uint64
+//	GasPrice  *big.Int
+//	GasTipCap *big.Int // a.k.a. maxPriorityFeePerGas
+//	GasFeeCap *big.Int // a.k.a. maxFeePerGas
+//	Gas       uint64
+//	To        *common.Address `rlp:"nil"` // nil means contract creation
+//	Value     *big.Int
+//	Data      []byte
+//}
+
+// CalculateRollupGasDataFromMessage calculate RollupGasData from message.
+func (st *StateTransition) CalculateRollupGasDataFromMessage() {
+	tx := types.NewTx(&types.DynamicFeeTx{
+		Nonce:     st.msg.Nonce,
+		Value:     st.msg.Value,
+		Gas:       st.msg.GasLimit,
+		GasTipCap: st.msg.GasTipCap,
+		GasFeeCap: st.msg.GasFeeCap,
+		Data:      st.msg.Data,
+	})
+
+	st.msg.RollupDataGas = tx.RollupDataGas()
+
+	// add a constant to cover sigs(V,R,S) and other data to make sure that the gasLimit from eth_estimateGas can cover L1 cost
+	// just used for estimateGas and the actual L1 cost depends on users' tx when executing
+	st.msg.RollupDataGas.Ones += 80
 }
 
 // ApplyMessage computes the new state by applying the given message
@@ -240,14 +281,21 @@ func (st *StateTransition) to() common.Address {
 	return *st.msg.To
 }
 
-func (st *StateTransition) buyGas() error {
+func (st *StateTransition) buyGas() (*big.Int, error) {
+	log.Info("buyGas1")
 	mgval := new(big.Int).SetUint64(st.msg.GasLimit)
 	mgval = mgval.Mul(mgval, st.msg.GasPrice)
 	var l1Cost *big.Int
-	if st.evm.Context.L1CostFunc != nil && !st.msg.SkipAccountChecks {
-		l1Cost = st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupDataGas, st.msg.IsDepositTx)
+	log.Info("buyGas2", "st.evm.Context.L1CostFunc", st.evm.Context.L1CostFunc)
+	if st.msg.RunMode == GasEstimationMode {
+		st.CalculateRollupGasDataFromMessage()
 	}
-	if l1Cost != nil {
+	if st.evm.Context.L1CostFunc != nil && st.msg.RunMode != EthcallMode {
+		log.Info("buyGas3", "blockHeight", st.evm.Context.BlockNumber.Uint64())
+		l1Cost = st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupDataGas, st.msg.IsDepositTx)
+		log.Info("buyGas3", "l1Cost", l1Cost)
+	}
+	if l1Cost != nil && st.msg.RunMode == GasEstimationMode {
 		mgval = mgval.Add(mgval, l1Cost)
 	}
 	balanceCheck := mgval
@@ -255,24 +303,28 @@ func (st *StateTransition) buyGas() error {
 		balanceCheck = new(big.Int).SetUint64(st.msg.GasLimit)
 		balanceCheck = balanceCheck.Mul(balanceCheck, st.msg.GasFeeCap)
 		balanceCheck.Add(balanceCheck, st.msg.Value)
-		if l1Cost != nil {
+		if l1Cost != nil && st.msg.RunMode == GasEstimationMode {
 			balanceCheck.Add(balanceCheck, l1Cost)
 		}
 	}
+
 	if have, want := st.state.GetBalance(st.msg.From), balanceCheck; have.Cmp(want) < 0 {
-		return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From.Hex(), have, want)
+		return nil, fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From.Hex(), have, want)
 	}
+	log.Info("buyGas4")
 	if err := st.gp.SubGas(st.msg.GasLimit); err != nil {
-		return err
+		log.Info("buyGas5")
+		return nil, err
 	}
 	st.gasRemaining += st.msg.GasLimit
 
 	st.initialGas = st.msg.GasLimit
 	st.state.SubBalance(st.msg.From, mgval)
-	return nil
+	log.Info("buyGas6", "l1Cost", l1Cost)
+	return l1Cost, nil
 }
 
-func (st *StateTransition) preCheck() error {
+func (st *StateTransition) preCheck() (*big.Int, error) {
 	if st.msg.IsDepositTx {
 		// No fee fields to check, no nonce to check, and no need to check if EOA (L1 already verified it for us)
 		// Gas is free, but no refunds!
@@ -281,12 +333,15 @@ func (st *StateTransition) preCheck() error {
 		// Don't touch the gas pool for system transactions
 		if st.msg.IsSystemTx {
 			if st.evm.ChainConfig().IsOptimismRegolith(st.evm.Context.Time) {
-				return fmt.Errorf("%w: address %v", ErrSystemTxNotSupported,
+				return nil, fmt.Errorf("%w: address %v", ErrSystemTxNotSupported,
 					st.msg.From.Hex())
 			}
-			return nil
+			return common.Big0, nil
 		}
-		return st.gp.SubGas(st.msg.GasLimit) // gas used by deposits may not be used by other txs
+		if err := st.gp.SubGas(st.msg.GasLimit); err != nil {
+			return nil, err
+		}
+		return common.Big0, nil // gas used by deposits may not be used by other txs
 	}
 	// Only check transactions that are not fake
 	msg := st.msg
@@ -294,19 +349,19 @@ func (st *StateTransition) preCheck() error {
 		// Make sure this transaction's nonce is correct.
 		stNonce := st.state.GetNonce(msg.From)
 		if msgNonce := msg.Nonce; stNonce < msgNonce {
-			return fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooHigh,
+			return nil, fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooHigh,
 				msg.From.Hex(), msgNonce, stNonce)
 		} else if stNonce > msgNonce {
-			return fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooLow,
+			return nil, fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooLow,
 				msg.From.Hex(), msgNonce, stNonce)
 		} else if stNonce+1 < stNonce {
-			return fmt.Errorf("%w: address %v, nonce: %d", ErrNonceMax,
+			return nil, fmt.Errorf("%w: address %v, nonce: %d", ErrNonceMax,
 				msg.From.Hex(), stNonce)
 		}
 		// Make sure the sender is an EOA
 		codeHash := st.state.GetCodeHash(msg.From)
 		if codeHash != (common.Hash{}) && codeHash != types.EmptyCodeHash {
-			return fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
+			return nil, fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
 				msg.From.Hex(), codeHash)
 		}
 	}
@@ -316,21 +371,21 @@ func (st *StateTransition) preCheck() error {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
 		if !st.evm.Config.NoBaseFee || msg.GasFeeCap.BitLen() > 0 || msg.GasTipCap.BitLen() > 0 {
 			if l := msg.GasFeeCap.BitLen(); l > 256 {
-				return fmt.Errorf("%w: address %v, maxFeePerGas bit length: %d", ErrFeeCapVeryHigh,
+				return nil, fmt.Errorf("%w: address %v, maxFeePerGas bit length: %d", ErrFeeCapVeryHigh,
 					msg.From.Hex(), l)
 			}
 			if l := msg.GasTipCap.BitLen(); l > 256 {
-				return fmt.Errorf("%w: address %v, maxPriorityFeePerGas bit length: %d", ErrTipVeryHigh,
+				return nil, fmt.Errorf("%w: address %v, maxPriorityFeePerGas bit length: %d", ErrTipVeryHigh,
 					msg.From.Hex(), l)
 			}
 			if msg.GasFeeCap.Cmp(msg.GasTipCap) < 0 {
-				return fmt.Errorf("%w: address %v, maxPriorityFeePerGas: %s, maxFeePerGas: %s", ErrTipAboveFeeCap,
+				return nil, fmt.Errorf("%w: address %v, maxPriorityFeePerGas: %s, maxFeePerGas: %s", ErrTipAboveFeeCap,
 					msg.From.Hex(), msg.GasTipCap, msg.GasFeeCap)
 			}
 			// This will panic if baseFee is nil, but basefee presence is verified
 			// as part of header validation.
 			if msg.GasFeeCap.Cmp(st.evm.Context.BaseFee) < 0 {
-				return fmt.Errorf("%w: address %v, maxFeePerGas: %s baseFee: %s", ErrFeeCapTooLow,
+				return nil, fmt.Errorf("%w: address %v, maxFeePerGas: %s baseFee: %s", ErrFeeCapTooLow,
 					msg.From.Hex(), msg.GasFeeCap, st.evm.Context.BaseFee)
 			}
 		}
@@ -397,7 +452,9 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	// 6. caller has enough balance to cover asset transfer for **topmost** call
 
 	// Check clauses 1-3, buy gas if everything is correct
-	if err := st.preCheck(); err != nil {
+	tokenRatio := st.state.GetState(types.L1BlockAddr, types.TokenRatioSlot).Big().Uint64()
+	l1Cost, err := st.preCheck()
+	if err != nil {
 		return nil, err
 	}
 
@@ -420,10 +477,44 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	log.Info("innerTransitionDb", "gas", gas)
+	//if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
+	//	gas = gas * tokenRatio
+	//}
 	if st.gasRemaining < gas {
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, gas)
 	}
 	st.gasRemaining -= gas
+
+	log.Info("innerTransitionDb", "l1Cost", l1Cost)
+	log.Info("innerTransitionDb", "gp", st.gp.Gas())
+	log.Info("innerTransitionDb", "st.msg", *st.msg)
+	log.Info("innerTransitionDb", "st1", *st)
+	log.Info("innerTransitionDb", "IsDepositTx", st.msg.IsDepositTx, "IsSystemTx", st.msg.IsSystemTx)
+
+	var l1Gas uint64
+	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
+		// l1Gas = l1Cost / l2GasPrice
+		// st.gasRemaining -= l1Gas
+		// l2Gas = st.gasRemaining / tokenRatio
+		// st.gasRemaining = l2GasEvm = l2Gas / tokenRatio
+		log.Info("innerTransitionDb", "st.msg.GasPrice", st.msg.GasPrice.Uint64())
+		if st.msg.GasPrice.Cmp(common.Big0) > 0 {
+			l1Gas = new(big.Int).Div(l1Cost, st.msg.GasPrice).Uint64()
+			if st.msg.GasLimit < l1Gas {
+				return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, l1Gas)
+			}
+		}
+		st.gasRemaining -= l1Gas
+		//tokenRatio = st.state.GetState(types.L1BlockAddr, types.TokenRatioSlot).Big().Uint64()
+		log.Info("innerTransitionDb", "tokenRatio", tokenRatio)
+		if tokenRatio > 0 {
+			st.gasRemaining = st.gasRemaining / tokenRatio
+		}
+	}
+
+	log.Info("innerTransitionDb", "L1BlockAddr", types.L1BlockAddr)
+	log.Info("innerTransitionDb", "st2", *st)
 
 	// Check clause 6
 	if msg.Value.Sign() > 0 && !st.evm.Context.CanTransfer(st.state, msg.From, msg.Value) {
@@ -467,15 +558,18 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 			ReturnData: ret,
 		}, nil
 	}
+
+	log.Info("innerTransitionDb", "IsLondon", rules.IsLondon, "IsOptimismRegolith", rules.IsOptimismRegolith)
+
 	// Note for deposit tx there is no ETH refunded for unused gas, but that's taken care of by the fact that gasPrice
 	// is always 0 for deposit tx. So calling refundGas will ensure the gasUsed accounting is correct without actually
 	// changing the sender's balance
 	if !rules.IsLondon {
 		// Before EIP-3529: refunds were capped to gasUsed / 2
-		st.refundGas(params.RefundQuotient)
+		st.refundGas(params.RefundQuotient, tokenRatio)
 	} else {
 		// After EIP-3529: refunds are capped to gasUsed / 5
-		st.refundGas(params.RefundQuotientEIP3529)
+		st.refundGas(params.RefundQuotientEIP3529, tokenRatio)
 	}
 	if st.msg.IsDepositTx && rules.IsOptimismRegolith {
 		// Skip coinbase payments for deposit tx in Regolith
@@ -504,10 +598,13 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	// Note optimismConfig will not be nil if rules.IsOptimismBedrock is true
 	if optimismConfig := st.evm.ChainConfig().Optimism; optimismConfig != nil && rules.IsOptimismBedrock {
 		st.state.AddBalance(params.OptimismBaseFeeRecipient, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.evm.Context.BaseFee))
-		if cost := st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupDataGas, st.msg.IsDepositTx); cost != nil {
-			st.state.AddBalance(params.OptimismL1FeeRecipient, cost)
-		}
+		// leo: can not collect l1 fee here again, all l1 fee has been collected by CoinBase & OptimismBaseFeeRecipient
+		//if cost := st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupDataGas, st.msg.IsDepositTx); cost != nil {
+		//	st.state.AddBalance(params.OptimismL1FeeRecipient, cost)
+		//}
 	}
+
+	log.Info("innerTransitionDb", "st.gasUsed()", st.gasUsed(), "l1Gas", l1Gas, "vmerr", vmerr)
 
 	return &ExecutionResult{
 		UsedGas:    st.gasUsed(),
@@ -516,15 +613,22 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	}, nil
 }
 
-func (st *StateTransition) refundGas(refundQuotient uint64) {
+func (st *StateTransition) refundGas(refundQuotient, tokenRatio uint64) {
 	// Apply refund counter, capped to a refund quotient
 	refund := st.gasUsed() / refundQuotient
 	if refund > st.state.GetRefund() {
 		refund = st.state.GetRefund()
 	}
+	log.Info("refundGas", "gasRemaining", st.gasRemaining)
+
 	st.gasRemaining += refund
 
+	log.Info("refundGas", "refund", refund, "GetRefund", st.state.GetRefund(), "st.gasUsed() / refundQuotient", st.gasUsed()/refundQuotient)
+
 	// Return ETH for remaining gas, exchanged at the original rate.
+	// todo by leo
+	st.gasRemaining = st.gasRemaining * tokenRatio
+	log.Info("refundGas", "gasRemaining2", st.gasRemaining)
 	remaining := new(big.Int).Mul(new(big.Int).SetUint64(st.gasRemaining), st.msg.GasPrice)
 	st.state.AddBalance(st.msg.From, remaining)
 
