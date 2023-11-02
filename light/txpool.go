@@ -385,6 +385,9 @@ func (pool *TxPool) validateTx(ctx context.Context, tx *types.Transaction) error
 	}
 	var balance *big.Int
 	if metaTxParams != nil {
+		if metaTxParams.ExpireHeight < header.Number.Uint64() {
+			return types.ErrExpiredMetaTx
+		}
 		balance = currentState.GetBalance(metaTxParams.GasFeeSponsor)
 	} else {
 		balance = currentState.GetBalance(from)
