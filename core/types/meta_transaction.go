@@ -35,6 +35,10 @@ type MetaTxParams struct {
 	S *big.Int
 }
 
+type MetaTxParamsCache struct {
+	metaTxParams *MetaTxParams
+}
+
 type MetaTxSignData struct {
 	ChainID      *big.Int
 	Nonce        uint64
@@ -71,9 +75,9 @@ func DecodeAndVerifyMetaTxParams(tx *Transaction) (*MetaTxParams, error) {
 	}
 
 	if mtp := tx.metaTxParams.Load(); mtp != nil {
-		mtpCache, ok := mtp.(*MetaTxParams)
+		mtpCache, ok := mtp.(*MetaTxParamsCache)
 		if ok {
-			return mtpCache, nil
+			return mtpCache.metaTxParams, nil
 		}
 	}
 
@@ -81,7 +85,11 @@ func DecodeAndVerifyMetaTxParams(tx *Transaction) (*MetaTxParams, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Not metaTx
 	if metaTxParams == nil {
+		tx.metaTxParams.Store(&MetaTxParamsCache{
+			metaTxParams: nil,
+		})
 		return nil, nil
 	}
 
@@ -107,7 +115,9 @@ func DecodeAndVerifyMetaTxParams(tx *Transaction) (*MetaTxParams, error) {
 		return nil, ErrGasFeeSponsorMismatch
 	}
 
-	tx.metaTxParams.Store(metaTxParams)
+	tx.metaTxParams.Store(&MetaTxParamsCache{
+		metaTxParams: metaTxParams,
+	})
 
 	return metaTxParams, nil
 }
