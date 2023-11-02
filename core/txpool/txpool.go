@@ -1478,12 +1478,13 @@ func (pool *TxPool) validateMetaTxList(list *list) ([]*types.Transaction, *big.I
 		if metaTxParams.ExpireHeight < currHeight {
 			invalidMetaTxs = append(invalidMetaTxs, tx)
 		}
-		if pool.currentState.GetBalance(metaTxParams.GasFeeSponsor).Cmp(tx.Cost()) >= 0 {
-			sponsorCostSum = new(big.Int).Add(sponsorCostSum, tx.Cost())
-		}
+		txTotalCost := tx.Cost()
 		l1Cost := pool.l1CostFn(tx.RollupDataGas(), tx.IsDepositTx())
 		if l1Cost != nil {
-			sponsorCostSum = new(big.Int).Add(sponsorCostSum, l1Cost) // gas fee sponsor must sponsor additional l1Cost fee
+			txTotalCost = new(big.Int).Add(txTotalCost, l1Cost) // gas fee sponsor must sponsor additional l1Cost fee
+		}
+		if pool.currentState.GetBalance(metaTxParams.GasFeeSponsor).Cmp(txTotalCost) >= 0 {
+			sponsorCostSum = new(big.Int).Add(sponsorCostSum, txTotalCost)
 		}
 	}
 	return invalidMetaTxs, sponsorCostSum
