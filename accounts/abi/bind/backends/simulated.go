@@ -710,7 +710,7 @@ func (b *SimulatedBackend) callContract(ctx context.Context, call ethereum.CallM
 	}
 	// Ensure message is initialized properly.
 	if call.Gas == 0 {
-		call.Gas = 1125899906842624
+		call.Gas = core.DefaultMantleBlockGasLimit
 	}
 	if call.Value == nil {
 		call.Value = new(big.Int)
@@ -739,6 +739,7 @@ func (b *SimulatedBackend) callContract(ctx context.Context, call ethereum.CallM
 	txContext := core.NewEVMTxContext(msg)
 	evmContext := core.NewEVMBlockContext(header, b.blockchain, nil, b.config, stateDB)
 	vmEnv := vm.NewEVM(evmContext, txContext, stateDB, b.config, vm.Config{NoBaseFee: true})
+	log.Info("SimulatedBackend")
 	gasPool := new(core.GasPool).AddGas(math.MaxUint64)
 
 	return core.ApplyMessage(vmEnv, msg, gasPool)

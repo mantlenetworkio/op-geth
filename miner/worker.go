@@ -1027,7 +1027,6 @@ type generateParams struct {
 // either based on the last chain head or specified parent. In this function
 // the pending transactions are not filled yet, only the empty task returned.
 func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
-	log.Info("prepareWork", "gaslimit", w.config.GasCeil)
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
@@ -1049,7 +1048,6 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 		}
 		timestamp = parent.Time + 1
 	}
-	log.Info("prepareWork1", "parent.GasLimit", parent.GasLimit, "w.config.GasCeil", w.config.GasCeil)
 	// Construct the sealing block header.
 	header := &types.Header{
 		ParentHash: parent.Hash(),
@@ -1070,20 +1068,14 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 	if w.chainConfig.IsLondon(header.Number) {
 		header.BaseFee = misc.CalcBaseFee(w.chainConfig, parent)
 		if !w.chainConfig.IsLondon(parent.Number) {
-			log.Info("prepareWork2", "header.GasLimit", header.GasLimit)
 			parentGasLimit := parent.GasLimit * w.chainConfig.ElasticityMultiplier()
 			header.GasLimit = core.CalcGasLimit(parentGasLimit, w.config.GasCeil)
-			log.Info("prepareWork3", "parentGasLimit", parentGasLimit, "w.config.GasCeil", w.config.GasCeil)
 		}
 	}
 	if genParams.gasLimit != nil { // override gas limit if specified
-		log.Info("prepareWork4", "header.GasLimit", header.GasLimit)
-		log.Info("prepareWork4", "genParams.gasLimit", *genParams.gasLimit)
 		header.GasLimit = *genParams.gasLimit
 	} else if w.chain.Config().Optimism != nil && w.config.GasCeil != 0 {
 		// configure the gas limit of pending blocks with the miner gas limit config when using optimism
-		log.Info("prepareWork5", "header.GasLimit", header.GasLimit)
-		log.Info("prepareWork5", "genParams.gasLimit", w.config.GasCeil)
 		header.GasLimit = w.config.GasCeil
 	}
 	// Run the consensus preparation with the default or customized consensus engine.

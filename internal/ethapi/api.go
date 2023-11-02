@@ -1070,12 +1070,6 @@ func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash 
 	if err != nil {
 		return nil, err
 	}
-	//if runMode == core.EthcallMode {
-	//	msg.SkipAccountChecks = true
-	//} else if runMode == core.GasEstimationMode {
-	//	// should check account's balance to cover L1Cost
-	//	msg.SkipAccountChecks = false
-	//}
 	evm, vmError, err := b.GetEVM(ctx, msg, state, header, &vm.Config{NoBaseFee: true})
 	if err != nil {
 		return nil, err
@@ -1088,8 +1082,7 @@ func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash 
 	}()
 
 	// Execute the message.
-	//gp := new(core.GasPool).AddGas(math.MaxUint64 / 2)
-	gp := new(core.GasPool).AddGas(1125899906842624)
+	gp := new(core.GasPool).AddGas(core.DefaultMantleBlockGasLimit)
 	result, err := core.ApplyMessage(evm, msg, gp)
 	if err := vmError(); err != nil {
 		return nil, err

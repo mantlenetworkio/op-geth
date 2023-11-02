@@ -25,7 +25,6 @@ import (
 	cmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 
 	"golang.org/x/crypto/sha3"
@@ -192,17 +191,6 @@ func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.In
 	return msg, err
 }
 
-//type CommonTx struct {
-//	Nonce     uint64
-//	GasPrice  *big.Int
-//	GasTipCap *big.Int // a.k.a. maxPriorityFeePerGas
-//	GasFeeCap *big.Int // a.k.a. maxFeePerGas
-//	Gas       uint64
-//	To        *common.Address `rlp:"nil"` // nil means contract creation
-//	Value     *big.Int
-//	Data      []byte
-//}
-
 // CalculateRollupGasDataFromMessage calculate RollupGasData from message.
 func (st *StateTransition) CalculateRollupGasDataFromMessage() {
 	tx := types.NewTx(&types.DynamicFeeTx{
@@ -282,18 +270,14 @@ func (st *StateTransition) to() common.Address {
 }
 
 func (st *StateTransition) buyGas() (*big.Int, error) {
-	log.Info("buyGas1")
 	mgval := new(big.Int).SetUint64(st.msg.GasLimit)
 	mgval = mgval.Mul(mgval, st.msg.GasPrice)
 	var l1Cost *big.Int
-	log.Info("buyGas2", "st.evm.Context.L1CostFunc", st.evm.Context.L1CostFunc)
 	if st.msg.RunMode == GasEstimationMode {
 		st.CalculateRollupGasDataFromMessage()
 	}
 	if st.evm.Context.L1CostFunc != nil && st.msg.RunMode != EthcallMode {
-		log.Info("buyGas3", "blockHeight", st.evm.Context.BlockNumber.Uint64())
 		l1Cost = st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupDataGas, st.msg.IsDepositTx)
-		log.Info("buyGas3", "l1Cost", l1Cost)
 	}
 	if l1Cost != nil && st.msg.RunMode == GasEstimationMode {
 		mgval = mgval.Add(mgval, l1Cost)
@@ -311,16 +295,14 @@ func (st *StateTransition) buyGas() (*big.Int, error) {
 	if have, want := st.state.GetBalance(st.msg.From), balanceCheck; have.Cmp(want) < 0 {
 		return nil, fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From.Hex(), have, want)
 	}
-	log.Info("buyGas4")
+
 	if err := st.gp.SubGas(st.msg.GasLimit); err != nil {
-		log.Info("buyGas5")
 		return nil, err
 	}
 	st.gasRemaining += st.msg.GasLimit
 
 	st.initialGas = st.msg.GasLimit
 	st.state.SubBalance(st.msg.From, mgval)
-	log.Info("buyGas6", "l1Cost", l1Cost)
 	return l1Cost, nil
 }
 
@@ -477,44 +459,30 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Info("innerTransitionDb", "gas", gas)
-	//if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
-	//	gas = gas * tokenRatio
-	//}
+	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
+		gas = gas * tokenRatio
+	}
 	if st.gasRemaining < gas {
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, gas)
 	}
 	st.gasRemaining -= gas
 
-	log.Info("innerTransitionDb", "l1Cost", l1Cost)
-	log.Info("innerTransitionDb", "gp", st.gp.Gas())
-	log.Info("innerTransitionDb", "st.msg", *st.msg)
-	log.Info("innerTransitionDb", "st1", *st)
-	log.Info("innerTransitionDb", "IsDepositTx", st.msg.IsDepositTx, "IsSystemTx", st.msg.IsSystemTx)
-
 	var l1Gas uint64
 	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
-		// l1Gas = l1Cost / l2GasPrice
-		// st.gasRemaining -= l1Gas
-		// l2Gas = st.gasRemaining / tokenRatio
-		// st.gasRemaining = l2GasEvm = l2Gas / tokenRatio
-		log.Info("innerTransitionDb", "st.msg.GasPrice", st.msg.GasPrice.Uint64())
 		if st.msg.GasPrice.Cmp(common.Big0) > 0 {
 			l1Gas = new(big.Int).Div(l1Cost, st.msg.GasPrice).Uint64()
 			if st.msg.GasLimit < l1Gas {
 				return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, l1Gas)
 			}
 		}
+		if st.gasRemaining < gas {
+			return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, gas)
+		}
 		st.gasRemaining -= l1Gas
-		//tokenRatio = st.state.GetState(types.L1BlockAddr, types.TokenRatioSlot).Big().Uint64()
-		log.Info("innerTransitionDb", "tokenRatio", tokenRatio)
 		if tokenRatio > 0 {
 			st.gasRemaining = st.gasRemaining / tokenRatio
 		}
 	}
-
-	log.Info("innerTransitionDb", "L1BlockAddr", types.L1BlockAddr)
-	log.Info("innerTransitionDb", "st2", *st)
 
 	// Check clause 6
 	if msg.Value.Sign() > 0 && !st.evm.Context.CanTransfer(st.state, msg.From, msg.Value) {
@@ -558,19 +526,19 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 			ReturnData: ret,
 		}, nil
 	}
-
-	log.Info("innerTransitionDb", "IsLondon", rules.IsLondon, "IsOptimismRegolith", rules.IsOptimismRegolith)
-
 	// Note for deposit tx there is no ETH refunded for unused gas, but that's taken care of by the fact that gasPrice
 	// is always 0 for deposit tx. So calling refundGas will ensure the gasUsed accounting is correct without actually
 	// changing the sender's balance
-	if !rules.IsLondon {
-		// Before EIP-3529: refunds were capped to gasUsed / 2
-		st.refundGas(params.RefundQuotient, tokenRatio)
-	} else {
-		// After EIP-3529: refunds are capped to gasUsed / 5
-		st.refundGas(params.RefundQuotientEIP3529, tokenRatio)
+	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
+		if !rules.IsLondon {
+			// Before EIP-3529: refunds were capped to gasUsed / 2
+			st.refundGas(params.RefundQuotient, tokenRatio)
+		} else {
+			// After EIP-3529: refunds are capped to gasUsed / 5
+			st.refundGas(params.RefundQuotientEIP3529, tokenRatio)
+		}
 	}
+
 	if st.msg.IsDepositTx && rules.IsOptimismRegolith {
 		// Skip coinbase payments for deposit tx in Regolith
 		return &ExecutionResult{
@@ -604,8 +572,6 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 		//}
 	}
 
-	log.Info("innerTransitionDb", "st.gasUsed()", st.gasUsed(), "l1Gas", l1Gas, "vmerr", vmerr)
-
 	return &ExecutionResult{
 		UsedGas:    st.gasUsed(),
 		Err:        vmerr,
@@ -619,16 +585,10 @@ func (st *StateTransition) refundGas(refundQuotient, tokenRatio uint64) {
 	if refund > st.state.GetRefund() {
 		refund = st.state.GetRefund()
 	}
-	log.Info("refundGas", "gasRemaining", st.gasRemaining)
-
 	st.gasRemaining += refund
 
-	log.Info("refundGas", "refund", refund, "GetRefund", st.state.GetRefund(), "st.gasUsed() / refundQuotient", st.gasUsed()/refundQuotient)
-
 	// Return ETH for remaining gas, exchanged at the original rate.
-	// todo by leo
 	st.gasRemaining = st.gasRemaining * tokenRatio
-	log.Info("refundGas", "gasRemaining2", st.gasRemaining)
 	remaining := new(big.Int).Mul(new(big.Int).SetUint64(st.gasRemaining), st.msg.GasPrice)
 	st.state.AddBalance(st.msg.From, remaining)
 

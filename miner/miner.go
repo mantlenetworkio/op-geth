@@ -68,8 +68,7 @@ type Config struct {
 
 // DefaultConfig contains default settings for miner.
 var DefaultConfig = Config{
-	//GasCeil:  30000000,
-	GasCeil:  1125899906842624,
+	GasCeil:  core.DefaultMantleBlockGasLimit,
 	GasPrice: big.NewInt(params.GWei),
 
 	// The default recommit time is chosen as two seconds since

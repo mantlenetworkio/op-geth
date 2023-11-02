@@ -87,10 +87,10 @@ var Defaults = Config{
 	FilterLogCacheSize:      32,
 	Miner:                   miner.DefaultConfig,
 	TxPool:                  txpool.DefaultConfig,
-	RPCGasCap:               1125899906842624,
+	RPCGasCap:               core.DefaultMantleBlockGasLimit,
 	RPCEVMTimeout:           5 * time.Second,
 	GPO:                     FullNodeGPO,
-	RPCTxFeeCap:             1000, // 1000 ether
+	RPCTxFeeCap:             5000, // 5000 mnt
 }
 
 func init() {

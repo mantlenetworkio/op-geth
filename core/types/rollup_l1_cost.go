@@ -20,7 +20,6 @@ import (
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -73,7 +72,6 @@ func NewL1CostFunc(config *params.ChainConfig, statedb StateGetter) L1CostFunc {
 			tokenRatio = statedb.GetState(L1BlockAddr, TokenRatioSlot).Big()
 			cacheBlockNum = blockNum
 		}
-		log.Info("L1Cost", "rollupDataGas", rollupDataGas, "l1BaseFee", l1BaseFee, "overhead", overhead, "scalar", scalar, "tokenRatio", tokenRatio)
 		return L1Cost(rollupDataGas, l1BaseFee, overhead, scalar, tokenRatio)
 	}
 }
