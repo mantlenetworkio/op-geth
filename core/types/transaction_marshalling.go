@@ -45,11 +45,12 @@ type txJSON struct {
 	To                   *common.Address `json:"to"`
 
 	// Deposit transaction fields
-	SourceHash *common.Hash    `json:"sourceHash,omitempty"`
-	From       *common.Address `json:"from,omitempty"`
-	Mint       *hexutil.Big    `json:"mint,omitempty"`
-	EthValue   *hexutil.Big    `json:"ethValue,omitempty"`
-	IsSystemTx *bool           `json:"isSystemTx,omitempty"`
+	SourceHash    *common.Hash    `json:"sourceHash,omitempty"`
+	From          *common.Address `json:"from,omitempty"`
+	Mint          *hexutil.Big    `json:"mint,omitempty"`
+	EthValue      *hexutil.Big    `json:"ethValue,omitempty"`
+	IsSystemTx    *bool           `json:"isSystemTx,omitempty"`
+	IsBroadcastTx *bool           `json:"isBroadcastTx,omitempty"`
 
 	// Access list transaction fields:
 	ChainID    *hexutil.Big `json:"chainId,omitempty"`
@@ -117,6 +118,7 @@ func (tx *Transaction) MarshalJSON() ([]byte, error) {
 			enc.EthValue = (*hexutil.Big)(itx.EthValue)
 		}
 		enc.IsSystemTx = &itx.IsSystemTransaction
+		enc.IsBroadcastTx = &itx.IsBroadcastTransaction
 		// other fields will show up as null.
 	}
 	return json.Marshal(&enc)
@@ -331,6 +333,9 @@ func (tx *Transaction) UnmarshalJSON(input []byte) error {
 		// IsSystemTx may be omitted. Defaults to false.
 		if dec.IsSystemTx != nil {
 			itx.IsSystemTransaction = *dec.IsSystemTx
+		}
+		if dec.IsBroadcastTx != nil {
+			itx.IsBroadcastTransaction = *dec.IsBroadcastTx
 		}
 
 		if dec.Nonce != nil {

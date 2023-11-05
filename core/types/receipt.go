@@ -524,14 +524,22 @@ func (rs Receipts) DeriveFields(config *params.ChainConfig, hash common.Hash, nu
 			logIndex++
 		}
 	}
-	if config.Optimism != nil && len(txs) >= 2 { // need at least an info tx and a non-info tx
-		if data := txs[0].Data(); len(data) >= 4+32*8 { // function selector + 8 arguments to setL1BlockValues
-			l1Basefee := new(big.Int).SetBytes(data[4+32*2 : 4+32*3])  // arg index 2
-			overhead := new(big.Int).SetBytes(data[4+32*6 : 4+32*7])   // arg index 6
-			scalar := new(big.Int).SetBytes(data[4+32*7 : 4+32*8])     // arg index 7
-			tokenRatio := new(big.Int).SetBytes(data[4+32*8 : 4+32*9]) // arg index 8
-			fscalar := new(big.Float).SetInt(scalar)                   // legacy: format fee scalar as big Float
-			fdivisor := new(big.Float).SetUint64(1_000_000)            // 10**6, i.e. 6 decimals
+	if config.Optimism != nil && len(txs) >= 2 { // need at least a L1 info tx and a token ratio info tx
+		numDepositTx := 0
+		for _, tx := range txs {
+			if tx.IsDepositTx() {
+				numDepositTx++
+			}
+		}
+		if dataL1Info, dataTokenRatio := txs[0].Data(), txs[numDepositTx-1].Data(); len(dataL1Info) >= 4+32*8 && len(dataTokenRatio) >= 4+32*1 {
+			// L1 info: function selector + 8 arguments to setL1BlockValues
+			// Token ratio info: function selector + 1 arguments to setTokenRatio
+			l1Basefee := new(big.Int).SetBytes(dataL1Info[4+32*2 : 4+32*3])      // L1Info arg index 2
+			overhead := new(big.Int).SetBytes(dataL1Info[4+32*6 : 4+32*7])       // L1Info arg index 6
+			scalar := new(big.Int).SetBytes(dataL1Info[4+32*7 : 4+32*8])         // L1Info arg index 7
+			tokenRatio := new(big.Int).SetBytes(dataTokenRatio[4+32*0 : 4+32*1]) // TokenRatio arg index 0
+			fscalar := new(big.Float).SetInt(scalar)                             // legacy: format fee scalar as big Float
+			fdivisor := new(big.Float).SetUint64(1_000_000)                      // 10**6, i.e. 6 decimals
 			feeScalar := new(big.Float).Quo(fscalar, fdivisor)
 			for i := 0; i < len(rs); i++ {
 				if !txs[i].IsDepositTx() {
@@ -544,7 +552,7 @@ func (rs Receipts) DeriveFields(config *params.ChainConfig, hash common.Hash, nu
 				}
 			}
 		} else {
-			return fmt.Errorf("L1 info tx only has %d bytes, cannot read gas price parameters", len(data))
+			return fmt.Errorf("L1 info tx and token ratio tx only has %d bytes and %d bytes respectively, cannot read gas price parameters", len(dataL1Info), len(dataTokenRatio))
 		}
 	}
 
