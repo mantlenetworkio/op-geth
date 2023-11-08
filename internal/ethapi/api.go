@@ -52,6 +52,10 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
+var (
+	gasBuffer = uint64(120)
+)
+
 // EthereumAPI provides an API to access Ethereum related information.
 type EthereumAPI struct {
 	b Backend
@@ -1306,7 +1310,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 			return 0, fmt.Errorf("gas required exceeds allowance (%d)", cap)
 		}
 	}
-	return hexutil.Uint64(hi) * 150 / 100, nil
+	return hexutil.Uint64(hi * gasBuffer / 100), nil
 }
 
 func calculateGasWithAllowance(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, gasPriceForEstimate *big.Int, gasCap uint64) (uint64, error) {
