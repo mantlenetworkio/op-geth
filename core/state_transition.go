@@ -131,6 +131,7 @@ type RunMode uint8
 const (
 	CommitMode RunMode = iota
 	GasEstimationMode
+	GasEstimationWithSkipCheckBalanceMode
 	EthcallMode
 )
 
@@ -273,13 +274,13 @@ func (st *StateTransition) buyGas() (*big.Int, error) {
 	mgval := new(big.Int).SetUint64(st.msg.GasLimit)
 	mgval = mgval.Mul(mgval, st.msg.GasPrice)
 	var l1Cost *big.Int
-	if st.msg.RunMode == GasEstimationMode {
+	if st.msg.RunMode == GasEstimationMode || st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode {
 		st.CalculateRollupGasDataFromMessage()
 	}
 	if st.evm.Context.L1CostFunc != nil && st.msg.RunMode != EthcallMode {
 		l1Cost = st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupDataGas, st.msg.IsDepositTx)
 	}
-	if l1Cost != nil && st.msg.RunMode == GasEstimationMode {
+	if l1Cost != nil && (st.msg.RunMode == GasEstimationMode || st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode) {
 		mgval = mgval.Add(mgval, l1Cost)
 	}
 	balanceCheck := mgval
@@ -291,9 +292,10 @@ func (st *StateTransition) buyGas() (*big.Int, error) {
 			balanceCheck.Add(balanceCheck, l1Cost)
 		}
 	}
-
-	if have, want := st.state.GetBalance(st.msg.From), balanceCheck; have.Cmp(want) < 0 {
-		return nil, fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From.Hex(), have, want)
+	if st.msg.RunMode != GasEstimationWithSkipCheckBalanceMode && st.msg.RunMode != EthcallMode {
+		if have, want := st.state.GetBalance(st.msg.From), balanceCheck; have.Cmp(want) < 0 {
+			return nil, fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From.Hex(), have, want)
+		}
 	}
 
 	if err := st.gp.SubGas(st.msg.GasLimit); err != nil {
@@ -302,7 +304,9 @@ func (st *StateTransition) buyGas() (*big.Int, error) {
 	st.gasRemaining += st.msg.GasLimit
 
 	st.initialGas = st.msg.GasLimit
-	st.state.SubBalance(st.msg.From, mgval)
+	if st.msg.RunMode != GasEstimationWithSkipCheckBalanceMode && st.msg.RunMode != EthcallMode {
+		st.state.SubBalance(st.msg.From, mgval)
+	}
 	return l1Cost, nil
 }
 
@@ -468,8 +472,8 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	st.gasRemaining -= gas
 
 	var l1Gas uint64
-	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
-		if st.msg.GasPrice.Cmp(common.Big0) > 0 {
+	if !st.msg.IsDepositTx && !st.msg.IsSystemTx && st.msg.RunMode != GasEstimationWithSkipCheckBalanceMode {
+		if st.msg.GasPrice.Cmp(common.Big0) > 0 && l1Cost != nil {
 			l1Gas = new(big.Int).Div(l1Cost, st.msg.GasPrice).Uint64()
 			if st.msg.GasLimit < l1Gas {
 				return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, l1Gas)
@@ -580,6 +584,11 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 }
 
 func (st *StateTransition) refundGas(refundQuotient, tokenRatio uint64) {
+	if st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode || st.msg.RunMode == EthcallMode {
+		st.gasRemaining = st.gasRemaining * tokenRatio
+		st.gp.AddGas(st.gasRemaining)
+		return
+	}
 	// Apply refund counter, capped to a refund quotient
 	refund := st.gasUsed() / refundQuotient
 	if refund > st.state.GetRefund() {
