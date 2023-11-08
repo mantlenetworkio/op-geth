@@ -268,9 +268,14 @@ func (st *StateTransition) buyGas() error {
 			balanceCheck.Add(balanceCheck, l1Cost)
 		}
 	}
+
 	if st.msg.MetaTxParams != nil {
-		if have, want := st.state.GetBalance(st.msg.MetaTxParams.GasFeeSponsor), balanceCheck; have.Cmp(want) < 0 {
+		sponsorAmount, selfPayAmount := st.msg.MetaTxParams.CalculateSponsorAndSelfAmount(balanceCheck)
+		if have, want := st.state.GetBalance(st.msg.MetaTxParams.GasFeeSponsor), sponsorAmount; have.Cmp(want) < 0 {
 			return fmt.Errorf("%w: gasFeeSponsor %v have %v want %v", ErrInsufficientFunds, st.msg.MetaTxParams.GasFeeSponsor.Hex(), have, want)
+		}
+		if have, want := st.state.GetBalance(st.msg.From), selfPayAmount; have.Cmp(want) < 0 {
+			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From.Hex(), have, want)
 		}
 	} else {
 		if have, want := st.state.GetBalance(st.msg.From), balanceCheck; have.Cmp(want) < 0 {
@@ -285,7 +290,9 @@ func (st *StateTransition) buyGas() error {
 
 	st.initialGas = st.msg.GasLimit
 	if st.msg.MetaTxParams != nil {
-		st.state.SubBalance(st.msg.MetaTxParams.GasFeeSponsor, mgval)
+		sponsorAmount, selfPayAmount := st.msg.MetaTxParams.CalculateSponsorAndSelfAmount(balanceCheck)
+		st.state.SubBalance(st.msg.MetaTxParams.GasFeeSponsor, sponsorAmount)
+		st.state.SubBalance(st.msg.MetaTxParams.GasFeeSponsor, selfPayAmount)
 	} else {
 		st.state.SubBalance(st.msg.From, mgval)
 	}
@@ -559,7 +566,9 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 	// Return ETH for remaining gas, exchanged at the original rate.
 	remaining := new(big.Int).Mul(new(big.Int).SetUint64(st.gasRemaining), st.msg.GasPrice)
 	if st.msg.MetaTxParams != nil {
-		st.state.AddBalance(st.msg.MetaTxParams.GasFeeSponsor, remaining)
+		sponsorRefundAmount, selfRefundAmount := st.msg.MetaTxParams.CalculateSponsorAndSelfAmount(remaining)
+		st.state.AddBalance(st.msg.MetaTxParams.GasFeeSponsor, sponsorRefundAmount)
+		st.state.AddBalance(st.msg.From, selfRefundAmount)
 	} else {
 		st.state.AddBalance(st.msg.From, remaining)
 	}

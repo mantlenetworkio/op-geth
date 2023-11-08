@@ -383,19 +383,25 @@ func (pool *TxPool) validateTx(ctx context.Context, tx *types.Transaction) error
 	if err != nil {
 		return err
 	}
-	var balance *big.Int
 	if metaTxParams != nil {
 		if metaTxParams.ExpireHeight < header.Number.Uint64() {
 			return types.ErrExpiredMetaTx
 		}
-		balance = currentState.GetBalance(metaTxParams.GasFeeSponsor)
+		sponsorAmount, selfPayAmount := metaTxParams.CalculateSponsorAndSelfAmount(tx.Cost())
+		sponsorBalance := currentState.GetBalance(metaTxParams.GasFeeSponsor)
+		if sponsorBalance.Cmp(sponsorAmount) < 0 {
+			return core.ErrInsufficientFunds
+		}
+		userBalance := currentState.GetBalance(from)
+		if userBalance.Cmp(selfPayAmount) < 0 {
+			return core.ErrInsufficientFunds
+		}
 	} else {
-		balance = currentState.GetBalance(from)
-	}
-	// Transactor should have enough funds to cover the costs
-	// cost == V + GP * GL
-	if b := balance; b.Cmp(tx.Cost()) < 0 {
-		return core.ErrInsufficientFunds
+		// Transactor should have enough funds to cover the costs
+		// cost == V + GP * GL
+		if b := currentState.GetBalance(from); b.Cmp(tx.Cost()) < 0 {
+			return core.ErrInsufficientFunds
+		}
 	}
 
 	// Should supply enough intrinsic gas

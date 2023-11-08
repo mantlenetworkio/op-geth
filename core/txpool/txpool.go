@@ -693,18 +693,28 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	if err != nil {
 		return err
 	}
-	var balance *big.Int
+	var userBalance *big.Int
 	if metaTxParams != nil {
 		if metaTxParams.ExpireHeight < pool.chain.CurrentBlock().Number.Uint64() {
 			return types.ErrExpiredMetaTx
 		}
-		balance = pool.currentState.GetBalance(metaTxParams.GasFeeSponsor)
+		sponsorAmount, selfPayAmount := metaTxParams.CalculateSponsorAndSelfAmount(tx.Cost())
+		sponsorBalance := pool.currentState.GetBalance(metaTxParams.GasFeeSponsor)
+		if sponsorBalance.Cmp(sponsorAmount) < 0 {
+			return core.ErrInsufficientFunds
+		}
+		selfBalance := pool.currentState.GetBalance(from)
+		if selfBalance.Cmp(selfPayAmount) < 0 {
+			return core.ErrInsufficientFunds
+		}
+		userBalance = new(big.Int).Add(selfBalance, sponsorBalance)
 	} else {
-		balance = pool.currentState.GetBalance(from)
-	}
-
-	if balance.Cmp(cost) < 0 {
-		return core.ErrInsufficientFunds
+		userBalance = pool.currentState.GetBalance(from)
+		// Transactor should have enough funds to cover the costs
+		// cost == V + GP * GL
+		if b := userBalance; b.Cmp(tx.Cost()) < 0 {
+			return core.ErrInsufficientFunds
+		}
 	}
 
 	// Verify that replacing transactions will not result in overdraft
@@ -719,12 +729,8 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 			}
 			sum.Sub(sum, replL1Cost)
 		}
-		if balance.Cmp(sum) < 0 {
-			if metaTxParams != nil {
-				log.Trace("Replacing transactions would overdraft", "gasFeeSponsor", metaTxParams.GasFeeSponsor, "balance", balance, "required", sum)
-			} else {
-				log.Trace("Replacing transactions would overdraft", "sender", from, "balance", balance, "required", sum)
-			}
+		if userBalance.Cmp(sum) < 0 {
+			log.Trace("Replacing transactions would overdraft", "sender", from, "balance", userBalance, "required", sum)
 			return ErrOverdraft
 		}
 	}
@@ -1483,8 +1489,11 @@ func (pool *TxPool) validateMetaTxList(list *list) ([]*types.Transaction, *big.I
 		if l1Cost != nil {
 			txTotalCost = new(big.Int).Add(txTotalCost, l1Cost) // gas fee sponsor must sponsor additional l1Cost fee
 		}
-		if pool.currentState.GetBalance(metaTxParams.GasFeeSponsor).Cmp(txTotalCost) >= 0 {
-			sponsorCostSum = new(big.Int).Add(sponsorCostSum, txTotalCost)
+		sponsorAmount, _ := metaTxParams.CalculateSponsorAndSelfAmount(txTotalCost)
+		if pool.currentState.GetBalance(metaTxParams.GasFeeSponsor).Cmp(sponsorAmount) >= 0 {
+			sponsorCostSum = new(big.Int).Add(sponsorCostSum, sponsorAmount)
+		} else {
+			invalidMetaTxs = append(invalidMetaTxs, tx)
 		}
 	}
 	return invalidMetaTxs, sponsorCostSum

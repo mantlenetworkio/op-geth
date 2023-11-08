@@ -23,6 +23,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -227,19 +228,20 @@ func decodeSignature(sig []byte) (r, s, v *big.Int) {
 	return r, s, v
 }
 
-func generateMetaTxData(dynamicTx *types.DynamicFeeTx, expireHeight uint64,
+func generateMetaTxData(dynamicTx *types.DynamicFeeTx, expireHeight uint64, sponsorPercent uint64,
 	gasFeeSponsorAddr common.Address, privateKey *ecdsa.PrivateKey) ([]byte, error) {
 	metaTxSignData := &types.MetaTxSignData{
-		ChainID:      dynamicTx.ChainID,
-		Nonce:        dynamicTx.Nonce,
-		GasTipCap:    dynamicTx.GasTipCap,
-		GasFeeCap:    dynamicTx.GasFeeCap,
-		Gas:          dynamicTx.Gas,
-		To:           dynamicTx.To,
-		Value:        dynamicTx.Value,
-		Data:         dynamicTx.Data,
-		AccessList:   dynamicTx.AccessList,
-		ExpireHeight: expireHeight,
+		ChainID:        dynamicTx.ChainID,
+		Nonce:          dynamicTx.Nonce,
+		GasTipCap:      dynamicTx.GasTipCap,
+		GasFeeCap:      dynamicTx.GasFeeCap,
+		Gas:            dynamicTx.Gas,
+		To:             dynamicTx.To,
+		Value:          dynamicTx.Value,
+		Data:           dynamicTx.Data,
+		AccessList:     dynamicTx.AccessList,
+		ExpireHeight:   expireHeight,
+		SponsorPercent: sponsorPercent,
 	}
 
 	sponsorSig, err := crypto.Sign(metaTxSignData.Hash().Bytes(), privateKey)
@@ -250,12 +252,13 @@ func generateMetaTxData(dynamicTx *types.DynamicFeeTx, expireHeight uint64,
 	r, s, v := decodeSignature(sponsorSig)
 
 	metaTxData := &types.MetaTxParams{
-		ExpireHeight:  expireHeight,
-		Payload:       metaTxSignData.Data,
-		GasFeeSponsor: gasFeeSponsorAddr,
-		R:             r,
-		S:             s,
-		V:             v,
+		ExpireHeight:   expireHeight,
+		Payload:        metaTxSignData.Data,
+		GasFeeSponsor:  gasFeeSponsorAddr,
+		SponsorPercent: sponsorPercent,
+		R:              r,
+		S:              s,
+		V:              v,
 	}
 
 	metaTxDataBz, err := rlp.EncodeToBytes(metaTxData)
@@ -284,13 +287,23 @@ func TestMetaTx(t *testing.T) {
 		gasFeeSponsorAddrs = append(gasFeeSponsorAddrs, crypto.PubkeyToAddress(gasFeeSponsor.PublicKey))
 		pool.currentState.AddBalance(crypto.PubkeyToAddress(gasFeeSponsor.PublicKey), new(big.Int).Mul(big.NewInt(1e18), big.NewInt(1e4)))
 	}
-	userNum := 100
-	usersAccountsPrivateKey := make([]*ecdsa.PrivateKey, 0, userNum)
-	usersAccountsAddrs := make([]common.Address, 0, userNum)
-	for i := 0; i < userNum; i++ {
+	userNum1 := 100
+	usersAccountsWithoutBalancePrivateKey := make([]*ecdsa.PrivateKey, 0, userNum1)
+	usersAccountsWithoutBalanceAddrs := make([]common.Address, 0, userNum1)
+	for i := 0; i < userNum1; i++ {
 		userAcc, _ := crypto.GenerateKey()
-		usersAccountsPrivateKey = append(usersAccountsPrivateKey, userAcc)
-		usersAccountsAddrs = append(usersAccountsAddrs, crypto.PubkeyToAddress(userAcc.PublicKey))
+		usersAccountsWithoutBalancePrivateKey = append(usersAccountsWithoutBalancePrivateKey, userAcc)
+		usersAccountsWithoutBalanceAddrs = append(usersAccountsWithoutBalanceAddrs, crypto.PubkeyToAddress(userAcc.PublicKey))
+	}
+
+	userNum2 := 10
+	usersAccountsWithBalancePrivateKey := make([]*ecdsa.PrivateKey, 0, userNum2)
+	usersAccountsWithBalanceAddrs := make([]common.Address, 0, userNum2)
+	for i := 0; i < userNum2; i++ {
+		userAcc, _ := crypto.GenerateKey()
+		usersAccountsWithBalancePrivateKey = append(usersAccountsWithBalancePrivateKey, userAcc)
+		usersAccountsWithBalanceAddrs = append(usersAccountsWithBalanceAddrs, crypto.PubkeyToAddress(userAcc.PublicKey))
+		pool.currentState.AddBalance(crypto.PubkeyToAddress(userAcc.PublicKey), new(big.Int).Mul(big.NewInt(1e18), big.NewInt(1)))
 	}
 
 	chainId := params.TestChainConfig.ChainID
@@ -301,8 +314,8 @@ func TestMetaTx(t *testing.T) {
 
 	userNonceMap := make(map[common.Address]uint64)
 	for i := 0; i < sponsorNum; i++ {
-		for j := 0; j < userNum; j++ {
-			nonce := userNonceMap[usersAccountsAddrs[j]]
+		for j := 0; j < userNum1; j++ {
+			nonce := userNonceMap[usersAccountsWithoutBalanceAddrs[j]]
 			dynamicTx := &types.DynamicFeeTx{
 				ChainID:    chainId,
 				Nonce:      nonce,
@@ -314,13 +327,13 @@ func TestMetaTx(t *testing.T) {
 				Data:       approveABICallData,
 				AccessList: nil,
 			}
-			payload, err := generateMetaTxData(dynamicTx, expireHeight, gasFeeSponsorAddrs[i], gasFeeSponsorPrivateKeys[i])
+			payload, err := generateMetaTxData(dynamicTx, expireHeight, 100, gasFeeSponsorAddrs[i], gasFeeSponsorPrivateKeys[i])
 			require.NoError(t, err)
 
 			dynamicTx.Data = payload
 			tx := types.NewTx(dynamicTx)
 
-			txSignature, err := crypto.Sign(signer.Hash(tx).Bytes(), usersAccountsPrivateKey[j])
+			txSignature, err := crypto.Sign(signer.Hash(tx).Bytes(), usersAccountsWithoutBalancePrivateKey[j])
 			require.NoError(t, err)
 			signedTx, err := tx.WithSignature(signer, txSignature)
 			require.NoError(t, err)
@@ -328,25 +341,25 @@ func TestMetaTx(t *testing.T) {
 			err = pool.AddLocal(signedTx)
 			require.NoError(t, err)
 
-			userNonceMap[usersAccountsAddrs[j]] = nonce + 1
+			userNonceMap[usersAccountsWithoutBalanceAddrs[j]] = nonce + 1
 		}
 	}
 
 	all := pool.all.Count()
 	pending, queued := pool.Stats()
-	if pending != userNum*sponsorNum {
+	if pending != userNum1*sponsorNum {
 		t.Errorf("Wrong pending-count, want %d, have %d",
-			userNum*sponsorNum, pending)
+			userNum1*sponsorNum, pending)
 	}
 
 	// increase nonce so that later tx can only be included into txpool queue
-	for j := 0; j < userNum; j++ {
-		userNonceMap[usersAccountsAddrs[j]] = userNonceMap[usersAccountsAddrs[j]] + 1
+	for j := 0; j < userNum1; j++ {
+		userNonceMap[usersAccountsWithoutBalanceAddrs[j]] = userNonceMap[usersAccountsWithoutBalanceAddrs[j]] + 1
 	}
 
 	for i := 0; i < sponsorNum; i++ {
-		for j := 0; j < userNum; j++ {
-			nonce := userNonceMap[usersAccountsAddrs[j]]
+		for j := 0; j < userNum1; j++ {
+			nonce := userNonceMap[usersAccountsWithoutBalanceAddrs[j]]
 			dynamicTx := &types.DynamicFeeTx{
 				ChainID:    chainId,
 				Nonce:      nonce,
@@ -358,13 +371,13 @@ func TestMetaTx(t *testing.T) {
 				Data:       approveABICallData,
 				AccessList: nil,
 			}
-			payload, err := generateMetaTxData(dynamicTx, expireHeight, gasFeeSponsorAddrs[i], gasFeeSponsorPrivateKeys[i])
+			payload, err := generateMetaTxData(dynamicTx, expireHeight, 100, gasFeeSponsorAddrs[i], gasFeeSponsorPrivateKeys[i])
 			require.NoError(t, err)
 
 			dynamicTx.Data = payload
 			tx := types.NewTx(dynamicTx)
 
-			txSignature, err := crypto.Sign(signer.Hash(tx).Bytes(), usersAccountsPrivateKey[j])
+			txSignature, err := crypto.Sign(signer.Hash(tx).Bytes(), usersAccountsWithoutBalancePrivateKey[j])
 			require.NoError(t, err)
 			signedTx, err := tx.WithSignature(signer, txSignature)
 			require.NoError(t, err)
@@ -372,23 +385,96 @@ func TestMetaTx(t *testing.T) {
 			err = pool.AddLocal(signedTx)
 			require.NoError(t, err)
 
-			userNonceMap[usersAccountsAddrs[j]] = nonce + 1
+			userNonceMap[usersAccountsWithoutBalanceAddrs[j]] = nonce + 1
 		}
 	}
 
 	all = pool.all.Count()
 	pending, queued = pool.Stats()
-
-	if pending != userNum*sponsorNum {
+	if pending != userNum1*sponsorNum {
 		t.Errorf("Wrong pending-count, want %d, have %d",
-			userNum*sponsorNum, pending)
+			userNum1*sponsorNum, pending)
 	}
-	if queued != userNum*sponsorNum {
+	if queued != userNum1*sponsorNum {
 		t.Errorf("Wrong queued-count, want %d, have %d",
-			userNum*sponsorNum, pending)
+			userNum1*sponsorNum, pending)
 	}
-	if all != 2*userNum*sponsorNum {
+	if all != 2*userNum1*sponsorNum {
 		t.Errorf("Wrong queued-count, want %d, have %d",
-			2*userNum*sponsorNum, all)
+			2*userNum1*sponsorNum, all)
+	}
+
+	{
+		nonce := userNonceMap[usersAccountsWithoutBalanceAddrs[0]]
+		dynamicTx := &types.DynamicFeeTx{
+			ChainID:    chainId,
+			Nonce:      nonce,
+			GasTipCap:  big.NewInt(1e9),
+			GasFeeCap:  big.NewInt(1e9),
+			Gas:        4700000,
+			To:         &to,
+			Value:      big.NewInt(0),
+			Data:       approveABICallData,
+			AccessList: nil,
+		}
+		payload, err := generateMetaTxData(dynamicTx, expireHeight, 90, gasFeeSponsorAddrs[0], gasFeeSponsorPrivateKeys[0])
+		require.NoError(t, err)
+
+		dynamicTx.Data = payload
+		tx := types.NewTx(dynamicTx)
+
+		txSignature, err := crypto.Sign(signer.Hash(tx).Bytes(), usersAccountsWithoutBalancePrivateKey[0])
+		require.NoError(t, err)
+		signedTx, err := tx.WithSignature(signer, txSignature)
+		require.NoError(t, err)
+
+		err = pool.AddLocal(signedTx)
+		require.Equal(t, err, core.ErrInsufficientFunds)
+	}
+
+	for i := 0; i < sponsorNum; i++ {
+		for j := 0; j < userNum2; j++ {
+			nonce := userNonceMap[usersAccountsWithBalanceAddrs[j]]
+			dynamicTx := &types.DynamicFeeTx{
+				ChainID:    chainId,
+				Nonce:      nonce,
+				GasTipCap:  big.NewInt(1e9),
+				GasFeeCap:  big.NewInt(1e9),
+				Gas:        4700000,
+				To:         &to,
+				Value:      big.NewInt(0),
+				Data:       approveABICallData,
+				AccessList: nil,
+			}
+			payload, err := generateMetaTxData(dynamicTx, expireHeight, 90, gasFeeSponsorAddrs[i], gasFeeSponsorPrivateKeys[i])
+			require.NoError(t, err)
+
+			dynamicTx.Data = payload
+			tx := types.NewTx(dynamicTx)
+
+			txSignature, err := crypto.Sign(signer.Hash(tx).Bytes(), usersAccountsWithBalancePrivateKey[j])
+			require.NoError(t, err)
+			signedTx, err := tx.WithSignature(signer, txSignature)
+			require.NoError(t, err)
+
+			err = pool.AddLocal(signedTx)
+			require.NoError(t, err)
+
+			userNonceMap[usersAccountsWithBalanceAddrs[j]] = nonce + 1
+		}
+	}
+	all1 := pool.all.Count()
+	pending1, queued1 := pool.Stats()
+	if pending1-pending != userNum2*sponsorNum {
+		t.Errorf("Wrong pending-count delta, want %d, have %d",
+			userNum2*sponsorNum, pending1-pending)
+	}
+	if queued1-queued != 0 {
+		t.Errorf("Wrong queued-count delta, want %d, have %d",
+			0, queued1-queued)
+	}
+	if all1-all != userNum2*sponsorNum {
+		t.Errorf("Wrong queued-count delta, want %d, have %d",
+			userNum2*sponsorNum, all1-all)
 	}
 }
