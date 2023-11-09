@@ -320,7 +320,7 @@ func TestMetaTx(t *testing.T) {
 				ChainID:    chainId,
 				Nonce:      nonce,
 				GasTipCap:  big.NewInt(1e9),
-				GasFeeCap:  big.NewInt(1e9),
+				GasFeeCap:  big.NewInt(2e9),
 				Gas:        4700000,
 				To:         &to,
 				Value:      big.NewInt(0),
@@ -364,7 +364,7 @@ func TestMetaTx(t *testing.T) {
 				ChainID:    chainId,
 				Nonce:      nonce,
 				GasTipCap:  big.NewInt(1e9),
-				GasFeeCap:  big.NewInt(1e9),
+				GasFeeCap:  big.NewInt(2e9),
 				Gas:        4700000,
 				To:         &to,
 				Value:      big.NewInt(0),
@@ -410,7 +410,7 @@ func TestMetaTx(t *testing.T) {
 			ChainID:    chainId,
 			Nonce:      nonce,
 			GasTipCap:  big.NewInt(1e9),
-			GasFeeCap:  big.NewInt(1e9),
+			GasFeeCap:  big.NewInt(2e9),
 			Gas:        4700000,
 			To:         &to,
 			Value:      big.NewInt(0),
@@ -439,7 +439,7 @@ func TestMetaTx(t *testing.T) {
 				ChainID:    chainId,
 				Nonce:      nonce,
 				GasTipCap:  big.NewInt(1e9),
-				GasFeeCap:  big.NewInt(1e9),
+				GasFeeCap:  big.NewInt(2e9),
 				Gas:        4700000,
 				To:         &to,
 				Value:      big.NewInt(0),
@@ -477,4 +477,123 @@ func TestMetaTx(t *testing.T) {
 		t.Errorf("Wrong queued-count delta, want %d, have %d",
 			userNum2*sponsorNum, all1-all)
 	}
+}
+
+// Tests there are meta txs and normal txs from the same user
+func TestMixedMetaTxs(t *testing.T) {
+	t.Parallel()
+	// Create the pool to test the pricing enforcement with
+	statedb, _ := state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
+	blockchain := newTestBlockChain(10000000, statedb, new(event.Feed))
+	pool := NewTxPool(testTxPoolConfig, eip1559Config, blockchain)
+	defer pool.Stop()
+
+	gasFeeSponsorPrivateKey, _ := crypto.GenerateKey()
+	gasFeeSponsorAddr := crypto.PubkeyToAddress(gasFeeSponsorPrivateKey.PublicKey)
+
+	userAccPrivateKey, _ := crypto.GenerateKey()
+	userAccAddr := crypto.PubkeyToAddress(userAccPrivateKey.PublicKey)
+
+	pool.currentState.AddBalance(gasFeeSponsorAddr, big.NewInt(1e18))
+	pool.currentState.AddBalance(userAccAddr, big.NewInt(188e14))
+
+	chainId := params.TestChainConfig.ChainID
+	signer := types.LatestSignerForChainID(chainId)
+	approveABICallData, _ := hexutil.Decode("0x095ea7b30000000000000000000000001f9090aae28b8a3dceadf281b0f12828e676c3260000000000000000000000000000000000000000000000000de0b6b3a7640000")
+	to := common.HexToAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+	expireHeight := uint64(20_000_010)
+
+	nonce := uint64(0)
+
+	dynamicTx := &types.DynamicFeeTx{
+		ChainID:    chainId,
+		Nonce:      nonce,
+		GasTipCap:  big.NewInt(1e9),
+		GasFeeCap:  big.NewInt(2e9),
+		Gas:        4700000,
+		To:         &to,
+		Value:      big.NewInt(0),
+		Data:       approveABICallData,
+		AccessList: nil,
+	}
+	tx := types.NewTx(dynamicTx)
+	txSignature, err := crypto.Sign(signer.Hash(tx).Bytes(), userAccPrivateKey)
+	require.NoError(t, err)
+	signedTx, err := tx.WithSignature(signer, txSignature)
+	require.NoError(t, err)
+	err = pool.AddLocal(signedTx)
+	require.NoError(t, err)
+	nonce++
+
+	dynamicTx = &types.DynamicFeeTx{
+		ChainID:    chainId,
+		Nonce:      nonce,
+		GasTipCap:  big.NewInt(1e9),
+		GasFeeCap:  big.NewInt(2e9),
+		Gas:        470000,
+		To:         &to,
+		Value:      big.NewInt(0),
+		Data:       approveABICallData,
+		AccessList: nil,
+	}
+	payload, err := generateMetaTxData(dynamicTx, expireHeight, 100, gasFeeSponsorAddr, gasFeeSponsorPrivateKey)
+	require.NoError(t, err)
+	dynamicTx.Data = payload
+	tx = types.NewTx(dynamicTx)
+	txSignature, err = crypto.Sign(signer.Hash(tx).Bytes(), userAccPrivateKey)
+	require.NoError(t, err)
+	signedTx, err = tx.WithSignature(signer, txSignature)
+	require.NoError(t, err)
+	err = pool.AddLocal(signedTx)
+	require.NoError(t, err)
+	nonce++
+
+	dynamicTx = &types.DynamicFeeTx{
+		ChainID:    chainId,
+		Nonce:      nonce,
+		GasTipCap:  big.NewInt(1e9),
+		GasFeeCap:  big.NewInt(2e9),
+		Gas:        470000,
+		To:         &to,
+		Value:      big.NewInt(0),
+		Data:       approveABICallData,
+		AccessList: nil,
+	}
+	payload, err = generateMetaTxData(dynamicTx, expireHeight, 100, gasFeeSponsorAddr, gasFeeSponsorPrivateKey)
+	require.NoError(t, err)
+	dynamicTx.Data = payload
+	tx = types.NewTx(dynamicTx)
+	txSignature, err = crypto.Sign(signer.Hash(tx).Bytes(), userAccPrivateKey)
+	require.NoError(t, err)
+	signedTx, err = tx.WithSignature(signer, txSignature)
+	require.NoError(t, err)
+	err = pool.AddLocal(signedTx)
+	require.NoError(t, err)
+	nonce++
+
+	pending, _ := pool.Stats()
+	require.Equal(t, 3, pending)
+
+	dynamicTx = &types.DynamicFeeTx{
+		ChainID:    chainId,
+		Nonce:      nonce,
+		GasTipCap:  big.NewInt(1e9),
+		GasFeeCap:  big.NewInt(2e9),
+		Gas:        4700000,
+		To:         &to,
+		Value:      big.NewInt(0),
+		Data:       approveABICallData,
+		AccessList: nil,
+	}
+	tx = types.NewTx(dynamicTx)
+	txSignature, err = crypto.Sign(signer.Hash(tx).Bytes(), userAccPrivateKey)
+	require.NoError(t, err)
+	signedTx, err = tx.WithSignature(signer, txSignature)
+	require.NoError(t, err)
+	err = pool.AddLocal(signedTx)
+	require.NoError(t, err)
+	nonce++
+
+	pending, _ = pool.Stats()
+	require.Equal(t, 4, pending)
 }

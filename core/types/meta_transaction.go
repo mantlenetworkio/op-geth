@@ -38,14 +38,6 @@ type MetaTxParams struct {
 	S *big.Int
 }
 
-func (mxParams *MetaTxParams) CalculateSponsorAndSelfAmount(amount *big.Int) (*big.Int, *big.Int) {
-	sponsorAmount := new(big.Int).Div(
-		new(big.Int).Mul(amount, big.NewInt(int64(mxParams.SponsorPercent))),
-		big.NewInt(OneHundredPercent))
-	selfAmount := new(big.Int).Sub(amount, sponsorAmount)
-	return sponsorAmount, selfAmount
-}
-
 type MetaTxParamsCache struct {
 	metaTxParams *MetaTxParams
 }
@@ -62,6 +54,17 @@ type MetaTxSignData struct {
 	AccessList     AccessList
 	ExpireHeight   uint64
 	SponsorPercent uint64
+}
+
+func CalculateSponsorPercentAmount(mxParams *MetaTxParams, amount *big.Int) (*big.Int, *big.Int) {
+	if mxParams == nil {
+		return nil, nil
+	}
+	sponsorAmount := new(big.Int).Div(
+		new(big.Int).Mul(amount, big.NewInt(int64(mxParams.SponsorPercent))),
+		big.NewInt(OneHundredPercent))
+	selfAmount := new(big.Int).Sub(amount, sponsorAmount)
+	return sponsorAmount, selfAmount
 }
 
 func DecodeMetaTxParams(txData []byte) (*MetaTxParams, error) {

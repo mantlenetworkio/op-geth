@@ -25,6 +25,7 @@ import (
 	cmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"golang.org/x/crypto/sha3"
 )
@@ -270,10 +271,12 @@ func (st *StateTransition) buyGas() error {
 	}
 
 	if st.msg.MetaTxParams != nil {
-		sponsorAmount, selfPayAmount := st.msg.MetaTxParams.CalculateSponsorAndSelfAmount(balanceCheck)
+		pureGasFeeValue := new(big.Int).Sub(balanceCheck, st.msg.Value)
+		sponsorAmount, selfPayAmount := types.CalculateSponsorPercentAmount(st.msg.MetaTxParams, pureGasFeeValue)
 		if have, want := st.state.GetBalance(st.msg.MetaTxParams.GasFeeSponsor), sponsorAmount; have.Cmp(want) < 0 {
-			return fmt.Errorf("%w: gasFeeSponsor %v have %v want %v", ErrInsufficientFunds, st.msg.MetaTxParams.GasFeeSponsor.Hex(), have, want)
+			return fmt.Errorf("%w: gas fee sponsor %v have %v want %v", ErrInsufficientFunds, st.msg.MetaTxParams.GasFeeSponsor.Hex(), have, want)
 		}
+		selfPayAmount = new(big.Int).Add(selfPayAmount, st.msg.Value)
 		if have, want := st.state.GetBalance(st.msg.From), selfPayAmount; have.Cmp(want) < 0 {
 			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From.Hex(), have, want)
 		}
@@ -290,9 +293,12 @@ func (st *StateTransition) buyGas() error {
 
 	st.initialGas = st.msg.GasLimit
 	if st.msg.MetaTxParams != nil {
-		sponsorAmount, selfPayAmount := st.msg.MetaTxParams.CalculateSponsorAndSelfAmount(balanceCheck)
+		sponsorAmount, selfPayAmount := types.CalculateSponsorPercentAmount(st.msg.MetaTxParams, mgval)
 		st.state.SubBalance(st.msg.MetaTxParams.GasFeeSponsor, sponsorAmount)
-		st.state.SubBalance(st.msg.MetaTxParams.GasFeeSponsor, selfPayAmount)
+		st.state.SubBalance(st.msg.From, selfPayAmount)
+		log.Debug("BuyGas for metaTx",
+			"sponsor", st.msg.MetaTxParams.GasFeeSponsor.String(), "amount", sponsorAmount.String(),
+			"user", st.msg.From.String(), "amount", selfPayAmount.String())
 	} else {
 		st.state.SubBalance(st.msg.From, mgval)
 	}
@@ -566,9 +572,12 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 	// Return ETH for remaining gas, exchanged at the original rate.
 	remaining := new(big.Int).Mul(new(big.Int).SetUint64(st.gasRemaining), st.msg.GasPrice)
 	if st.msg.MetaTxParams != nil {
-		sponsorRefundAmount, selfRefundAmount := st.msg.MetaTxParams.CalculateSponsorAndSelfAmount(remaining)
+		sponsorRefundAmount, selfRefundAmount := types.CalculateSponsorPercentAmount(st.msg.MetaTxParams, remaining)
 		st.state.AddBalance(st.msg.MetaTxParams.GasFeeSponsor, sponsorRefundAmount)
 		st.state.AddBalance(st.msg.From, selfRefundAmount)
+		log.Debug("RefundGas for metaTx",
+			"sponsor", st.msg.MetaTxParams.GasFeeSponsor.String(), "refundAmount", sponsorRefundAmount.String(),
+			"user", st.msg.From.String(), "refundAmount", selfRefundAmount.String())
 	} else {
 		st.state.AddBalance(st.msg.From, remaining)
 	}

@@ -387,7 +387,9 @@ func (pool *TxPool) validateTx(ctx context.Context, tx *types.Transaction) error
 		if metaTxParams.ExpireHeight < header.Number.Uint64() {
 			return types.ErrExpiredMetaTx
 		}
-		sponsorAmount, selfPayAmount := metaTxParams.CalculateSponsorAndSelfAmount(tx.Cost())
+		txGasCost := new(big.Int).Mul(tx.GasPrice(), new(big.Int).SetUint64(tx.Gas()))
+		sponsorAmount, selfPayAmount := types.CalculateSponsorPercentAmount(metaTxParams, txGasCost)
+		selfPayAmount = new(big.Int).Add(selfPayAmount, tx.Value())
 		sponsorBalance := currentState.GetBalance(metaTxParams.GasFeeSponsor)
 		if sponsorBalance.Cmp(sponsorAmount) < 0 {
 			return core.ErrInsufficientFunds
