@@ -39,8 +39,6 @@ type DepositTx struct {
 	Gas uint64
 	// Field indicating if this transaction is exempt from the L2 gas limit.
 	IsSystemTransaction bool
-	// Field indicating if this deposit transaction should be packed into batch
-	IsBroadcastTransaction bool
 	// EthValue means L2 BVM_ETH mint tag, nil means that there is no need to mint BVM_ETH.
 	EthValue *big.Int `rlp:"nil"`
 	// Normal Tx data
@@ -50,16 +48,15 @@ type DepositTx struct {
 // copy creates a deep copy of the transaction data and initializes all fields.
 func (tx *DepositTx) copy() TxData {
 	cpy := &DepositTx{
-		SourceHash:             tx.SourceHash,
-		From:                   tx.From,
-		To:                     copyAddressPtr(tx.To),
-		Mint:                   nil,
-		Value:                  new(big.Int),
-		Gas:                    tx.Gas,
-		IsSystemTransaction:    tx.IsSystemTransaction,
-		IsBroadcastTransaction: tx.IsBroadcastTransaction,
-		Data:                   common.CopyBytes(tx.Data),
-		EthValue:               nil,
+		SourceHash:          tx.SourceHash,
+		From:                tx.From,
+		To:                  copyAddressPtr(tx.To),
+		Mint:                nil,
+		Value:               new(big.Int),
+		Gas:                 tx.Gas,
+		IsSystemTransaction: tx.IsSystemTransaction,
+		Data:                common.CopyBytes(tx.Data),
+		EthValue:            nil,
 	}
 	if tx.Mint != nil {
 		cpy.Mint = new(big.Int).Set(tx.Mint)
@@ -86,7 +83,6 @@ func (tx *DepositTx) value() *big.Int        { return tx.Value }
 func (tx *DepositTx) nonce() uint64          { return 0 }
 func (tx *DepositTx) to() *common.Address    { return tx.To }
 func (tx *DepositTx) isSystemTx() bool       { return tx.IsSystemTransaction }
-func (tx *DepositTx) isBroadcastTx() bool    { return tx.IsBroadcastTransaction }
 
 func (tx *DepositTx) effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int {
 	return dst.Set(new(big.Int))

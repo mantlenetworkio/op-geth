@@ -124,6 +124,12 @@ type storedReceiptRLP struct {
 	// DepositNonce was introduced in Regolith to store the actual nonce used by deposit transactions.
 	// Must be nil for any transactions prior to Regolith or that aren't deposit transactions.
 	DepositNonce *uint64 `rlp:"optional"`
+
+	// used to record calculating l1 fee for txs from Layer2
+	L1GasUsed  *big.Int `rlp:"optional"`
+	L1GasPrice *big.Int `rlp:"optional"`
+	L1Fee      *big.Int `rlp:"optional"`
+	FeeScalar  string   `rlp:"optional"`
 }
 
 // LegacyOptimismStoredReceiptRLP is the pre bedrock storage encoding of a
@@ -378,6 +384,22 @@ func (r *ReceiptForStorage) EncodeRLP(_w io.Writer) error {
 	if r.DepositNonce != nil {
 		w.WriteUint64(*r.DepositNonce)
 	}
+
+	feeScalar := ""
+	if r.FeeScalar != nil {
+		feeScalar = r.FeeScalar.String()
+		w.WriteString(feeScalar)
+	}
+	if r.L1GasPrice != nil {
+		w.WriteBigInt(r.L1GasPrice)
+	}
+	if r.L1GasUsed != nil {
+		w.WriteBigInt(r.L1GasUsed)
+	}
+	if r.L1Fee != nil {
+		w.WriteBigInt(r.L1Fee)
+	}
+
 	w.ListEnd(outerList)
 	return w.Flush()
 }
@@ -441,6 +463,21 @@ func decodeStoredReceiptRLP(r *ReceiptForStorage, blob []byte) error {
 	if stored.DepositNonce != nil {
 		r.DepositNonce = stored.DepositNonce
 	}
+
+	scalar := new(big.Float)
+	if stored.FeeScalar != "" {
+		var ok bool
+		scalar, ok = scalar.SetString(stored.FeeScalar)
+		if !ok {
+			return errors.New("cannot parse fee scalar")
+		}
+	}
+
+	r.L1GasUsed = stored.L1GasUsed
+	r.L1GasPrice = stored.L1GasPrice
+	r.L1Fee = stored.L1Fee
+	r.FeeScalar = scalar
+
 	return nil
 }
 
@@ -522,37 +559,6 @@ func (rs Receipts) DeriveFields(config *params.ChainConfig, hash common.Hash, nu
 			rs[i].Logs[j].TxIndex = uint(i)
 			rs[i].Logs[j].Index = logIndex
 			logIndex++
-		}
-	}
-	if config.Optimism != nil && len(txs) >= 2 { // need at least a L1 info tx and a token ratio info tx
-		numDepositTx := 0
-		for _, tx := range txs {
-			if tx.IsDepositTx() {
-				numDepositTx++
-			}
-		}
-		if dataL1Info, dataTokenRatio := txs[0].Data(), txs[numDepositTx-1].Data(); len(dataL1Info) >= 4+32*8 && len(dataTokenRatio) >= 4+32*1 {
-			// L1 info: function selector + 8 arguments to setL1BlockValues
-			// Token ratio info: function selector + 1 arguments to setTokenRatio
-			l1Basefee := new(big.Int).SetBytes(dataL1Info[4+32*2 : 4+32*3])      // L1Info arg index 2
-			overhead := new(big.Int).SetBytes(dataL1Info[4+32*6 : 4+32*7])       // L1Info arg index 6
-			scalar := new(big.Int).SetBytes(dataL1Info[4+32*7 : 4+32*8])         // L1Info arg index 7
-			tokenRatio := new(big.Int).SetBytes(dataTokenRatio[4+32*0 : 4+32*1]) // TokenRatio arg index 0
-			fscalar := new(big.Float).SetInt(scalar)                             // legacy: format fee scalar as big Float
-			fdivisor := new(big.Float).SetUint64(1_000_000)                      // 10**6, i.e. 6 decimals
-			feeScalar := new(big.Float).Quo(fscalar, fdivisor)
-			for i := 0; i < len(rs); i++ {
-				if !txs[i].IsDepositTx() {
-					gas := txs[i].RollupDataGas().DataGas(time, config)
-					rs[i].L1GasPrice = l1Basefee
-					// GasUsed reported in receipt should include the overhead
-					rs[i].L1GasUsed = new(big.Int).Add(new(big.Int).SetUint64(gas), overhead)
-					rs[i].L1Fee = L1Cost(gas, l1Basefee, overhead, scalar, tokenRatio)
-					rs[i].FeeScalar = feeScalar
-				}
-			}
-		} else {
-			return fmt.Errorf("L1 info tx and token ratio tx only has %d bytes and %d bytes respectively, cannot read gas price parameters", len(dataL1Info), len(dataTokenRatio))
 		}
 	}
 

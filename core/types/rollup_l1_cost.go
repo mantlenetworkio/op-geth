@@ -49,10 +49,14 @@ var (
 	L1BaseFeeSlot  = common.BigToHash(big.NewInt(1))
 	OverheadSlot   = common.BigToHash(big.NewInt(5))
 	ScalarSlot     = common.BigToHash(big.NewInt(6))
-	TokenRatioSlot = common.BigToHash(big.NewInt(7))
+	TokenRatioSlot = common.BigToHash(big.NewInt(0))
 )
 
-var L1BlockAddr = common.HexToAddress("0x4200000000000000000000000000000000000015")
+var (
+	L1BlockAddr   = common.HexToAddress("0x4200000000000000000000000000000000000015")
+	GasOracleAddr = common.HexToAddress("0x420000000000000000000000000000000000000F")
+	Decimals      = big.NewInt(1_000_000)
+)
 
 // NewL1CostFunc returns a function used for calculating L1 fee cost.
 // This depends on the oracles because gas costs can change over time.
@@ -69,7 +73,7 @@ func NewL1CostFunc(config *params.ChainConfig, statedb StateGetter) L1CostFunc {
 			l1BaseFee = statedb.GetState(L1BlockAddr, L1BaseFeeSlot).Big()
 			overhead = statedb.GetState(L1BlockAddr, OverheadSlot).Big()
 			scalar = statedb.GetState(L1BlockAddr, ScalarSlot).Big()
-			tokenRatio = statedb.GetState(L1BlockAddr, TokenRatioSlot).Big()
+			tokenRatio = statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
 			cacheBlockNum = blockNum
 		}
 		return L1Cost(rollupDataGas, l1BaseFee, overhead, scalar, tokenRatio)
@@ -82,5 +86,34 @@ func L1Cost(rollupDataGas uint64, l1BaseFee, overhead, scalar, tokenRatio *big.I
 	l1Cost := l1GasUsed.Mul(l1GasUsed, l1BaseFee)
 	l1Cost = l1Cost.Mul(l1Cost, scalar)
 	l1Cost = l1Cost.Mul(l1Cost, tokenRatio)
-	return l1Cost.Div(l1Cost, big.NewInt(1_000_000))
+	return l1Cost.Div(l1Cost, Decimals)
+}
+
+// DeriveL1GasInfo reads L1 gas related information to be included
+// on the receipt
+func DeriveL1GasInfo(state StateGetter) (*big.Int, *big.Int, *big.Int, *big.Float, *big.Int) {
+	l1BaseFee, overhead, scalar, scaled := readL1BlockStorageSlots(L1BlockAddr, state)
+	tokenRatio := readGPOStorageSlots(GasOracleAddr, state)
+	return l1BaseFee, overhead, scalar, scaled, tokenRatio
+}
+
+func readL1BlockStorageSlots(addr common.Address, state StateGetter) (*big.Int, *big.Int, *big.Int, *big.Float) {
+	l1BaseFee := state.GetState(addr, L1BaseFeeSlot)
+	overhead := state.GetState(addr, OverheadSlot)
+	scalar := state.GetState(addr, ScalarSlot)
+	scaled := scaleDecimals(scalar.Big(), Decimals)
+	return l1BaseFee.Big(), overhead.Big(), scalar.Big(), scaled
+}
+
+func readGPOStorageSlots(addr common.Address, state StateGetter) *big.Int {
+	tokenRatio := state.GetState(addr, TokenRatioSlot)
+	return tokenRatio.Big()
+}
+
+// scaleDecimals will scale a value by decimals
+func scaleDecimals(scalar, divisor *big.Int) *big.Float {
+	fscalar := new(big.Float).SetInt(scalar)
+	fdivisor := new(big.Float).SetInt(divisor)
+	// fscalar / fdivisor
+	return new(big.Float).Quo(fscalar, fdivisor)
 }
