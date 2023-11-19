@@ -151,8 +151,8 @@ var defaultCacheConfig = &CacheConfig{
 	SnapshotWait:   true,
 }
 
-var (
-	DefaultMantleBlockGasLimit = uint64(1125899906842624)
+const (
+	DefaultMantleBlockGasLimit = 0x4000000000000
 )
 
 // BlockChain represents the canonical chain given a database with a genesis

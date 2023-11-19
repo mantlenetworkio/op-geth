@@ -584,11 +584,10 @@ func DefaultGoerliGenesisBlock() *Genesis {
 // DefaultSepoliaGenesisBlock returns the Sepolia network genesis block.
 func DefaultSepoliaGenesisBlock() *Genesis {
 	return &Genesis{
-		Config:    params.SepoliaChainConfig,
-		Nonce:     0,
-		ExtraData: []byte("Sepolia, Athens, Attica, Greece!"),
-		//GasLimit:   0x1c9c380,
-		GasLimit:   0x4000000000000,
+		Config:     params.SepoliaChainConfig,
+		Nonce:      0,
+		ExtraData:  []byte("Sepolia, Athens, Attica, Greece!"),
+		GasLimit:   0x1c9c380,
 		Difficulty: big.NewInt(0x20000),
 		Timestamp:  1633267481,
 		Alloc:      decodePrealloc(sepoliaAllocData),
