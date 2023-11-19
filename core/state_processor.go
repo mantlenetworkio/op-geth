@@ -142,6 +142,16 @@ func applyTransaction(msg *Message, config *params.ChainConfig, gp *GasPool, sta
 		receipt.DepositNonce = &nonce
 	}
 
+	// used to record calculating l1 fee for txs from Layer2
+	if !msg.IsDepositTx {
+		gas := tx.RollupDataGas().DataGas(evm.Context.Time, config)
+		receipt.L1GasUsed = new(big.Int).Add(new(big.Int).SetUint64(gas), overhead)
+		receipt.L1GasPrice = l1BaseFee
+		receipt.L1Fee = types.L1Cost(gas, l1BaseFee, overhead, scalar, tokenRatio)
+		receipt.FeeScalar = scaled
+		receipt.TokenRatio = tokenRatio
+	}
+
 	// If the transaction created a contract, store the creation address in the receipt.
 	if msg.To == nil {
 		receipt.ContractAddress = crypto.CreateAddress(evm.TxContext.Origin, nonce)
@@ -153,16 +163,6 @@ func applyTransaction(msg *Message, config *params.ChainConfig, gp *GasPool, sta
 	receipt.BlockHash = blockHash
 	receipt.BlockNumber = blockNumber
 	receipt.TransactionIndex = uint(statedb.TxIndex())
-
-	// used to record calculating l1 fee for txs from Layer2
-	if !msg.IsDepositTx {
-		gas := tx.RollupDataGas().DataGas(evm.Context.Time, config)
-		receipt.L1GasPrice = l1BaseFee
-		receipt.L1GasUsed = new(big.Int).Add(new(big.Int).SetUint64(gas), overhead)
-		receipt.L1Fee = types.L1Cost(gas, l1BaseFee, overhead, scalar, tokenRatio)
-		receipt.FeeScalar = scaled
-	}
-
 	return receipt, err
 }
 

@@ -75,11 +75,12 @@ type Receipt struct {
 	BlockNumber      *big.Int    `json:"blockNumber,omitempty"`
 	TransactionIndex uint        `json:"transactionIndex"`
 
-	// OVM legacy: extend receipts with their L1 price (if a rollup tx)
+	// Optimism: extend receipts with their L1 price (if a rollup tx)
 	L1GasPrice *big.Int   `json:"l1GasPrice,omitempty"`
 	L1GasUsed  *big.Int   `json:"l1GasUsed,omitempty"`
 	L1Fee      *big.Int   `json:"l1Fee,omitempty"`
 	FeeScalar  *big.Float `json:"l1FeeScalar,omitempty"`
+	TokenRatio *big.Int   `json:"tokenRatio,omitempty"`
 }
 
 type receiptMarshaling struct {
@@ -96,6 +97,7 @@ type receiptMarshaling struct {
 	L1GasUsed  *hexutil.Big
 	L1Fee      *hexutil.Big
 	FeeScalar  *big.Float
+	TokenRatio *hexutil.Big
 }
 
 // receiptRLP is the consensus encoding of a receipt.
@@ -120,7 +122,7 @@ type depositReceiptRlp struct {
 type storedReceiptRLP struct {
 	PostStateOrStatus []byte
 	CumulativeGasUsed uint64
-	Logs              []*Log
+	Logs              []*LogForStorage
 	// DepositNonce was introduced in Regolith to store the actual nonce used by deposit transactions.
 	// Must be nil for any transactions prior to Regolith or that aren't deposit transactions.
 	DepositNonce *uint64 `rlp:"optional"`
@@ -130,6 +132,7 @@ type storedReceiptRLP struct {
 	L1GasPrice *big.Int `rlp:"optional"`
 	L1Fee      *big.Int `rlp:"optional"`
 	FeeScalar  string   `rlp:"optional"`
+	TokenRatio *big.Int `rlp:"optional"`
 }
 
 // LegacyOptimismStoredReceiptRLP is the pre bedrock storage encoding of a
@@ -369,39 +372,27 @@ type ReceiptForStorage Receipt
 
 // EncodeRLP implements rlp.Encoder, and flattens all content fields of a receipt
 // into an RLP stream.
-func (r *ReceiptForStorage) EncodeRLP(_w io.Writer) error {
-	w := rlp.NewEncoderBuffer(_w)
-	outerList := w.List()
-	w.WriteBytes((*Receipt)(r).statusEncoding())
-	w.WriteUint64(r.CumulativeGasUsed)
-	logList := w.List()
-	for _, log := range r.Logs {
-		if err := rlp.Encode(w, log); err != nil {
-			return err
-		}
-	}
-	w.ListEnd(logList)
-	if r.DepositNonce != nil {
-		w.WriteUint64(*r.DepositNonce)
-	}
-
+func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 	feeScalar := ""
 	if r.FeeScalar != nil {
 		feeScalar = r.FeeScalar.String()
-		w.WriteString(feeScalar)
 	}
-	if r.L1GasPrice != nil {
-		w.WriteBigInt(r.L1GasPrice)
-	}
-	if r.L1GasUsed != nil {
-		w.WriteBigInt(r.L1GasUsed)
-	}
-	if r.L1Fee != nil {
-		w.WriteBigInt(r.L1Fee)
+	enc := &storedReceiptRLP{
+		PostStateOrStatus: (*Receipt)(r).statusEncoding(),
+		CumulativeGasUsed: r.CumulativeGasUsed,
+		Logs:              make([]*LogForStorage, len(r.Logs)),
+		DepositNonce:      r.DepositNonce,
+		L1GasUsed:         r.L1GasUsed,
+		L1GasPrice:        r.L1GasPrice,
+		L1Fee:             r.L1Fee,
+		FeeScalar:         feeScalar,
+		TokenRatio:        r.TokenRatio,
 	}
 
-	w.ListEnd(outerList)
-	return w.Flush()
+	for i, log := range r.Logs {
+		enc.Logs[i] = (*LogForStorage)(log)
+	}
+	return rlp.Encode(w, enc)
 }
 
 // DecodeRLP implements rlp.Decoder, and loads both consensus and implementation
@@ -458,7 +449,10 @@ func decodeStoredReceiptRLP(r *ReceiptForStorage, blob []byte) error {
 		return err
 	}
 	r.CumulativeGasUsed = stored.CumulativeGasUsed
-	r.Logs = stored.Logs
+	r.Logs = make([]*Log, len(stored.Logs))
+	for i, log := range stored.Logs {
+		r.Logs[i] = (*Log)(log)
+	}
 	r.Bloom = CreateBloom(Receipts{(*Receipt)(r)})
 	if stored.DepositNonce != nil {
 		r.DepositNonce = stored.DepositNonce
@@ -477,6 +471,7 @@ func decodeStoredReceiptRLP(r *ReceiptForStorage, blob []byte) error {
 	r.L1GasPrice = stored.L1GasPrice
 	r.L1Fee = stored.L1Fee
 	r.FeeScalar = scalar
+	r.TokenRatio = stored.TokenRatio
 
 	return nil
 }
