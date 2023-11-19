@@ -531,7 +531,7 @@ func (rs Receipts) DeriveFields(config *params.ChainConfig, hash common.Hash, nu
 			// Deriving the signer is expensive, only do if it's actually needed
 			from, _ := Sender(signer, txs[i])
 			nonce := txs[i].Nonce()
-			if rs[i].DepositNonce != nil {
+			if txs[i].IsDepositTx() && rs[i].DepositNonce != nil {
 				nonce = *rs[i].DepositNonce
 			}
 			rs[i].ContractAddress = crypto.CreateAddress(from, nonce)
