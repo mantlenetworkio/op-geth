@@ -522,8 +522,8 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 				return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, l1Gas)
 			}
 		}
-		if st.gasRemaining < gas {
-			return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, gas)
+		if st.gasRemaining < l1Gas {
+			return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, l1Gas)
 		}
 		st.gasRemaining -= l1Gas
 		if tokenRatio > 0 {
