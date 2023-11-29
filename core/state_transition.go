@@ -190,6 +190,7 @@ func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.In
 		ETHValue:          tx.ETHValue(),
 		MetaTxParams:      metaTxParams,
 		SkipAccountChecks: false,
+		RunMode:           CommitMode,
 	}
 	// If baseFee provided, set gasPrice to effectiveGasPrice.
 	if baseFee != nil {
@@ -613,7 +614,7 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	// Note optimismConfig will not be nil if rules.IsOptimismBedrock is true
 	if optimismConfig := st.evm.ChainConfig().Optimism; optimismConfig != nil && rules.IsOptimismBedrock {
 		st.state.AddBalance(params.OptimismBaseFeeRecipient, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.evm.Context.BaseFee))
-		// leo: can not collect l1 fee here again, all l1 fee has been collected by CoinBase & OptimismBaseFeeRecipient
+		// Can not collect l1 fee here again, all l1 fee has been collected by CoinBase & OptimismBaseFeeRecipient
 		//if cost := st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupDataGas, st.msg.IsDepositTx); cost != nil {
 		//	st.state.AddBalance(params.OptimismL1FeeRecipient, cost)
 		//}

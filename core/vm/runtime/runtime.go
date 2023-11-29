@@ -74,8 +74,6 @@ func setDefaults(cfg *Config) {
 		cfg.Difficulty = new(big.Int)
 	}
 	if cfg.GasLimit == 0 {
-		// todo: leo
-		// cfg.GasLimit = math.MaxUint64
 		cfg.GasLimit = core.DefaultMantleBlockGasLimit
 	}
 	if cfg.GasPrice == nil {
