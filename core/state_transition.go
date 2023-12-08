@@ -482,7 +482,8 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	// 6. caller has enough balance to cover asset transfer for **topmost** call
 
 	// Check clauses 1-3, buy gas if everything is correct
-	tokenRatio := st.state.GetState(types.L1BlockAddr, types.TokenRatioSlot).Big().Uint64()
+	tokenRatio := st.state.GetState(types.GasOracleAddr, types.TokenRatioSlot).Big().Uint64()
+	log.Info("innerTransitionDb", "tokenRatio", tokenRatio)
 	l1Cost, err := st.preCheck()
 	if err != nil {
 		return nil, err
