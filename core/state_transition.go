@@ -483,7 +483,6 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 
 	// Check clauses 1-3, buy gas if everything is correct
 	tokenRatio := st.state.GetState(types.GasOracleAddr, types.TokenRatioSlot).Big().Uint64()
-	log.Info("innerTransitionDb", "tokenRatio", tokenRatio)
 	l1Cost, err := st.preCheck()
 	if err != nil {
 		return nil, err
