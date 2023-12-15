@@ -20,6 +20,7 @@ import (
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -81,6 +82,13 @@ func NewL1CostFunc(config *params.ChainConfig, statedb StateGetter) L1CostFunc {
 }
 
 func L1Cost(rollupDataGas uint64, l1BaseFee, overhead, scalar, tokenRatio *big.Int) *big.Int {
+	log.Info("buyGas L1Cost",
+		"rollupDataGas", rollupDataGas,
+		"l1BaseFee", l1BaseFee.String(),
+		"overhead", overhead.String(),
+		"scalar", scalar.String(),
+		"tokenRatio", tokenRatio.String())
+
 	l1GasUsed := new(big.Int).SetUint64(rollupDataGas)
 	l1GasUsed = l1GasUsed.Add(l1GasUsed, overhead)
 	l1Cost := l1GasUsed.Mul(l1GasUsed, l1BaseFee)

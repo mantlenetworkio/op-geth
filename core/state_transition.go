@@ -290,9 +290,11 @@ func (st *StateTransition) buyGas() (*big.Int, error) {
 	}
 	if st.evm.Context.L1CostFunc != nil && st.msg.RunMode != EthcallMode {
 		l1Cost = st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupDataGas, st.msg.IsDepositTx)
+		log.Info("buyGas", "l1Cost", l1Cost.String(), "RunMode", st.msg.RunMode)
 	}
 	if l1Cost != nil && (st.msg.RunMode == GasEstimationMode || st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode) {
 		mgval = mgval.Add(mgval, l1Cost)
+		log.Info("buyGas", "mgval", mgval.String(), "RunMode", st.msg.RunMode)
 	}
 	balanceCheck := mgval
 	if st.msg.GasFeeCap != nil {
@@ -519,6 +521,7 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
 		if st.msg.GasPrice.Cmp(common.Big0) > 0 && l1Cost != nil {
 			l1Gas = new(big.Int).Div(l1Cost, st.msg.GasPrice).Uint64()
+			log.Info("buyGas", "l1Gas", l1Gas, "RunMode", st.msg.RunMode)
 			if st.msg.GasLimit < l1Gas {
 				return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, l1Gas)
 			}
