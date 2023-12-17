@@ -43,7 +43,7 @@ type StateGetter interface {
 
 // L1CostFunc is used in the state transition to determine the cost of a rollup message.
 // Returns nil if there is no cost.
-type L1CostFunc func(blockNum uint64, blockTime uint64, dataGas RollupGasData, isDepositTx bool) *big.Int
+type L1CostFunc func(blockNum uint64, blockTime uint64, dataGas RollupGasData, isDepositTx bool, to *common.Address) *big.Int
 
 var (
 	L1BaseFeeSlot  = common.BigToHash(big.NewInt(1))
@@ -64,7 +64,7 @@ var (
 func NewL1CostFunc(config *params.ChainConfig, statedb StateGetter) L1CostFunc {
 	cacheBlockNum := ^uint64(0)
 	var l1BaseFee, overhead, scalar, tokenRatio *big.Int
-	return func(blockNum uint64, blockTime uint64, dataGas RollupGasData, isDepositTx bool) *big.Int {
+	return func(blockNum uint64, blockTime uint64, dataGas RollupGasData, isDepositTx bool, to *common.Address) *big.Int {
 		rollupDataGas := dataGas.DataGas(blockTime, config) // Only fake txs for RPC view-calls are 0.
 		if config.Optimism == nil || isDepositTx || rollupDataGas == 0 {
 			return common.Big0
@@ -76,6 +76,12 @@ func NewL1CostFunc(config *params.ChainConfig, statedb StateGetter) L1CostFunc {
 			tokenRatio = statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
 			cacheBlockNum = blockNum
 		}
+
+		// update the tokenRatio, so set the cacheBlockNum as default value and query the latest tokenRatio next time
+		if to != nil && *to == GasOracleAddr {
+			cacheBlockNum = ^uint64(0)
+		}
+
 		return L1Cost(rollupDataGas, l1BaseFee, overhead, scalar, tokenRatio)
 	}
 }
