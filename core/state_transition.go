@@ -640,10 +640,15 @@ func (st *StateTransition) refundGas(refundQuotient, tokenRatio uint64) {
 	}
 	// Apply refund counter, capped to a refund quotient
 	refund := st.gasUsed() / refundQuotient
+	log.Info("st.gasUsed():" + strconv.FormatUint(st.gasUsed(), 10))
+	log.Info("refund:" + strconv.FormatUint(refund, 10))
+
 	if refund > st.state.GetRefund() {
 		refund = st.state.GetRefund()
 	}
-	st.gasRemaining += refund
+	if refund > 0 {
+		st.gasRemaining += refund
+	}
 
 	// Return ETH for remaining gas, exchanged at the original rate.
 	if tokenRatio > 0 {
@@ -664,6 +669,7 @@ func (st *StateTransition) refundGas(refundQuotient, tokenRatio uint64) {
 
 	// Also return remaining gas to the block gas counter so it is
 	// available for the next transaction.
+	log.Info("AddGas:" + strconv.FormatUint(st.gasRemaining, 10))
 	st.gp.AddGas(st.gasRemaining)
 }
 
