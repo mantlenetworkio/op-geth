@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"strconv"
 
 	"github.com/ethereum/go-ethereum/common"
 	cmath "github.com/ethereum/go-ethereum/common/math"
@@ -360,6 +361,8 @@ func (st *StateTransition) preCheck() (*big.Int, error) {
 		// Gas is free, but no refunds!
 		st.initialGas = st.msg.GasLimit
 		st.gasRemaining += st.msg.GasLimit // Add gas here in order to be able to execute calls.
+		log.Info("initialGas:" + strconv.FormatUint(st.gasRemaining, 10))
+		log.Info("gasRemaining:" + strconv.FormatUint(st.gasRemaining, 10))
 		// Don't touch the gas pool for system transactions
 		if st.msg.IsSystemTx {
 			if st.evm.ChainConfig().IsOptimismRegolith(st.evm.Context.Time) {
@@ -483,6 +486,7 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 
 	// Check clauses 1-3, buy gas if everything is correct
 	tokenRatio := st.state.GetState(types.GasOracleAddr, types.TokenRatioSlot).Big().Uint64()
+	log.Info("tokenRatio:" + strconv.FormatUint(tokenRatio, 10))
 	l1Cost, err := st.preCheck()
 	if err != nil {
 		return nil, err
@@ -510,6 +514,7 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
 		gas = gas * tokenRatio
 	}
+	log.Info("gasRemaining2222:" + strconv.FormatUint(st.gasRemaining, 10))
 	if st.gasRemaining < gas {
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, gas)
 	}
