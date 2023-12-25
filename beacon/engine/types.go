@@ -43,6 +43,8 @@ type PayloadAttributes struct {
 	NoTxPool bool `json:"noTxPool,omitempty" gencodec:"optional"`
 	// GasLimit is a field for rollups: if set, this sets the exact gas limit the block produced with.
 	GasLimit *uint64 `json:"gasLimit,omitempty" gencodec:"optional"`
+	// BaseFee is a field for rollups: if set, this sets the exact base fee the block produced with.
+	BaseFee *big.Int `json:"baseFee,omitempty" gencodec:"optional"`
 }
 
 // JSON type overrides for PayloadAttributes.
