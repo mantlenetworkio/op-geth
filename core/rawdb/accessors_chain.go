@@ -724,31 +724,20 @@ func (r *receiptLogs) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	// First try to decode the latest receipt database format, try the pre-bedrock Optimism legacy format otherwise.
-	stored := new(storedReceiptRLP)
-	if err := decodeStoredReceiptRLP(stored, blob); err == nil {
+	var stored storedReceiptRLP
+	err = rlp.DecodeBytes(blob, &stored)
+	if err == nil {
 		r.Logs = stored.Logs
 		return nil
 	}
 
-	storedLegacy := new(legacyOptimismStoredReceiptRLP)
-	if err := decodeLegacyOptimismReceiptRLP(storedLegacy, blob); err != nil {
+	var storedLegacy legacyOptimismStoredReceiptRLP
+	err = rlp.DecodeBytes(blob, &storedLegacy)
+	if err != nil {
 		return err
 	}
+
 	r.Logs = stored.Logs
-	return nil
-}
-
-func decodeStoredReceiptRLP(stored *storedReceiptRLP, blob []byte) error {
-	if err := rlp.DecodeBytes(blob, stored); err != nil {
-		return err
-	}
-	return nil
-}
-
-func decodeLegacyOptimismReceiptRLP(stored *legacyOptimismStoredReceiptRLP, blob []byte) error {
-	if err := rlp.DecodeBytes(blob, stored); err != nil {
-		return err
-	}
 	return nil
 }
 
