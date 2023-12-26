@@ -28,6 +28,7 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -1067,6 +1068,12 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 	// Set baseFee and GasLimit if we are on an EIP-1559 chain
 	if w.chainConfig.IsLondon(header.Number) {
 		header.BaseFee = genParams.baseFee
+		if genParams.baseFee == nil {
+			header.BaseFee = misc.CalcBaseFee(w.chainConfig, parent)
+			log.Debug("header base fee from eip1559 calculator", "baseFee", header.BaseFee.String())
+		} else {
+			log.Debug("header base fee from catalyst generation parameters", "baseFee", header.BaseFee.String())
+		}
 		if !w.chainConfig.IsLondon(parent.Number) {
 			parentGasLimit := parent.GasLimit * w.chainConfig.ElasticityMultiplier()
 			header.GasLimit = core.CalcGasLimit(parentGasLimit, w.config.GasCeil)
@@ -1199,7 +1206,6 @@ func (w *worker) commitWork(interrupt *int32, noempty bool, timestamp int64) {
 	work, err := w.prepareWork(&generateParams{
 		timestamp: uint64(timestamp),
 		coinbase:  coinbase,
-		baseFee:   big.NewInt(1e9), // just for fix unit tests
 	})
 	if err != nil {
 		return
