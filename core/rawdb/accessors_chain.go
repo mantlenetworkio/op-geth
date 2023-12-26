@@ -737,7 +737,7 @@ func (r *receiptLogs) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	r.Logs = stored.Logs
+	r.Logs = storedLegacy.Logs
 	return nil
 }
 
