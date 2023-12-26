@@ -1199,6 +1199,7 @@ func (w *worker) commitWork(interrupt *int32, noempty bool, timestamp int64) {
 	work, err := w.prepareWork(&generateParams{
 		timestamp: uint64(timestamp),
 		coinbase:  coinbase,
+		baseFee:   big.NewInt(1e9), // just for fix unit tests
 	})
 	if err != nil {
 		return

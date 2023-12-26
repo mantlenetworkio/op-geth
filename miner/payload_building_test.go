@@ -17,6 +17,7 @@
 package miner
 
 import (
+	"math/big"
 	"reflect"
 	"testing"
 	"time"
@@ -43,6 +44,7 @@ func TestBuildPayload(t *testing.T) {
 		Timestamp:    timestamp,
 		Random:       common.Hash{},
 		FeeRecipient: recipient,
+		BaseFee:      big.NewInt(1e9),
 	}
 	payload, err := w.buildPayload(args)
 	if err != nil {
