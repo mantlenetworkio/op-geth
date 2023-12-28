@@ -507,9 +507,11 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	log.Info("innerTransitionDb", "gas", gas)
 	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
 		gas = gas * tokenRatio
 	}
+	log.Info("innerTransitionDb", "gas", gas, "tokenRatio", tokenRatio, "st.gasRemaining", st.gasRemaining)
 	if st.gasRemaining < gas {
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, gas)
 	}
@@ -519,10 +521,12 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
 		if st.msg.GasPrice.Cmp(common.Big0) > 0 && l1Cost != nil {
 			l1Gas = new(big.Int).Div(l1Cost, st.msg.GasPrice).Uint64()
+			log.Info("innerTransitionDb", "l1Cost", l1Cost.String(), "st.msg.GasPrice", st.msg.GasPrice.String(), "l1Gas", l1Gas, "st.msg.GasLimit", st.msg.GasLimit)
 			if st.msg.GasLimit < l1Gas {
 				return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, l1Gas)
 			}
 		}
+		log.Info("innerTransitionDb", "l1Gas", l1Gas, "st.msg.GasLimit", st.msg.GasLimit)
 		if st.gasRemaining < l1Gas {
 			return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, l1Gas)
 		}
