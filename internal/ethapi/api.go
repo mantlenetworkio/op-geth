@@ -1193,6 +1193,16 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		}
 		hi = block.GasLimit()
 	}
+
+	// Normalize the gasPrice used for estimateGas
+	gasPriceForEstimateGas, err := b.SuggestGasTipCap(ctx)
+	if err != nil {
+		return 0, errors.New("failed to get suggestGasTipCap")
+	}
+	if head := b.CurrentHeader(); head.BaseFee != nil {
+		gasPriceForEstimateGas.Add(gasPriceForEstimateGas, head.BaseFee)
+	}
+
 	// Normalize the max fee per gas the call is willing to spend.
 	var feeCap *big.Int
 	if args.GasPrice != nil && (args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil) {
@@ -1202,21 +1212,12 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 	} else if args.MaxFeePerGas != nil {
 		feeCap = args.MaxFeePerGas.ToInt()
 	} else {
-		feeCap = common.Big0
+		feeCap = gasPriceForEstimateGas
 	}
 
 	runMode := core.GasEstimationMode
 	if args.GasPrice == nil && args.MaxFeePerGas == nil && args.MaxPriorityFeePerGas == nil {
 		runMode = core.GasEstimationWithSkipCheckBalanceMode
-	}
-
-	// Normalize the gasPrice used for estimateGas
-	gasPriceForEstimateGas, err := b.SuggestGasTipCap(ctx)
-	if err != nil {
-		return 0, errors.New("failed to get suggestGasTipCap")
-	}
-	if head := b.CurrentHeader(); head.BaseFee != nil {
-		gasPriceForEstimateGas.Add(gasPriceForEstimateGas, head.BaseFee)
 	}
 
 	// Recap the highest gas limit with account's available balance.
@@ -1262,14 +1263,6 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 	// Recap the highest gas allowance with specified gascap.
 	if gasCap != 0 && hi > gasCap {
 		log.Warn("Caller gas above allowance, capping", "requested", hi, "cap", gasCap)
-		hi = gasCap
-	}
-	// Recap the highest gas allowance with suggested gasPrice.
-	if runMode == core.GasEstimationMode {
-		gasCap, err = calculateGasWithAllowance(ctx, b, args, blockNrOrHash, gasPriceForEstimateGas, gasCap)
-		if err != nil {
-			return 0, err
-		}
 		hi = gasCap
 	}
 	cap = hi
