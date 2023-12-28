@@ -365,7 +365,8 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 			NoTxPool:     payloadAttributes.NoTxPool,
 			Transactions: transactions,
 			GasLimit:     payloadAttributes.GasLimit,
-			BaseFee:      payloadAttributes.BaseFee,
+			//BaseFee:      payloadAttributes.BaseFee,
+			BaseFee: miner.BaseFee,
 		}
 		id := args.Id()
 		// If we already are busy generating this work, then we do not need
