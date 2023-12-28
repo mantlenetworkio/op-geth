@@ -169,17 +169,12 @@ func (payload *Payload) ResolveFull() *engine.ExecutionPayloadEnvelope {
 	return engine.BlockToExecutableData(payload.full, payload.fullFees)
 }
 
-var (
-	// BaseFee 0.1 Gwei, temporary use
-	BaseFee = big.NewInt(100_000_000)
-)
-
 // buildPayload builds the payload according to the provided parameters.
 func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 	// Build the initial version with no transaction included. It should be fast
 	// enough to run. The empty payload can at least make sure there is something
 	// to deliver for not missing slot.
-	empty, _, err := w.getSealingBlock(args.Parent, args.Timestamp, args.FeeRecipient, args.Random, args.Withdrawals, true, args.Transactions, args.GasLimit, BaseFee)
+	empty, _, err := w.getSealingBlock(args.Parent, args.Timestamp, args.FeeRecipient, args.Random, args.Withdrawals, true, args.Transactions, args.GasLimit, args.BaseFee)
 	if err != nil {
 		return nil, err
 	}
