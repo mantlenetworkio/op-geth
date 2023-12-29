@@ -206,6 +206,9 @@ type Config struct {
 	// CheckpointOracle is the configuration for checkpoint oracle.
 	CheckpointOracle *params.CheckpointOracleConfig `toml:",omitempty"`
 
+	// OverrideMantleBaseFee (TODO: remove after the fork)
+	OverrideMantleBaseFee *big.Int `toml:",omitempty"`
+
 	// OverrideShanghai (TODO: remove after the fork)
 	OverrideShanghai *uint64 `toml:",omitempty"`
 

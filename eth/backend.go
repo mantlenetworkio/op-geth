@@ -199,6 +199,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	)
 	// Override the chain config with provided settings.
 	var overrides core.ChainOverrides
+	if config.OverrideMantleBaseFee != nil {
+		overrides.OverrideMantleBaseFee = config.OverrideMantleBaseFee
+	}
 	if config.OverrideShanghai != nil {
 		overrides.OverrideShanghai = config.OverrideShanghai
 	}

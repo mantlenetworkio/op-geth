@@ -64,6 +64,7 @@ var (
 		utils.NoUSBFlag,
 		utils.USBFlag,
 		utils.SmartCardDaemonPathFlag,
+		utils.OverrideMantleBaseFee,
 		utils.OverrideShanghai,
 		utils.EnablePersonal,
 		utils.OverrideOptimismBedrock,

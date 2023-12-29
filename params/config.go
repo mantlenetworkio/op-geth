@@ -42,6 +42,9 @@ var (
 	BaseGoerliChainId          = big.NewInt(84531)
 	// April 27, 2023 @ 5:00:00 pm UTC
 	BaseGoerliRegolithTime = uint64(1682614800)
+
+	// Mantle chain_id
+	MantleSepoliaChainId = big.NewInt(5003)
 )
 
 // TrustedCheckpoints associates each known checkpoint with the genesis hash of
