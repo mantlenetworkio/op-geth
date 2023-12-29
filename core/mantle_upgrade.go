@@ -14,8 +14,8 @@ var (
 )
 
 type MantleUpgradeChainConfig struct {
-	ChainID                 *big.Int `json:"chainId"`            // chainId identifies the current chain and is used for replay protection
-	MantleBaseFeeForSepolia *big.Int `json:"mantleBaseFeeBlock"` // Mantle BaseFee switch block (nil = no fork, 0 = already on mantle baseFee)
+	ChainID                 *big.Int `json:"chainId"`                 // chainId identifies the current chain and is used for replay protection
+	MantleBaseFeeForSepolia *big.Int `json:"MantleBaseFeeForSepolia"` // Mantle BaseFee switch block (nil = no fork, 0 = already on mantle baseFee)
 }
 
 func getUpgradeConfigForMantle(chainID *big.Int) *MantleUpgradeChainConfig {
