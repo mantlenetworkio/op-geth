@@ -44,6 +44,12 @@ func VerifyEip1559Header(config *params.ChainConfig, parent, header *types.Heade
 	if header.BaseFee == nil {
 		return fmt.Errorf("header is missing baseFee")
 	}
+	// Verify the baseFee is correct based on the parent header.
+	expectedBaseFee := CalcBaseFee(config, parent)
+	if header.BaseFee.Cmp(expectedBaseFee) != 0 {
+		return fmt.Errorf("invalid baseFee: have %s, want %s, parentBaseFee %s, parentGasUsed %d",
+			header.BaseFee, expectedBaseFee, parent.BaseFee, parent.GasUsed)
+	}
 	return nil
 }
 
@@ -52,6 +58,10 @@ func CalcBaseFee(config *params.ChainConfig, parent *types.Header) *big.Int {
 	// If the current block is the first EIP-1559 block, return the InitialBaseFee.
 	if !config.IsLondon(parent.Number) {
 		return new(big.Int).SetUint64(params.InitialBaseFee)
+	}
+
+	if config.IsMantleBaseFee(parent.Number) {
+		return new(big.Int).Set(parent.BaseFee)
 	}
 
 	parentGasTarget := parent.GasLimit / config.ElasticityMultiplier()

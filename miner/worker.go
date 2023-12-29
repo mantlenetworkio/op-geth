@@ -1067,7 +1067,10 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 	}
 	// Set baseFee and GasLimit if we are on an EIP-1559 chain
 	if w.chainConfig.IsLondon(header.Number) {
-		header.BaseFee = genParams.baseFee
+		header.BaseFee = misc.CalcBaseFee(w.chainConfig, parent)
+		if w.chainConfig.IsMantleBaseFee(header.Number) {
+			header.BaseFee = genParams.baseFee
+		}
 		if genParams.baseFee == nil {
 			header.BaseFee = misc.CalcBaseFee(w.chainConfig, parent)
 			log.Debug("header base fee from eip1559 calculator", "baseFee", header.BaseFee.String())
