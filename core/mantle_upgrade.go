@@ -9,7 +9,7 @@ import (
 var (
 	MantleSepoliaUpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:                 params.MantleSepoliaChainId,
-		MantleBaseFeeForSepolia: big.NewInt(1_000_000_000),
+		MantleBaseFeeForSepolia: big.NewInt(473_611),
 	}
 )
 
