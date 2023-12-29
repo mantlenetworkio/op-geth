@@ -269,11 +269,6 @@ var (
 		Value:    2048,
 		Category: flags.EthCategory,
 	}
-	OverrideMantleBaseFee = &cli.Uint64Flag{
-		Name:     "override.mantlebasefee",
-		Usage:    "Manually specify the MantleBaseFee, overriding the bundled setting",
-		Category: flags.EthCategory,
-	}
 	OverrideShanghai = &cli.Uint64Flag{
 		Name:     "override.shanghai",
 		Usage:    "Manually specify the Shanghai fork timestamp, overriding the bundled setting",
