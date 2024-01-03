@@ -7,6 +7,11 @@ import (
 )
 
 var (
+	MantleMainnetUpgradeConfig = MantleUpgradeChainConfig{
+		ChainID:     params.MantleMainnetChainId,
+		BaseFeeTime: u64Ptr(0),
+	}
+
 	MantleSepoliaUpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:     params.MantleSepoliaChainId,
 		BaseFeeTime: u64Ptr(1_703_759_533),
@@ -18,8 +23,10 @@ type MantleUpgradeChainConfig struct {
 	BaseFeeTime *uint64  `json:"BaseFeeTime"` // Mantle BaseFee switch time (nil = no fork, 0 = already on mantle baseFee)
 }
 
-func getUpgradeConfigForMantle(chainID *big.Int) *MantleUpgradeChainConfig {
+func GetUpgradeConfigForMantle(chainID *big.Int) *MantleUpgradeChainConfig {
 	switch chainID {
+	case params.MantleMainnetChainId:
+		return &MantleMainnetUpgradeConfig
 	case params.MantleSepoliaChainId:
 		return &MantleSepoliaUpgradeConfig
 	default:

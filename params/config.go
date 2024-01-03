@@ -44,6 +44,7 @@ var (
 	BaseGoerliRegolithTime = uint64(1682614800)
 
 	// Mantle chain_id
+	MantleMainnetChainId = big.NewInt(5000)
 	MantleSepoliaChainId = big.NewInt(5003)
 )
 
