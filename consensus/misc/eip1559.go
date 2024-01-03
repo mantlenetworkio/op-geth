@@ -54,7 +54,7 @@ func CalcBaseFee(config *params.ChainConfig, parent *types.Header) *big.Int {
 		return new(big.Int).SetUint64(params.InitialBaseFee)
 	}
 
-	if config.IsMantleBaseFee(parent.Number) {
+	if config.IsMantleBaseFee(parent.Time) {
 		return new(big.Int).Set(parent.BaseFee)
 	}
 

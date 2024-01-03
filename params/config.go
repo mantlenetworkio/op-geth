@@ -451,10 +451,12 @@ type ChainConfig struct {
 	MuirGlacierBlock    *big.Int `json:"muirGlacierBlock,omitempty"`    // Eip-2384 (bomb delay) switch block (nil = no fork, 0 = already activated)
 	BerlinBlock         *big.Int `json:"berlinBlock,omitempty"`         // Berlin switch block (nil = no fork, 0 = already on berlin)
 	LondonBlock         *big.Int `json:"londonBlock,omitempty"`         // London switch block (nil = no fork, 0 = already on london)
-	MantleBaseFeeBlock  *big.Int `json:"mantleBaseFeeBlock,omitempty"`  // Mantle BaseFee switch block (nil = no fork, 0 = already on mantle baseFee)
 	ArrowGlacierBlock   *big.Int `json:"arrowGlacierBlock,omitempty"`   // Eip-4345 (bomb delay) switch block (nil = no fork, 0 = already activated)
 	GrayGlacierBlock    *big.Int `json:"grayGlacierBlock,omitempty"`    // Eip-5133 (bomb delay) switch block (nil = no fork, 0 = already activated)
 	MergeNetsplitBlock  *big.Int `json:"mergeNetsplitBlock,omitempty"`  // Virtual fork after The Merge to use as a network splitter
+
+	// Mantle upgrade configs
+	BaseFeeTime *uint64 `json:"baseFeeTime,omitempty"` // Mantle BaseFee switch time (nil = no fork, 0 = already on mantle baseFee)
 
 	// Fork scheduling was switched from blocks to timestamps here
 
@@ -668,9 +670,9 @@ func (c *ChainConfig) IsLondon(num *big.Int) bool {
 	return isBlockForked(c.LondonBlock, num)
 }
 
-// IsMantleBaseFee returns whether num is either equal to the Mantle BaseFee fork block or greater.
-func (c *ChainConfig) IsMantleBaseFee(num *big.Int) bool {
-	return isBlockForked(c.MantleBaseFeeBlock, num)
+// IsMantleBaseFee returns whether time is either equal to the BaseFee fork time or greater.
+func (c *ChainConfig) IsMantleBaseFee(time uint64) bool {
+	return isTimestampForked(c.BaseFeeTime, time)
 }
 
 // IsArrowGlacier returns whether num is either equal to the Arrow Glacier (EIP-4345) fork block or greater.
@@ -1065,7 +1067,7 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		IsBerlin:         c.IsBerlin(num),
 		IsLondon:         c.IsLondon(num),
 		IsMerge:          isMerge,
-		IsMantleBaseFee:  c.IsMantleBaseFee(num),
+		IsMantleBaseFee:  c.IsMantleBaseFee(timestamp),
 		IsShanghai:       c.IsShanghai(timestamp),
 		isCancun:         c.IsCancun(timestamp),
 		isPrague:         c.IsPrague(timestamp),
