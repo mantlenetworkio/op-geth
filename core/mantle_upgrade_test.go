@@ -3,21 +3,21 @@ package core
 import (
 	"math/big"
 	"testing"
-
-	"github.com/ethereum/go-ethereum/params"
 )
 
 var (
-	NonExistChainID = big.NewInt(-1)
+	MantleMainnetChainId = big.NewInt(5000)
+	MantleSepoliaChainId = big.NewInt(5003)
+	NonExistChainID      = big.NewInt(-1)
 )
 
 func TestGetUpgradeConfigForMantle(t *testing.T) {
-	mainnetUpgradeConfig := GetUpgradeConfigForMantle(params.MantleMainnetChainId)
+	mainnetUpgradeConfig := GetUpgradeConfigForMantle(MantleMainnetChainId)
 	if *mainnetUpgradeConfig.BaseFeeTime != *MantleMainnetUpgradeConfig.BaseFeeTime {
 		t.Errorf("wrong baseFeeTime: got %v, want %v", *mainnetUpgradeConfig.BaseFeeTime, *MantleMainnetUpgradeConfig.BaseFeeTime)
 	}
 
-	sepoliaUpgradeConfig := GetUpgradeConfigForMantle(params.MantleSepoliaChainId)
+	sepoliaUpgradeConfig := GetUpgradeConfigForMantle(MantleSepoliaChainId)
 	if *sepoliaUpgradeConfig.BaseFeeTime != *MantleSepoliaUpgradeConfig.BaseFeeTime {
 		t.Errorf("wrong baseFeeTime: got %v, want %v", *sepoliaUpgradeConfig.BaseFeeTime, *MantleSepoliaUpgradeConfig.BaseFeeTime)
 	}

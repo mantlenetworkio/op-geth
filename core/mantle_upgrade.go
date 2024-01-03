@@ -24,10 +24,13 @@ type MantleUpgradeChainConfig struct {
 }
 
 func GetUpgradeConfigForMantle(chainID *big.Int) *MantleUpgradeChainConfig {
-	switch chainID {
-	case params.MantleMainnetChainId:
+	if chainID == nil {
+		return nil
+	}
+	switch chainID.Int64() {
+	case params.MantleMainnetChainId.Int64():
 		return &MantleMainnetUpgradeConfig
-	case params.MantleSepoliaChainId:
+	case params.MantleSepoliaChainId.Int64():
 		return &MantleSepoliaUpgradeConfig
 	default:
 		return nil
