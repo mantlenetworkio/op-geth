@@ -8,7 +8,7 @@ import (
 var (
 	MantleMainnetChainId = big.NewInt(5000)
 	MantleSepoliaChainId = big.NewInt(5003)
-	NonExistChainID      = big.NewInt(-1)
+	OtherChainID         = big.NewInt(1_000_000)
 )
 
 func TestGetUpgradeConfigForMantle(t *testing.T) {
@@ -22,8 +22,13 @@ func TestGetUpgradeConfigForMantle(t *testing.T) {
 		t.Errorf("wrong baseFeeTime: got %v, want %v", *sepoliaUpgradeConfig.BaseFeeTime, *MantleSepoliaUpgradeConfig.BaseFeeTime)
 	}
 
-	upgradeConfig := GetUpgradeConfigForMantle(NonExistChainID)
+	upgradeConfig := GetUpgradeConfigForMantle(nil)
 	if upgradeConfig != nil {
+		t.Errorf("upgradeConfig should be nil, upgradeConfig: got %v, want %v", upgradeConfig, nil)
+	}
+
+	defaultUpgradeConfig := GetUpgradeConfigForMantle(OtherChainID)
+	if *defaultUpgradeConfig.BaseFeeTime != *MantleDefaultUpgradeConfig.BaseFeeTime {
 		t.Errorf("upgradeConfig should be nil, upgradeConfig: got %v, want %v", upgradeConfig, nil)
 	}
 }

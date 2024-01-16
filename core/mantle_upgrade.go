@@ -20,6 +20,9 @@ var (
 		ChainID:     params.MantleLocalChainId,
 		BaseFeeTime: u64Ptr(0),
 	}
+	MantleDefaultUpgradeConfig = MantleUpgradeChainConfig{
+		BaseFeeTime: u64Ptr(0),
+	}
 )
 
 type MantleUpgradeChainConfig struct {
@@ -39,7 +42,7 @@ func GetUpgradeConfigForMantle(chainID *big.Int) *MantleUpgradeChainConfig {
 	case params.MantleLocalChainId.Int64():
 		return &MantleLocalUpgradeConfig
 	default:
-		return nil
+		return &MantleDefaultUpgradeConfig
 	}
 }
 
