@@ -25,6 +25,7 @@ import (
 	cmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"golang.org/x/crypto/sha3"
@@ -439,11 +440,14 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	}
 	//add eth value
 	if ethValue := st.msg.ETHValue; ethValue != nil && ethValue.Cmp(big.NewInt(0)) != 0 {
-		st.addBVMETHBalance(ethValue)
-		st.addBVMETHTotalSupply(ethValue)
-		st.generateBVMETHMintEvent(*st.msg.To, ethValue)
+		st.mintBVMETH(ethValue)
 	}
 	snap := st.state.Snapshot()
+
+	// Will be reverted if failed
+	if ethValue := st.msg.ETHValue; ethValue != nil && ethValue.Cmp(big.NewInt(0)) != 0 {
+		st.transferBVMETH(ethValue)
+	}
 
 	result, err := st.innerTransitionDb()
 	// Failed deposits must still be included. Unless we cannot produce the block at all due to the gas limit.
@@ -664,12 +668,15 @@ func (st *StateTransition) gasUsed() uint64 {
 	return st.initialGas - st.gasRemaining
 }
 
-func (st *StateTransition) addBVMETHBalance(ethValue *big.Int) {
-	key := getBVMETHBalanceKey(*st.msg.To)
+func (st *StateTransition) mintBVMETH(ethValue *big.Int) {
+	key := getBVMETHBalanceKey(st.msg.From)
 	value := st.state.GetState(BVM_ETH_ADDR, key)
 	bal := value.Big()
 	bal = bal.Add(bal, ethValue)
 	st.state.SetState(BVM_ETH_ADDR, key, common.BigToHash(bal))
+
+	st.addBVMETHTotalSupply(ethValue)
+	st.generateBVMETHMintEvent(st.msg.From, ethValue)
 }
 
 func (st *StateTransition) addBVMETHTotalSupply(ethValue *big.Int) {
@@ -678,6 +685,37 @@ func (st *StateTransition) addBVMETHTotalSupply(ethValue *big.Int) {
 	bal := value.Big()
 	bal = bal.Add(bal, ethValue)
 	st.state.SetState(BVM_ETH_ADDR, key, common.BigToHash(bal))
+}
+
+func (st *StateTransition) transferBVMETH(ethValue *big.Int) {
+	fromKey := getBVMETHBalanceKey(st.msg.From)
+
+	createdContractAddr := crypto.CreateAddress(st.msg.From, st.evm.StateDB.GetNonce(st.msg.From))
+
+	var toKey common.Hash
+	if st.msg.To == nil {
+		toKey = getBVMETHBalanceKey(createdContractAddr)
+	} else {
+		toKey = getBVMETHBalanceKey(*st.msg.To)
+	}
+
+	fromBalanceValue := st.state.GetState(BVM_ETH_ADDR, fromKey)
+	toBalanceValue := st.state.GetState(BVM_ETH_ADDR, toKey)
+
+	fromBalance := fromBalanceValue.Big()
+	toBalance := toBalanceValue.Big()
+
+	fromBalance = new(big.Int).Sub(fromBalance, ethValue)
+	toBalance = new(big.Int).Add(toBalance, ethValue)
+
+	st.state.SetState(BVM_ETH_ADDR, fromKey, common.BigToHash(fromBalance))
+	st.state.SetState(BVM_ETH_ADDR, toKey, common.BigToHash(toBalance))
+
+	if st.msg.To == nil {
+		st.generateBVMETHTransferEvent(st.msg.From, createdContractAddr, ethValue)
+	} else {
+		st.generateBVMETHTransferEvent(st.msg.From, *st.msg.To, ethValue)
+	}
 }
 
 func getBVMETHBalanceKey(addr common.Address) common.Hash {
@@ -705,6 +743,25 @@ func (st *StateTransition) generateBVMETHMintEvent(mintAddress common.Address, m
 		Address: BVM_ETH_ADDR,
 		Topics:  topics,
 		Data:    d,
+		// This is a non-consensus field, but assigned here because
+		// core/state doesn't know the current block number.
+		BlockNumber: st.evm.Context.BlockNumber.Uint64(),
+	})
+}
+
+func (st *StateTransition) generateBVMETHTransferEvent(from, to common.Address, amount *big.Int) {
+	// keccak("Transfer(address,address,uint256)") = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+	methodHash := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+	topics := make([]common.Hash, 3)
+	topics[0] = methodHash
+	topics[1] = from.Hash()
+	topics[2] = to.Hash()
+	//data means the transfer amount in Transfer EVENT.
+	data := common.HexToHash(common.Bytes2Hex(amount.Bytes())).Bytes()
+	st.evm.StateDB.AddLog(&types.Log{
+		Address: BVM_ETH_ADDR,
+		Topics:  topics,
+		Data:    data,
 		// This is a non-consensus field, but assigned here because
 		// core/state doesn't know the current block number.
 		BlockNumber: st.evm.Context.BlockNumber.Uint64(),
