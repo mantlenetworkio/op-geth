@@ -29,6 +29,6 @@ func TestGetUpgradeConfigForMantle(t *testing.T) {
 
 	defaultUpgradeConfig := GetUpgradeConfigForMantle(OtherChainID)
 	if *defaultUpgradeConfig.BaseFeeTime != *MantleDefaultUpgradeConfig.BaseFeeTime {
-		t.Errorf("upgradeConfig should be nil, upgradeConfig: got %v, want %v", upgradeConfig, nil)
+		t.Errorf("wrong baseFeeTime: got %v, want %v", *defaultUpgradeConfig.BaseFeeTime, *MantleDefaultUpgradeConfig.BaseFeeTime)
 	}
 }
