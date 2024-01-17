@@ -673,10 +673,12 @@ func (st *StateTransition) gasUsed() uint64 {
 
 func (st *StateTransition) mintBVMETH(ethValue *big.Int, rules params.Rules) {
 	if !rules.IsMantleBVMETHMintUpgrade {
+		var key common.Hash
 		if st.msg.To == nil {
-			return
+			key = getBVMETHBalanceKey(crypto.CreateAddress(st.msg.From, st.evm.StateDB.GetNonce(st.msg.From)))
+		} else {
+			key = getBVMETHBalanceKey(*st.msg.To)
 		}
-		key := getBVMETHBalanceKey(*st.msg.To)
 		value := st.state.GetState(BVM_ETH_ADDR, key)
 		bal := value.Big()
 		bal = bal.Add(bal, ethValue)
@@ -708,7 +710,6 @@ func (st *StateTransition) transferBVMETH(ethValue *big.Int) {
 	fromKey := getBVMETHBalanceKey(st.msg.From)
 
 	createdContractAddr := crypto.CreateAddress(st.msg.From, st.evm.StateDB.GetNonce(st.msg.From))
-
 	var toKey common.Hash
 	if st.msg.To == nil {
 		toKey = getBVMETHBalanceKey(createdContractAddr)
