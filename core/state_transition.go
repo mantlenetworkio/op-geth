@@ -161,6 +161,7 @@ type Message struct {
 	IsDepositTx   bool                // IsDepositTx indicates the message is force-included and can persist a mint.
 	Mint          *big.Int            // Mint is the amount to mint before EVM processing, or nil if there is no minting.
 	ETHValue      *big.Int            // ETHValue is the amount to mint BVM_ETH before EVM processing, or nil if there is no minting.
+	ETHTxValue    *big.Int            // ETHTxValue is the amount to be transferred to msg.To before EVM processing, and the transfer will be reverted if EVM failed
 	MetaTxParams  *types.MetaTxParams // MetaTxParams contains necessary parameter to sponsor gas fee for msg.From.
 	RollupDataGas types.RollupGasData // RollupDataGas indicates the rollup cost of the message, 0 if not a rollup or no cost.
 
@@ -189,6 +190,7 @@ func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.In
 		Mint:              tx.Mint(),
 		RollupDataGas:     tx.RollupDataGas(),
 		ETHValue:          tx.ETHValue(),
+		ETHTxValue:        tx.ETHTxValue(),
 		MetaTxParams:      metaTxParams,
 		SkipAccountChecks: false,
 		RunMode:           CommitMode,
@@ -447,8 +449,8 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 
 	// Will be reverted if failed
 	if rules.IsMantleBVMETHMintUpgrade {
-		if ethValue := st.msg.ETHValue; ethValue != nil && ethValue.Cmp(big.NewInt(0)) != 0 {
-			st.transferBVMETH(ethValue)
+		if ethTxValue := st.msg.ETHTxValue; ethTxValue != nil && ethTxValue.Cmp(big.NewInt(0)) != 0 {
+			st.transferBVMETH(ethTxValue)
 		}
 	}
 
