@@ -438,15 +438,18 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	if mint := st.msg.Mint; mint != nil {
 		st.state.AddBalance(st.msg.From, mint)
 	}
-	//add eth value
+	//Mint BVM_ETH
+	rules := st.evm.ChainConfig().Rules(st.evm.Context.BlockNumber, st.evm.Context.Random != nil, st.evm.Context.Time)
 	if ethValue := st.msg.ETHValue; ethValue != nil && ethValue.Cmp(big.NewInt(0)) != 0 {
-		st.mintBVMETH(ethValue)
+		st.mintBVMETH(ethValue, rules)
 	}
 	snap := st.state.Snapshot()
 
 	// Will be reverted if failed
-	if ethValue := st.msg.ETHValue; ethValue != nil && ethValue.Cmp(big.NewInt(0)) != 0 {
-		st.transferBVMETH(ethValue)
+	if rules.IsMantleBVMETHMintUpgrade {
+		if ethValue := st.msg.ETHValue; ethValue != nil && ethValue.Cmp(big.NewInt(0)) != 0 {
+			st.transferBVMETH(ethValue)
+		}
 	}
 
 	result, err := st.innerTransitionDb()
@@ -668,7 +671,21 @@ func (st *StateTransition) gasUsed() uint64 {
 	return st.initialGas - st.gasRemaining
 }
 
-func (st *StateTransition) mintBVMETH(ethValue *big.Int) {
+func (st *StateTransition) mintBVMETH(ethValue *big.Int, rules params.Rules) {
+	if !rules.IsMantleBVMETHMintUpgrade {
+		if st.msg.To == nil {
+			return
+		}
+		key := getBVMETHBalanceKey(*st.msg.To)
+		value := st.state.GetState(BVM_ETH_ADDR, key)
+		bal := value.Big()
+		bal = bal.Add(bal, ethValue)
+		st.state.SetState(BVM_ETH_ADDR, key, common.BigToHash(bal))
+
+		st.addBVMETHTotalSupply(ethValue)
+		st.generateBVMETHMintEvent(*st.msg.To, ethValue)
+		return
+	}
 	key := getBVMETHBalanceKey(st.msg.From)
 	value := st.state.GetState(BVM_ETH_ADDR, key)
 	bal := value.Big()
