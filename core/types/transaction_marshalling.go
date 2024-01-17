@@ -54,6 +54,7 @@ type txJSON struct {
 	From       *common.Address `json:"from,omitempty"`
 	Mint       *hexutil.Big    `json:"mint,omitempty"`
 	EthValue   *hexutil.Big    `json:"ethValue,omitempty"`
+	EthTxValue *hexutil.Big    `json:"ethTxValue,omitempty"`
 	IsSystemTx *bool           `json:"isSystemTx,omitempty"`
 
 	// Access list transaction fields:
@@ -140,6 +141,9 @@ func (tx *Transaction) MarshalJSON() ([]byte, error) {
 		}
 		if itx.EthValue != nil {
 			enc.EthValue = (*hexutil.Big)(itx.EthValue)
+		}
+		if itx.EthTxValue != nil {
+			enc.EthTxValue = (*hexutil.Big)(itx.EthTxValue)
 		}
 		enc.IsSystemTx = &itx.IsSystemTransaction
 		// other fields will show up as null.
@@ -419,6 +423,8 @@ func (tx *Transaction) UnmarshalJSON(input []byte) error {
 		itx.Mint = (*big.Int)(dec.Mint)
 		// ethValue may be omitted or nil if there is nothing to mint.
 		itx.EthValue = (*big.Int)(dec.EthValue)
+		// ethValue may be omitted or nil if there is nothing to mint.
+		itx.EthTxValue = (*big.Int)(dec.EthTxValue)
 		if dec.Data == nil {
 			return errors.New("missing required field 'input' in transaction")
 		}
