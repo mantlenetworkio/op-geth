@@ -310,6 +310,7 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, triedb *trie.Database, gen
 			mantleUpgradeChainConfig := GetUpgradeConfigForMantle(config.ChainID)
 			if mantleUpgradeChainConfig != nil {
 				config.BaseFeeTime = mantleUpgradeChainConfig.BaseFeeTime
+				config.BVMETHMintUpgradeTime = mantleUpgradeChainConfig.BVMETHMintUpgradeTime
 			}
 
 			if overrides != nil && overrides.OverrideShanghai != nil {
