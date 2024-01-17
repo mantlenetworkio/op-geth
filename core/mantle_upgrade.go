@@ -16,7 +16,7 @@ var (
 	MantleSepoliaUpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               params.MantleSepoliaChainId,
 		BaseFeeTime:           u64Ptr(1_704_891_600),
-		BVMETHMintUpgradeTime: u64Ptr(1_705_507_220),
+		BVMETHMintUpgradeTime: u64Ptr(1_705_536_020),
 	}
 	MantleLocalUpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               params.MantleLocalChainId,
