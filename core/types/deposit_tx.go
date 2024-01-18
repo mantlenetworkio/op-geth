@@ -41,10 +41,10 @@ type DepositTx struct {
 	IsSystemTransaction bool
 	// EthValue means L2 BVM_ETH mint tag, nil means that there is no need to mint BVM_ETH.
 	EthValue *big.Int `rlp:"nil"`
-	// EthTxValue means L2 BVM_ETH tx tag, nil means that there is no need to transfer BVM_ETH to msg.To.
-	EthTxValue *big.Int `rlp:"nil"`
 	// Normal Tx data
 	Data []byte
+	// EthTxValue means L2 BVM_ETH tx tag, nil means that there is no need to transfer BVM_ETH to msg.To.
+	EthTxValue *big.Int `rlp:"optional"`
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
