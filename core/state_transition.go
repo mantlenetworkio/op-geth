@@ -717,6 +717,9 @@ func (st *StateTransition) transferBVMETH(ethValue *big.Int) {
 	} else {
 		ethRecipient = crypto.CreateAddress(st.msg.From, st.evm.StateDB.GetNonce(st.msg.From))
 	}
+	if ethRecipient == st.msg.From {
+		return
+	}
 
 	fromKey := getBVMETHBalanceKey(st.msg.From)
 	toKey := getBVMETHBalanceKey(ethRecipient)
