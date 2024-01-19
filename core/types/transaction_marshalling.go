@@ -320,7 +320,7 @@ func (tx *Transaction) UnmarshalJSON(input []byte) error {
 		itx.Mint = (*big.Int)(dec.Mint)
 		// ethValue may be omitted or nil if there is nothing to mint.
 		itx.EthValue = (*big.Int)(dec.EthValue)
-		// ethValue may be omitted or nil if there is nothing to mint.
+		// ethValue may be omitted or nil if there is nothing to transfer to msg.To.
 		itx.EthTxValue = (*big.Int)(dec.EthTxValue)
 		if dec.Data == nil {
 			return errors.New("missing required field 'input' in transaction")
