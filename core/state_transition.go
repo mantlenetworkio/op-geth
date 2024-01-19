@@ -676,18 +676,20 @@ func (st *StateTransition) gasUsed() uint64 {
 func (st *StateTransition) mintBVMETH(ethValue *big.Int, rules params.Rules) {
 	if !rules.IsMantleBVMETHMintUpgrade {
 		var key common.Hash
-		if st.msg.To == nil {
-			key = getBVMETHBalanceKey(crypto.CreateAddress(st.msg.From, st.evm.StateDB.GetNonce(st.msg.From)))
+		var ethRecipient common.Address
+		if st.msg.To != nil {
+			ethRecipient = *st.msg.To
 		} else {
-			key = getBVMETHBalanceKey(*st.msg.To)
+			ethRecipient = crypto.CreateAddress(st.msg.From, st.evm.StateDB.GetNonce(st.msg.From))
 		}
+    key = getBVMETHBalanceKey(ethRecipient)
 		value := st.state.GetState(BVM_ETH_ADDR, key)
 		bal := value.Big()
 		bal = bal.Add(bal, ethValue)
 		st.state.SetState(BVM_ETH_ADDR, key, common.BigToHash(bal))
 
 		st.addBVMETHTotalSupply(ethValue)
-		st.generateBVMETHMintEvent(*st.msg.To, ethValue)
+		st.generateBVMETHMintEvent(ethRecipient, ethValue)
 		return
 	}
 	key := getBVMETHBalanceKey(st.msg.From)
@@ -709,15 +711,15 @@ func (st *StateTransition) addBVMETHTotalSupply(ethValue *big.Int) {
 }
 
 func (st *StateTransition) transferBVMETH(ethValue *big.Int) {
-	fromKey := getBVMETHBalanceKey(st.msg.From)
-
-	createdContractAddr := crypto.CreateAddress(st.msg.From, st.evm.StateDB.GetNonce(st.msg.From))
-	var toKey common.Hash
-	if st.msg.To == nil {
-		toKey = getBVMETHBalanceKey(createdContractAddr)
+  var ethRecipient common.Address
+	if st.msg.To != nil {
+		ethRecipient = *st.msg.To
 	} else {
-		toKey = getBVMETHBalanceKey(*st.msg.To)
+		ethRecipient = crypto.CreateAddress(st.msg.From, st.evm.StateDB.GetNonce(st.msg.From))
 	}
+  
+  fromKey := getBVMETHBalanceKey(st.msg.From)
+  toKey = getBVMETHBalanceKey(ethRecipient)
 
 	fromBalanceValue := st.state.GetState(BVM_ETH_ADDR, fromKey)
 	toBalanceValue := st.state.GetState(BVM_ETH_ADDR, toKey)
