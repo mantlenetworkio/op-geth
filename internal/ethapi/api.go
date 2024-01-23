@@ -1232,14 +1232,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		if err != nil {
 			return 0, err
 		}
-		if metaTxParams != nil {
-			sponsorAmount, _ := types.CalculateSponsorPercentAmount(metaTxParams, new(big.Int).Mul(feeCap, new(big.Int).SetUint64(b.CurrentHeader().GasLimit)))
-			sponsorBalance := state.GetBalance(metaTxParams.GasFeeSponsor)
-			if sponsorBalance.Cmp(sponsorAmount) <= 0 {
-				return 0, types.ErrSponsorBalanceNotEnough
-			}
-			balance = new(big.Int).Add(balance, sponsorAmount)
-		}
+
 		available := new(big.Int).Set(balance)
 		if args.Value != nil {
 			if args.Value.ToInt().Cmp(available) >= 0 {
@@ -1247,6 +1240,17 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 			}
 			available.Sub(available, args.Value.ToInt())
 		}
+
+		if metaTxParams != nil {
+			sponsorAmount, _ := types.CalculateSponsorPercentAmount(metaTxParams, new(big.Int).Mul(feeCap, new(big.Int).SetUint64(b.CurrentHeader().GasLimit)))
+			sponsorBalance := state.GetBalance(metaTxParams.GasFeeSponsor)
+			if sponsorAmount.Cmp(sponsorBalance) < 0 {
+				available.Add(available, sponsorAmount)
+			} else {
+				available.Add(available, sponsorBalance)
+			}
+		}
+
 		allowance := new(big.Int).Div(available, feeCap)
 
 		// If the allowance is larger than maximum uint64, skip checking
