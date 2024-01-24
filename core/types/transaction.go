@@ -43,9 +43,10 @@ var (
 
 // Transaction types.
 const (
-	LegacyTxType = iota
-	AccessListTxType
-	DynamicFeeTxType
+	LegacyTxType     = 0x00
+	AccessListTxType = 0x01
+	DynamicFeeTxType = 0x02
+	BlobTxType       = 0x03
 )
 
 // Transaction is an Ethereum transaction.
