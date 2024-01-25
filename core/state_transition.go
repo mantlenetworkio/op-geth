@@ -25,6 +25,7 @@ import (
 	cmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"golang.org/x/crypto/sha3"
@@ -439,9 +440,15 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	}
 	//add eth value
 	if ethValue := st.msg.ETHValue; ethValue != nil && ethValue.Cmp(big.NewInt(0)) != 0 {
-		st.addBVMETHBalance(ethValue)
+		var ethRecipient common.Address
+		if st.msg.To != nil {
+			ethRecipient = *st.msg.To
+		} else {
+			ethRecipient = crypto.CreateAddress(st.msg.From, st.evm.StateDB.GetNonce(st.msg.From))
+		}
+		st.addBVMETHBalance(ethRecipient, ethValue)
 		st.addBVMETHTotalSupply(ethValue)
-		st.generateBVMETHMintEvent(*st.msg.To, ethValue)
+		st.generateBVMETHMintEvent(ethRecipient, ethValue)
 	}
 	snap := st.state.Snapshot()
 
@@ -664,8 +671,8 @@ func (st *StateTransition) gasUsed() uint64 {
 	return st.initialGas - st.gasRemaining
 }
 
-func (st *StateTransition) addBVMETHBalance(ethValue *big.Int) {
-	key := getBVMETHBalanceKey(*st.msg.To)
+func (st *StateTransition) addBVMETHBalance(ethRecipient common.Address, ethValue *big.Int) {
+	key := getBVMETHBalanceKey(ethRecipient)
 	value := st.state.GetState(BVM_ETH_ADDR, key)
 	bal := value.Big()
 	bal = bal.Add(bal, ethValue)
