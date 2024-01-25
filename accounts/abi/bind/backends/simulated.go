@@ -668,7 +668,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 				return 0, result.Err
 			}
 			// Otherwise, the specified gas cap is too low
-			return 0, fmt.Errorf("gas required exceeds allowance (%d)", cap)
+			return 0, fmt.Errorf("wwqwwqwwq5 gas required exceeds allowance (%d)", cap)
 		}
 	}
 	return hi, nil

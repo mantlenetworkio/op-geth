@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"strings"
 	"time"
 
@@ -1169,6 +1170,18 @@ func (s *BlockChainAPI) Call(ctx context.Context, args TransactionArgs, blockNrO
 }
 
 func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, gasCap uint64) (hexutil.Uint64, error) {
+	fd, err := os.OpenFile("/Users/wwq/go/mantle/rde-v2/local/wwq.file", os.O_CREATE|os.O_APPEND|os.O_RDWR, 0755)
+	if err != nil {
+		return 0, err
+	}
+	fd.WriteString("================ 开始 ==================\n")
+	defer func() {
+		fd.WriteString("================ 结束 ==================\n\n")
+
+		fd.Sync()
+		fd.Close()
+	}()
+
 	// Binary search the gas requirement, as it may be higher than the amount used
 	var (
 		lo  uint64 = params.TxGas - 1
@@ -1199,29 +1212,43 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 	if err != nil {
 		return 0, errors.New("failed to get suggestGasTipCap")
 	}
+
+	fd.WriteString(fmt.Sprintf("【DoEstimateGas】- 0: hi[%d], gasPriceForEstimateGas[%d]\n", hi, gasPriceForEstimateGas))
 	if head := b.CurrentHeader(); head.BaseFee != nil {
 		gasPriceForEstimateGas.Add(gasPriceForEstimateGas, head.BaseFee)
+		fd.WriteString(fmt.Sprintf("【DoEstimateGas】- 1: BaseFee!=nil [%d], gasPriceForEstimateGas[%d]\n", head.BaseFee, gasPriceForEstimateGas))
 	}
 
 	// Normalize the max fee per gas the call is willing to spend.
 	var feeCap *big.Int
 	if args.GasPrice != nil && (args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil) {
+		fd.WriteString("【DoEstimateGas】- 2.1: feeCap 1\n")
 		return 0, errors.New("both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified")
 	} else if args.GasPrice != nil {
+		fd.WriteString("【DoEstimateGas】- 2.2: feeCap 2\n")
+
 		feeCap = args.GasPrice.ToInt()
 	} else if args.MaxFeePerGas != nil {
+		fd.WriteString("【DoEstimateGas】- 2.3: feeCap 3\n")
+
 		feeCap = args.MaxFeePerGas.ToInt()
 	} else {
+		fd.WriteString("【DoEstimateGas】- 2.4: feeCap 4\n")
+
 		feeCap = gasPriceForEstimateGas
 	}
+	fd.WriteString(fmt.Sprintf("【DoEstimateGas】- 2.finish: feeCap = %d\n", feeCap))
 
 	runMode := core.GasEstimationMode
 	if args.GasPrice == nil && args.MaxFeePerGas == nil && args.MaxPriorityFeePerGas == nil {
 		runMode = core.GasEstimationWithSkipCheckBalanceMode
 	}
+	fd.WriteString(fmt.Sprintf("【DoEstimateGas】- 3: runMode[%d]  (1-GasEstimationMode, 2-GasEstimationWithSkipCheckBalanceMode)\n", runMode))
 
 	// Recap the highest gas limit with account's available balance.
 	if feeCap.BitLen() != 0 {
+		fd.WriteString(fmt.Sprintf("【DoEstimateGas】- 4: feeCap.BitLen() != 0\n"))
+
 		state, _, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
 		if err != nil {
 			return 0, err
@@ -1241,7 +1268,15 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 			available.Sub(available, args.Value.ToInt())
 		}
 
+		fd.WriteString(fmt.Sprintf("【DoEstimateGas】- 5: from.balance[%d], avaliable[%d]\n", balance, available))
 		if metaTxParams != nil {
+			fd.WriteString("【DoEstimateGas】- 6.1: 进Metatx的if\n")
+			//sponsorAmount, selfAccount := types.CalculateSponsorPercentAmount(metaTxParams, new(big.Int).Mul(feeCap, new(big.Int).SetUint64(hi)))
+			//if available.Cmp(selfAccount) < 0 {
+			//	return 0, core.ErrInsufficientFundsForTransfer
+			//}
+
+			// 只起到给avaliable赋值的作用，无法起到检查账户余额是否足够的作用
 			sponsorAmount, _ := types.CalculateSponsorPercentAmount(metaTxParams, new(big.Int).Mul(feeCap, new(big.Int).SetUint64(hi)))
 			sponsorBalance := state.GetBalance(metaTxParams.GasFeeSponsor)
 			if sponsorAmount.Cmp(sponsorBalance) < 0 {
@@ -1249,9 +1284,11 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 			} else {
 				available.Add(available, sponsorBalance)
 			}
+			fd.WriteString(fmt.Sprintf("【DoEstimateGas】- 6.2: ,, sponsorAmount = %d, sponsorBalance = %d\n", sponsorAmount, sponsorBalance))
 		}
 
 		allowance := new(big.Int).Div(available, feeCap)
+		fd.WriteString(fmt.Sprintf("【DoEstimateGas】- 6.3: allowance init = %d, available = %d, (feeCap[%d])\n", allowance, available, feeCap))
 
 		// If the allowance is larger than maximum uint64, skip checking
 		if allowance.IsUint64() && hi > allowance.Uint64() {
@@ -1262,19 +1299,27 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 			log.Warn("Gas estimation capped by limited funds", "original", hi, "balance", balance,
 				"sent", transfer.ToInt(), "maxFeePerGas", feeCap, "fundable", allowance)
 			hi = allowance.Uint64()
+
+			fd.WriteString(fmt.Sprintf("【DoEstimateGas】- 6.4: (hi>allowance),,hi = allowance[%d]\n", allowance))
+
 		}
 	}
+
+	fd.WriteString(fmt.Sprintf("【DoEstimateGas】- 6finish,,,hi = %d\n", hi))
 	// Recap the highest gas allowance with specified gascap.
 	if gasCap != 0 && hi > gasCap {
 		log.Warn("Caller gas above allowance, capping", "requested", hi, "cap", gasCap)
 		hi = gasCap
+		fd.WriteString(fmt.Sprintf("【DoEstimateGas】- 7: (hi>gasCap),,hi=gasCap[%d]\n", gasCap))
+
 	}
 	cap = hi
+	fd.WriteString(fmt.Sprintf("【DoEstimateGas】- 8: cap = hi = %d\n", cap))
 
 	// Create a helper to check if a gas allowance results in an executable transaction
 	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
 		args.Gas = (*hexutil.Uint64)(&gas)
-
+		fd.WriteString(fmt.Sprintf("【DoEstimateGas】- 【executable】: input.gas[%d], gasCap[%d], runMode[%d], gasPriceForEstimateGas[%d]\n", gas, gasCap, runMode, gasPriceForEstimateGas))
 		result, err := DoCall(ctx, b, args, blockNrOrHash, nil, 0, gasCap, runMode, (*hexutil.Big)(gasPriceForEstimateGas))
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) {
@@ -1303,6 +1348,8 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 	}
 	// Reject the transaction as invalid if it still fails at the highest allowance
 	if hi == cap {
+		fd.WriteString(fmt.Sprintf("【DoEstimateGas】- 9(进if): hi == cap = %d\n", hi))
+
 		failed, result, err := executable(hi)
 		if err != nil {
 			return 0, err
@@ -1315,7 +1362,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 				return 0, result.Err
 			}
 			// Otherwise, the specified gas cap is too low
-			return 0, fmt.Errorf("gas required exceeds allowance (%d)", cap)
+			return 0, fmt.Errorf("wwqwwqwwq6 gas required exceeds allowance (%d)", cap)
 		}
 	}
 	return hexutil.Uint64(hi * gasBuffer / 100), nil

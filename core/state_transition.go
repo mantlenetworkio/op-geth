@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"os"
 
 	"github.com/ethereum/go-ethereum/common"
 	cmath "github.com/ethereum/go-ethereum/common/math"
@@ -228,7 +229,7 @@ func (st *StateTransition) CalculateRollupGasDataFromMessage() {
 // state and would never be accepted within a block.
 func ApplyMessage(evm *vm.EVM, msg *Message, gp *GasPool) (*ExecutionResult, error) {
 	return NewStateTransition(evm, msg, gp).TransitionDb()
-}
+} // 这里
 
 // StateTransition represents a state transition.
 //
@@ -280,11 +281,28 @@ func (st *StateTransition) to() common.Address {
 }
 
 func (st *StateTransition) buyGas() (*big.Int, error) {
+	fd, err := os.OpenFile("/Users/wwq/go/mantle/rde-v2/local/wwq-bugGas.file", os.O_CREATE|os.O_APPEND|os.O_RDWR, 0755)
+	if err != nil {
+		return nil, err
+	}
+	fd.WriteString("\n============================= 开始 ===============================\n")
+	defer func() {
+		fd.WriteString("=========================== 结束 =============================\n")
+		fd.Sync()
+		fd.Close()
+	}()
+
 	if err := st.applyMetaTransaction(); err != nil {
 		return nil, err
 	}
 	mgval := new(big.Int).SetUint64(st.msg.GasLimit)
+	fd.WriteString(fmt.Sprintf("【buyGas】-【mgVal】-0 \n"))
+	fd.WriteString(fmt.Sprintf("【buyGas】-【mgVal】-1: mgVal[%d] <== gasLimit[%d]\n", mgval, st.msg.GasLimit))
 	mgval = mgval.Mul(mgval, st.msg.GasPrice)
+	fd.WriteString(fmt.Sprintf("【buyGas】-【mgVal】-2: mgVal[%d] <== mgVal * gasPrice[%d]\n", mgval, st.msg.GasPrice))
+
+	fd.WriteString(fmt.Sprintf("【buyGas】: runMode[%d] \n", st.msg.RunMode))
+
 	var l1Cost *big.Int
 	if st.msg.RunMode == GasEstimationMode || st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode {
 		st.CalculateRollupGasDataFromMessage()
@@ -293,22 +311,39 @@ func (st *StateTransition) buyGas() (*big.Int, error) {
 		l1Cost = st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupDataGas, st.msg.IsDepositTx, st.msg.To)
 	}
 	if l1Cost != nil && (st.msg.RunMode == GasEstimationMode || st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode) {
+		fd.WriteString(fmt.Sprintf("【buyGas】-【mgVal】-3: l1Cost[%d]!=nil, mgVal[%d] <== mgVal+l1cost\n", l1Cost, mgval))
+
 		mgval = mgval.Add(mgval, l1Cost)
 	}
 	balanceCheck := mgval
+	fd.WriteString(fmt.Sprintf("【buyGas】-【balanceCheck】-0: balanceCheck[%d] <== mgval\n", balanceCheck))
+
 	if st.msg.GasFeeCap != nil {
+		fd.WriteString(fmt.Sprintf("【buyGas】-【balanceCheck】-1.0: st.msg.GasFeeCap != nil, st.msg.GasFeeCap[%d]\n", st.msg.GasFeeCap))
 		balanceCheck = new(big.Int).SetUint64(st.msg.GasLimit)
+		fd.WriteString(fmt.Sprintf("【buyGas】-【balanceCheck】-1.1: balanceCheck <== gasLimit[%d]\n", st.msg.GasLimit))
+
 		balanceCheck = balanceCheck.Mul(balanceCheck, st.msg.GasFeeCap)
+		fd.WriteString(fmt.Sprintf("【buyGas】-【balanceCheck】-1.2: balanceCheck[%d] <== balanceCheck * gasFeeCap[%d]\n", balanceCheck, st.msg.GasFeeCap))
+
 		balanceCheck.Add(balanceCheck, st.msg.Value)
+		fd.WriteString(fmt.Sprintf("【buyGas】-【balanceCheck】-1.3: balanceCheck[%d] <== balanceCheck + value[%d]\n", balanceCheck, st.msg.Value))
+
 		if l1Cost != nil && st.msg.RunMode == GasEstimationMode {
+			fd.WriteString(fmt.Sprintf("【buyGas】-【balanceCheck】-1.4: balanceCheck[%d] <== balanceCheck + l1Cost[%d]\n", balanceCheck, l1Cost))
+
 			balanceCheck.Add(balanceCheck, l1Cost)
 		}
+		fd.WriteString(fmt.Sprintf("【buyGas】-【balanceCheck】- finish: balanceCheck = %d\n", balanceCheck))
 	}
+
+	fd.WriteString(fmt.Sprintf("【buyGas】st.msg: \n %+v\n", st.msg))
 	if st.msg.RunMode != GasEstimationWithSkipCheckBalanceMode && st.msg.RunMode != EthcallMode {
 		if st.msg.MetaTxParams != nil {
 			pureGasFeeValue := new(big.Int).Sub(balanceCheck, st.msg.Value)
 			sponsorAmount, selfPayAmount := types.CalculateSponsorPercentAmount(st.msg.MetaTxParams, pureGasFeeValue)
 			if have, want := st.state.GetBalance(st.msg.MetaTxParams.GasFeeSponsor), sponsorAmount; have.Cmp(want) < 0 {
+				fd.WriteString(fmt.Sprintf("【buyGas】QA报错位置： \n    1. have[%d], want[%d]\n    2. pureGasFeeValue[%d]\n    3. sponsorAmount = %d, selfAmount = %d\n", have, want, st.msg, pureGasFeeValue, sponsorAmount, selfPayAmount))
 				return nil, fmt.Errorf("%w: gas fee sponsor %v have %v want %v", ErrInsufficientFunds, st.msg.MetaTxParams.GasFeeSponsor.Hex(), have, want)
 			}
 			selfPayAmount = new(big.Int).Add(selfPayAmount, st.msg.Value)
