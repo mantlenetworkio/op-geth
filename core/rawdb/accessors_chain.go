@@ -679,15 +679,34 @@ type storedReceiptRLP struct {
 	PostStateOrStatus []byte
 	CumulativeGasUsed uint64
 	Logs              []*types.Log
+	// DepositNonce was introduced in Regolith to store the actual nonce used by deposit transactions.
+	// Must be nil for any transactions prior to Regolith or that aren't deposit transactions.
+	DepositNonce *uint64 `rlp:"optional"`
 
 	// Remaining fields are declared to allow the receipt RLP to be parsed without errors.
 	// However, they must not be used as they may not be populated correctly due to multiple receipt formats
 	// being combined into a single list of optional fields which can be mistaken for each other.
-	// DepositNonce (*uint64) from Regolith deposit tx receipts will be parsed into L1GasUsed
-	L1GasUsed  *big.Int `rlp:"optional"` // OVM legacy
-	L1GasPrice *big.Int `rlp:"optional"` // OVM legacy
-	L1Fee      *big.Int `rlp:"optional"` // OVM legacy
-	FeeScalar  string   `rlp:"optional"` // OVM legacy
+	L1GasUsed  *big.Int `rlp:"optional"`
+	L1GasPrice *big.Int `rlp:"optional"`
+	L1Fee      *big.Int `rlp:"optional"`
+	FeeScalar  string   `rlp:"optional"`
+	TokenRatio *big.Int `rlp:"optional"`
+}
+
+type legacyOptimismStoredReceiptRLP struct {
+	PostStateOrStatus []byte
+	CumulativeGasUsed uint64
+	Logs              []*types.Log
+	L1GasUsed         *big.Int `rlp:"optional"`
+	L1GasPrice        *big.Int `rlp:"optional"`
+	L1Fee             *big.Int `rlp:"optional"`
+	FeeScalar         string   `rlp:"optional"`
+
+	// DAGasUsed,DAGasPrice,DAFee These values are not used to collect fee,
+	// so decode from ledger, but not exposed outside.
+	DAGasUsed  *big.Int `rlp:"optional"`
+	DAGasPrice *big.Int `rlp:"optional"`
+	DAFee      *big.Int `rlp:"optional"`
 }
 
 // ReceiptLogs is a barebone version of ReceiptForStorage which only keeps
@@ -699,11 +718,26 @@ type receiptLogs struct {
 
 // DecodeRLP implements rlp.Decoder.
 func (r *receiptLogs) DecodeRLP(s *rlp.Stream) error {
-	var stored storedReceiptRLP
-	if err := s.Decode(&stored); err != nil {
+	blob, err := s.Raw()
+	if err != nil {
 		return err
 	}
-	r.Logs = stored.Logs
+
+	// First try to decode the latest receipt database format, try the pre-bedrock Optimism legacy format otherwise.
+	var stored storedReceiptRLP
+	err = rlp.DecodeBytes(blob, &stored)
+	if err == nil {
+		r.Logs = stored.Logs
+		return nil
+	}
+
+	var storedLegacy legacyOptimismStoredReceiptRLP
+	err = rlp.DecodeBytes(blob, &storedLegacy)
+	if err != nil {
+		return err
+	}
+
+	r.Logs = storedLegacy.Logs
 	return nil
 }
 

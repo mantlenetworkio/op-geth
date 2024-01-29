@@ -1021,6 +1021,7 @@ type generateParams struct {
 
 	txs      types.Transactions // Deposit transactions to include at the start of the block
 	gasLimit *uint64            // Optional gas limit override
+	baseFee  *big.Int           // Optional base fee override
 }
 
 // prepareWork constructs the sealing task according to the given parameters,
@@ -1067,6 +1068,15 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 	// Set baseFee and GasLimit if we are on an EIP-1559 chain
 	if w.chainConfig.IsLondon(header.Number) {
 		header.BaseFee = misc.CalcBaseFee(w.chainConfig, parent)
+		if w.chainConfig.IsMantleBaseFee(header.Time) {
+			header.BaseFee = genParams.baseFee
+		}
+		if genParams.baseFee == nil {
+			header.BaseFee = misc.CalcBaseFee(w.chainConfig, parent)
+			log.Debug("header base fee from eip1559 calculator", "baseFee", header.BaseFee.String())
+		} else {
+			log.Debug("header base fee from catalyst generation parameters", "baseFee", header.BaseFee.String())
+		}
 		if !w.chainConfig.IsLondon(parent.Number) {
 			parentGasLimit := parent.GasLimit * w.chainConfig.ElasticityMultiplier()
 			header.GasLimit = core.CalcGasLimit(parentGasLimit, w.config.GasCeil)
@@ -1292,7 +1302,7 @@ func (w *worker) commit(env *environment, interval func(), update bool, start ti
 // getSealingBlock generates the sealing block based on the given parameters.
 // The generation result will be passed back via the given channel no matter
 // the generation itself succeeds or not.
-func (w *worker) getSealingBlock(parent common.Hash, timestamp uint64, coinbase common.Address, random common.Hash, withdrawals types.Withdrawals, noTxs bool, transactions types.Transactions, gasLimit *uint64) (*types.Block, *big.Int, error) {
+func (w *worker) getSealingBlock(parent common.Hash, timestamp uint64, coinbase common.Address, random common.Hash, withdrawals types.Withdrawals, noTxs bool, transactions types.Transactions, gasLimit *uint64, baseFee *big.Int) (*types.Block, *big.Int, error) {
 	req := &getWorkReq{
 		params: &generateParams{
 			timestamp:   timestamp,
@@ -1305,6 +1315,7 @@ func (w *worker) getSealingBlock(parent common.Hash, timestamp uint64, coinbase 
 			noTxs:       noTxs,
 			txs:         transactions,
 			gasLimit:    gasLimit,
+			baseFee:     baseFee,
 		},
 		result: make(chan *newPayloadResult, 1),
 	}

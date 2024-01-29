@@ -52,6 +52,10 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
+var (
+	gasBuffer = uint64(120)
+)
+
 // EthereumAPI provides an API to access Ethereum related information.
 type EthereumAPI struct {
 	b Backend
@@ -1043,7 +1047,7 @@ func (diff *BlockOverrides) Apply(blockCtx *vm.BlockContext) {
 	}
 }
 
-func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *StateOverride, timeout time.Duration, globalGasCap uint64) (*core.ExecutionResult, error) {
+func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *StateOverride, timeout time.Duration, globalGasCap uint64, runMode core.RunMode, gasPriceForEstimate *hexutil.Big) (*core.ExecutionResult, error) {
 	defer func(start time.Time) { log.Debug("Executing EVM call finished", "runtime", time.Since(start)) }(time.Now())
 
 	state, header, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
@@ -1066,7 +1070,7 @@ func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash 
 	defer cancel()
 
 	// Get a new instance of the EVM.
-	msg, err := args.ToMessage(globalGasCap, header.BaseFee)
+	msg, err := args.ToMessage(globalGasCap, header.BaseFee, runMode, gasPriceForEstimate)
 	if err != nil {
 		return nil, err
 	}
@@ -1082,7 +1086,7 @@ func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash 
 	}()
 
 	// Execute the message.
-	gp := new(core.GasPool).AddGas(math.MaxUint64)
+	gp := new(core.GasPool).AddGas(core.DefaultMantleBlockGasLimit)
 	result, err := core.ApplyMessage(evm, msg, gp)
 	if err := vmError(); err != nil {
 		return nil, err
@@ -1153,7 +1157,7 @@ func (s *BlockChainAPI) Call(ctx context.Context, args TransactionArgs, blockNrO
 		}
 	}
 
-	result, err := DoCall(ctx, s.b, args, blockNrOrHash, overrides, s.b.RPCEVMTimeout(), s.b.RPCGasCap())
+	result, err := DoCall(ctx, s.b, args, blockNrOrHash, overrides, s.b.RPCEVMTimeout(), s.b.RPCGasCap(), core.EthcallMode, args.GasPrice)
 	if err != nil {
 		return nil, err
 	}
@@ -1189,6 +1193,16 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		}
 		hi = block.GasLimit()
 	}
+
+	// Normalize the gasPrice used for estimateGas
+	gasPriceForEstimateGas, err := b.SuggestGasTipCap(ctx)
+	if err != nil {
+		return 0, errors.New("failed to get suggestGasTipCap")
+	}
+	if head := b.CurrentHeader(); head.BaseFee != nil {
+		gasPriceForEstimateGas.Add(gasPriceForEstimateGas, head.BaseFee)
+	}
+
 	// Normalize the max fee per gas the call is willing to spend.
 	var feeCap *big.Int
 	if args.GasPrice != nil && (args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil) {
@@ -1198,22 +1212,45 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 	} else if args.MaxFeePerGas != nil {
 		feeCap = args.MaxFeePerGas.ToInt()
 	} else {
-		feeCap = common.Big0
+		feeCap = gasPriceForEstimateGas
 	}
+
+	runMode := core.GasEstimationMode
+	if args.GasPrice == nil && args.MaxFeePerGas == nil && args.MaxPriorityFeePerGas == nil {
+		runMode = core.GasEstimationWithSkipCheckBalanceMode
+	}
+
 	// Recap the highest gas limit with account's available balance.
 	if feeCap.BitLen() != 0 {
 		state, _, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
 		if err != nil {
 			return 0, err
 		}
+
 		balance := state.GetBalance(*args.From) // from can't be nil
+		metaTxParams, err := types.DecodeMetaTxParams(args.data())
+		if err != nil {
+			return 0, err
+		}
+
 		available := new(big.Int).Set(balance)
 		if args.Value != nil {
-			if args.Value.ToInt().Cmp(available) >= 0 {
+			if args.Value.ToInt().Cmp(available) > 0 {
 				return 0, core.ErrInsufficientFundsForTransfer
 			}
 			available.Sub(available, args.Value.ToInt())
 		}
+
+		if metaTxParams != nil {
+			sponsorAmount, _ := types.CalculateSponsorPercentAmount(metaTxParams, new(big.Int).Mul(feeCap, new(big.Int).SetUint64(hi)))
+			sponsorBalance := state.GetBalance(metaTxParams.GasFeeSponsor)
+			if sponsorAmount.Cmp(sponsorBalance) < 0 {
+				available.Add(available, sponsorAmount)
+			} else {
+				available.Add(available, sponsorBalance)
+			}
+		}
+
 		allowance := new(big.Int).Div(available, feeCap)
 
 		// If the allowance is larger than maximum uint64, skip checking
@@ -1238,7 +1275,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
 		args.Gas = (*hexutil.Uint64)(&gas)
 
-		result, err := DoCall(ctx, b, args, blockNrOrHash, nil, 0, gasCap)
+		result, err := DoCall(ctx, b, args, blockNrOrHash, nil, 0, gasCap, runMode, (*hexutil.Big)(gasPriceForEstimateGas))
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) {
 				return true, nil, nil // Special case, raise gas limit
@@ -1281,7 +1318,45 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 			return 0, fmt.Errorf("gas required exceeds allowance (%d)", cap)
 		}
 	}
-	return hexutil.Uint64(hi), nil
+	return hexutil.Uint64(hi * gasBuffer / 100), nil
+}
+
+func calculateGasWithAllowance(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, gasPriceForEstimate *big.Int, gasCap uint64) (uint64, error) {
+	state, _, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
+	if err != nil {
+		return 0, err
+	}
+	balance := state.GetBalance(*args.From) // from can't be nil
+	metaTxParams, err := types.DecodeMetaTxParams(args.data())
+	if err != nil {
+		return 0, err
+	}
+
+	available := new(big.Int).Set(balance)
+	if args.Value != nil {
+		if args.Value.ToInt().Cmp(available) > 0 {
+			return 0, core.ErrInsufficientFundsForTransfer
+		}
+		available.Sub(available, args.Value.ToInt())
+	}
+	if metaTxParams != nil {
+		feeCap := new(big.Int).Mul(gasPriceForEstimate, big.NewInt(0).SetUint64(gasCap))
+		sponsorAmount, _ := types.CalculateSponsorPercentAmount(metaTxParams, feeCap)
+		sponsorBalance := state.GetBalance(metaTxParams.GasFeeSponsor)
+		if sponsorAmount.Cmp(sponsorBalance) < 0 {
+			available.Add(available, sponsorAmount)
+		} else {
+			available.Add(available, sponsorBalance)
+		}
+	}
+
+	allowanceGas := new(big.Int).Div(available, gasPriceForEstimate)
+
+	if allowanceGas.Uint64() < gasCap {
+		return allowanceGas.Uint64(), nil
+	}
+
+	return gasCap, nil
 }
 
 // EstimateGas returns an estimate of the amount of gas needed to execute the
@@ -1354,21 +1429,18 @@ func RPCMarshalBlock(ctx context.Context, block *types.Block, inclTx bool, fullT
 	fields["size"] = hexutil.Uint64(block.Size())
 
 	if inclTx {
-		formatTx := func(tx *types.Transaction) (interface{}, error) {
-			return tx.Hash(), nil
+		formatTx := func(idx int, tx *types.Transaction) interface{} {
+			return tx.Hash()
 		}
 		if fullTx {
-			formatTx = func(tx *types.Transaction) (interface{}, error) {
-				return newRPCTransactionFromBlockHash(ctx, block, tx.Hash(), backend), nil
+			formatTx = func(idx int, tx *types.Transaction) interface{} {
+				return newRPCTransactionFromBlockIndex(ctx, block, uint64(idx), backend)
 			}
 		}
 		txs := block.Transactions()
 		transactions := make([]interface{}, len(txs))
-		var err error
 		for i, tx := range txs {
-			if transactions[i], err = formatTx(tx); err != nil {
-				return nil, err
-			}
+			transactions[i] = formatTx(i, tx)
 		}
 		fields["transactions"] = transactions
 	}
@@ -1430,6 +1502,7 @@ type RPCTransaction struct {
 	// deposit-tx only
 	SourceHash *common.Hash `json:"sourceHash,omitempty"`
 	Mint       *hexutil.Big `json:"mint,omitempty"`
+	EthValue   *hexutil.Big `json:"ethValue,omitempty"`
 	IsSystemTx *bool        `json:"isSystemTx,omitempty"`
 }
 
@@ -1469,6 +1542,7 @@ func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber
 			result.IsSystemTx = &isSystemTx
 		}
 		result.Mint = (*hexutil.Big)(tx.Mint())
+		result.EthValue = (*hexutil.Big)(tx.ETHValue())
 		if receipt != nil && receipt.DepositNonce != nil {
 			result.Nonce = hexutil.Uint64(*receipt.DepositNonce)
 		}
@@ -1547,16 +1621,6 @@ func newRPCRawTransactionFromBlockIndex(b *types.Block, index uint64) hexutil.By
 	}
 	blob, _ := txs[index].MarshalBinary()
 	return blob
-}
-
-// newRPCTransactionFromBlockHash returns a transaction that will serialize to the RPC representation.
-func newRPCTransactionFromBlockHash(ctx context.Context, b *types.Block, hash common.Hash, backend Backend) *RPCTransaction {
-	for idx, tx := range b.Transactions() {
-		if tx.Hash() == hash {
-			return newRPCTransactionFromBlockIndex(ctx, b, uint64(idx), backend)
-		}
-	}
-	return nil
 }
 
 // accessListResult returns an optional accesslist
@@ -1644,7 +1708,7 @@ func AccessList(ctx context.Context, b Backend, blockNrOrHash rpc.BlockNumberOrH
 		statedb := db.Copy()
 		// Set the accesslist to the last al
 		args.AccessList = &accessList
-		msg, err := args.ToMessage(b.RPCGasCap(), header.BaseFee)
+		msg, err := args.ToMessage(b.RPCGasCap(), header.BaseFee, core.EthcallMode, args.GasPrice)
 		if err != nil {
 			return nil, 0, nil, err
 		}
@@ -1855,6 +1919,9 @@ func (s *TransactionAPI) GetTransactionReceipt(ctx context.Context, hash common.
 		fields["l1GasUsed"] = (*hexutil.Big)(receipt.L1GasUsed)
 		fields["l1Fee"] = (*hexutil.Big)(receipt.L1Fee)
 		fields["l1FeeScalar"] = receipt.FeeScalar.String()
+		if receipt.TokenRatio != nil {
+			fields["tokenRatio"] = (*hexutil.Big)(receipt.TokenRatio)
+		}
 	}
 	if s.b.ChainConfig().Optimism != nil && tx.IsDepositTx() && receipt.DepositNonce != nil {
 		fields["depositNonce"] = hexutil.Uint64(*receipt.DepositNonce)

@@ -42,6 +42,11 @@ var (
 	BaseGoerliChainId          = big.NewInt(84531)
 	// April 27, 2023 @ 5:00:00 pm UTC
 	BaseGoerliRegolithTime = uint64(1682614800)
+
+	// Mantle chain_id
+	MantleMainnetChainId = big.NewInt(5000)
+	MantleSepoliaChainId = big.NewInt(5003)
+	MantleLocalChainId   = big.NewInt(17)
 )
 
 // TrustedCheckpoints associates each known checkpoint with the genesis hash of
@@ -452,6 +457,9 @@ type ChainConfig struct {
 	GrayGlacierBlock    *big.Int `json:"grayGlacierBlock,omitempty"`    // Eip-5133 (bomb delay) switch block (nil = no fork, 0 = already activated)
 	MergeNetsplitBlock  *big.Int `json:"mergeNetsplitBlock,omitempty"`  // Virtual fork after The Merge to use as a network splitter
 
+	// Mantle upgrade configs
+	BaseFeeTime *uint64 `json:"baseFeeTime,omitempty"` // Mantle BaseFee switch time (nil = no fork, 0 = already on mantle baseFee)
+
 	// Fork scheduling was switched from blocks to timestamps here
 
 	ShanghaiTime *uint64 `json:"shanghaiTime,omitempty"` // Shanghai switch time (nil = no fork, 0 = already on shanghai)
@@ -662,6 +670,11 @@ func (c *ChainConfig) IsBerlin(num *big.Int) bool {
 // IsLondon returns whether num is either equal to the London fork block or greater.
 func (c *ChainConfig) IsLondon(num *big.Int) bool {
 	return isBlockForked(c.LondonBlock, num)
+}
+
+// IsMantleBaseFee returns whether time is either equal to the BaseFee fork time or greater.
+func (c *ChainConfig) IsMantleBaseFee(time uint64) bool {
+	return isTimestampForked(c.BaseFeeTime, time)
 }
 
 // IsArrowGlacier returns whether num is either equal to the Arrow Glacier (EIP-4345) fork block or greater.
@@ -1033,6 +1046,7 @@ type Rules struct {
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
 	IsBerlin, IsLondon                                      bool
 	IsMerge, IsShanghai, isCancun, isPrague                 bool
+	IsMantleBaseFee                                         bool
 	IsOptimismBedrock, IsOptimismRegolith                   bool
 }
 
@@ -1055,6 +1069,7 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		IsBerlin:         c.IsBerlin(num),
 		IsLondon:         c.IsLondon(num),
 		IsMerge:          isMerge,
+		IsMantleBaseFee:  c.IsMantleBaseFee(timestamp),
 		IsShanghai:       c.IsShanghai(timestamp),
 		isCancun:         c.IsCancun(timestamp),
 		isPrague:         c.IsPrague(timestamp),
