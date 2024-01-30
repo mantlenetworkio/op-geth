@@ -440,25 +440,17 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	if mint := st.msg.Mint; mint != nil {
 		st.state.AddBalance(st.msg.From, mint)
 	}
+
+	//Mint BVM_ETH
+	rules := st.evm.ChainConfig().Rules(st.evm.Context.BlockNumber, st.evm.Context.Random != nil, st.evm.Context.Time)
 	//add eth value
 	if ethValue := st.msg.ETHValue; ethValue != nil && ethValue.Cmp(big.NewInt(0)) != 0 {
-		var ethRecipient common.Address
-		if st.msg.To != nil {
-			ethRecipient = *st.msg.To
-		} else {
-			ethRecipient = crypto.CreateAddress(st.msg.From, st.evm.StateDB.GetNonce(st.msg.From))
-		}
-		st.addBVMETHBalance(ethRecipient, ethValue)
-		st.addBVMETHTotalSupply(ethValue)
-		st.generateBVMETHMintEvent(ethRecipient, ethValue)
+		st.mintBVMETH(ethValue, rules)
 	}
 	snap := st.state.Snapshot()
-
 	// Will be reverted if failed
-	if rules.IsMantleBVMETHMintUpgrade {
-		if ethTxValue := st.msg.ETHTxValue; ethTxValue != nil && ethTxValue.Cmp(big.NewInt(0)) != 0 {
-			st.transferBVMETH(ethTxValue)
-		}
+	if ethTxValue := st.msg.ETHTxValue; ethTxValue != nil && ethTxValue.Cmp(big.NewInt(0)) != 0 {
+		st.transferBVMETH(ethTxValue, rules)
 	}
 
 	result, err := st.innerTransitionDb()
@@ -680,12 +672,33 @@ func (st *StateTransition) gasUsed() uint64 {
 	return st.initialGas - st.gasRemaining
 }
 
-func (st *StateTransition) addBVMETHBalance(ethRecipient common.Address, ethValue *big.Int) {
-	key := getBVMETHBalanceKey(ethRecipient)
+func (st *StateTransition) mintBVMETH(ethValue *big.Int, rules params.Rules) {
+	if !rules.IsMantleBVMETHMintUpgrade {
+		var key common.Hash
+		var ethRecipient common.Address
+		if st.msg.To != nil {
+			ethRecipient = *st.msg.To
+		} else {
+			ethRecipient = crypto.CreateAddress(st.msg.From, st.evm.StateDB.GetNonce(st.msg.From))
+		}
+		key = getBVMETHBalanceKey(ethRecipient)
+		value := st.state.GetState(BVM_ETH_ADDR, key)
+		bal := value.Big()
+		bal = bal.Add(bal, ethValue)
+		st.state.SetState(BVM_ETH_ADDR, key, common.BigToHash(bal))
+
+		st.addBVMETHTotalSupply(ethValue)
+		st.generateBVMETHMintEvent(ethRecipient, ethValue)
+		return
+	}
+	key := getBVMETHBalanceKey(st.msg.From)
 	value := st.state.GetState(BVM_ETH_ADDR, key)
 	bal := value.Big()
 	bal = bal.Add(bal, ethValue)
 	st.state.SetState(BVM_ETH_ADDR, key, common.BigToHash(bal))
+
+	st.addBVMETHTotalSupply(ethValue)
+	st.generateBVMETHMintEvent(st.msg.From, ethValue)
 }
 
 func (st *StateTransition) addBVMETHTotalSupply(ethValue *big.Int) {
@@ -694,6 +707,38 @@ func (st *StateTransition) addBVMETHTotalSupply(ethValue *big.Int) {
 	bal := value.Big()
 	bal = bal.Add(bal, ethValue)
 	st.state.SetState(BVM_ETH_ADDR, key, common.BigToHash(bal))
+}
+
+func (st *StateTransition) transferBVMETH(ethValue *big.Int, rules params.Rules) {
+	if !rules.IsMantleBVMETHMintUpgrade {
+		return
+	}
+	var ethRecipient common.Address
+	if st.msg.To != nil {
+		ethRecipient = *st.msg.To
+	} else {
+		ethRecipient = crypto.CreateAddress(st.msg.From, st.evm.StateDB.GetNonce(st.msg.From))
+	}
+	if ethRecipient == st.msg.From {
+		return
+	}
+
+	fromKey := getBVMETHBalanceKey(st.msg.From)
+	toKey := getBVMETHBalanceKey(ethRecipient)
+
+	fromBalanceValue := st.state.GetState(BVM_ETH_ADDR, fromKey)
+	toBalanceValue := st.state.GetState(BVM_ETH_ADDR, toKey)
+
+	fromBalance := fromBalanceValue.Big()
+	toBalance := toBalanceValue.Big()
+
+	fromBalance = new(big.Int).Sub(fromBalance, ethValue)
+	toBalance = new(big.Int).Add(toBalance, ethValue)
+
+	st.state.SetState(BVM_ETH_ADDR, fromKey, common.BigToHash(fromBalance))
+	st.state.SetState(BVM_ETH_ADDR, toKey, common.BigToHash(toBalance))
+
+	st.generateBVMETHTransferEvent(st.msg.From, ethRecipient, ethValue)
 }
 
 func getBVMETHBalanceKey(addr common.Address) common.Hash {
@@ -721,6 +766,25 @@ func (st *StateTransition) generateBVMETHMintEvent(mintAddress common.Address, m
 		Address: BVM_ETH_ADDR,
 		Topics:  topics,
 		Data:    d,
+		// This is a non-consensus field, but assigned here because
+		// core/state doesn't know the current block number.
+		BlockNumber: st.evm.Context.BlockNumber.Uint64(),
+	})
+}
+
+func (st *StateTransition) generateBVMETHTransferEvent(from, to common.Address, amount *big.Int) {
+	// keccak("Transfer(address,address,uint256)") = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+	methodHash := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+	topics := make([]common.Hash, 3)
+	topics[0] = methodHash
+	topics[1] = from.Hash()
+	topics[2] = to.Hash()
+	//data means the transfer amount in Transfer EVENT.
+	data := common.HexToHash(common.Bytes2Hex(amount.Bytes())).Bytes()
+	st.evm.StateDB.AddLog(&types.Log{
+		Address: BVM_ETH_ADDR,
+		Topics:  topics,
+		Data:    data,
 		// This is a non-consensus field, but assigned here because
 		// core/state doesn't know the current block number.
 		BlockNumber: st.evm.Context.BlockNumber.Uint64(),
