@@ -170,8 +170,8 @@ type Message struct {
 }
 
 // TransactionToMessage converts a transaction into a Message.
-func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.Int) (*Message, error) {
-	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx)
+func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.Int, currentHeight uint64) (*Message, error) {
+	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx, currentHeight)
 	if err != nil {
 		return nil, err
 	}

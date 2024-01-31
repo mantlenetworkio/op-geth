@@ -3,6 +3,7 @@ package types
 import (
 	"bytes"
 	"errors"
+	"math"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -39,11 +40,39 @@ type MetaTxParams struct {
 	S *big.Int
 }
 
+//type MetaTxParamsV2 struct {
+//	ExpireHeight   uint64
+//	SponsorPercent uint64
+//	Payload        []byte
+//	From           common.Address
+//
+//	// In tx simulation, Signature will be empty, user can specify GasFeeSponsor to sponsor gas fee
+//	GasFeeSponsor common.Address
+//	// Signature values
+//	V *big.Int
+//	R *big.Int
+//	S *big.Int
+//}
+
 type MetaTxParamsCache struct {
 	metaTxParams *MetaTxParams
 }
 
 type MetaTxSignData struct {
+	ChainID        *big.Int
+	Nonce          uint64
+	GasTipCap      *big.Int
+	GasFeeCap      *big.Int
+	Gas            uint64
+	To             *common.Address `rlp:"nil"`
+	Value          *big.Int
+	Data           []byte
+	AccessList     AccessList
+	ExpireHeight   uint64
+	SponsorPercent uint64
+}
+
+type MetaTxSignDataV2 struct {
 	From           common.Address
 	ChainID        *big.Int
 	Nonce          uint64
@@ -90,7 +119,7 @@ func DecodeMetaTxParams(txData []byte) (*MetaTxParams, error) {
 	return &metaTxParams, nil
 }
 
-func DecodeAndVerifyMetaTxParams(tx *Transaction) (*MetaTxParams, error) {
+func DecodeAndVerifyMetaTxParams(tx *Transaction, currentHeight uint64) (*MetaTxParams, error) {
 	if tx.Type() != DynamicFeeTxType {
 		return nil, nil
 	}
@@ -118,33 +147,14 @@ func DecodeAndVerifyMetaTxParams(tx *Transaction) (*MetaTxParams, error) {
 		return nil, ErrInvalidSponsorPercent
 	}
 
-	txSender, err := Sender(LatestSignerForChainID(tx.ChainId()), tx)
-	if err != nil {
+	var updateHeight uint64 = math.MaxUint64
+
+	//args := []uint64{updateHeight}
+	//if currentHeight != nil && len(currentHeight) > 0 {
+	//	args = append(args, currentHeight[0])
+	//}
+	if err := checkSponsorSignature(tx, metaTxParams, updateHeight, currentHeight); err != nil {
 		return nil, err
-	}
-
-	metaTxSignData := &MetaTxSignData{
-		From:           txSender,
-		ChainID:        tx.ChainId(),
-		Nonce:          tx.Nonce(),
-		GasTipCap:      tx.GasTipCap(),
-		GasFeeCap:      tx.GasFeeCap(),
-		Gas:            tx.Gas(),
-		To:             tx.To(),
-		Value:          tx.Value(),
-		Data:           metaTxParams.Payload,
-		AccessList:     tx.AccessList(),
-		ExpireHeight:   metaTxParams.ExpireHeight,
-		SponsorPercent: metaTxParams.SponsorPercent,
-	}
-
-	gasFeeSponsorSigner, err := recoverPlain(metaTxSignData.Hash(), metaTxParams.R, metaTxParams.S, metaTxParams.V, true)
-	if err != nil {
-		return nil, ErrInvalidGasFeeSponsorSig
-	}
-
-	if gasFeeSponsorSigner != metaTxParams.GasFeeSponsor {
-		return nil, ErrGasFeeSponsorMismatch
 	}
 
 	tx.metaTxParams.Store(&MetaTxParamsCache{
@@ -154,6 +164,111 @@ func DecodeAndVerifyMetaTxParams(tx *Transaction) (*MetaTxParams, error) {
 	return metaTxParams, nil
 }
 
+func checkSponsorSignature(tx *Transaction, metaTxParams *MetaTxParams, args ...uint64) error {
+	var (
+		gasFeeSponsorSigner         common.Address
+		updateHeight, currentHeight uint64
+	)
+	if args != nil {
+		if len(args) == 2 {
+			updateHeight, currentHeight = args[0], args[1]
+		} else if len(args) > 2 {
+			return errors.New("wrong args number")
+		}
+	}
+
+	txSender, err := Sender(LatestSignerForChainID(tx.ChainId()), tx)
+	if err != nil {
+		return err
+	}
+
+	if args == nil || len(args) < 2 {
+		metaTxSignData := &MetaTxSignDataV2{
+			From:           txSender,
+			ChainID:        tx.ChainId(),
+			Nonce:          tx.Nonce(),
+			GasTipCap:      tx.GasTipCap(),
+			GasFeeCap:      tx.GasFeeCap(),
+			Gas:            tx.Gas(),
+			To:             tx.To(),
+			Value:          tx.Value(),
+			Data:           metaTxParams.Payload,
+			AccessList:     tx.AccessList(),
+			ExpireHeight:   metaTxParams.ExpireHeight,
+			SponsorPercent: metaTxParams.SponsorPercent,
+		}
+
+		gasFeeSponsorSigner, err = recoverPlain(metaTxSignData.Hash(), metaTxParams.R, metaTxParams.S, metaTxParams.V, true)
+		if err != nil {
+			metaTxSignData := &MetaTxSignData{
+				ChainID:        tx.ChainId(),
+				Nonce:          tx.Nonce(),
+				GasTipCap:      tx.GasTipCap(),
+				GasFeeCap:      tx.GasFeeCap(),
+				Gas:            tx.Gas(),
+				To:             tx.To(),
+				Value:          tx.Value(),
+				Data:           metaTxParams.Payload,
+				AccessList:     tx.AccessList(),
+				ExpireHeight:   metaTxParams.ExpireHeight,
+				SponsorPercent: metaTxParams.SponsorPercent,
+			}
+
+			gasFeeSponsorSigner, err = recoverPlain(metaTxSignData.Hash(), metaTxParams.R, metaTxParams.S, metaTxParams.V, true)
+			if err != nil {
+				return ErrInvalidGasFeeSponsorSig
+			}
+		}
+	} else if currentHeight >= updateHeight {
+		metaTxSignData := &MetaTxSignDataV2{
+			From:           txSender,
+			ChainID:        tx.ChainId(),
+			Nonce:          tx.Nonce(),
+			GasTipCap:      tx.GasTipCap(),
+			GasFeeCap:      tx.GasFeeCap(),
+			Gas:            tx.Gas(),
+			To:             tx.To(),
+			Value:          tx.Value(),
+			Data:           metaTxParams.Payload,
+			AccessList:     tx.AccessList(),
+			ExpireHeight:   metaTxParams.ExpireHeight,
+			SponsorPercent: metaTxParams.SponsorPercent,
+		}
+
+		gasFeeSponsorSigner, err = recoverPlain(metaTxSignData.Hash(), metaTxParams.R, metaTxParams.S, metaTxParams.V, true)
+		if err != nil {
+			return ErrInvalidGasFeeSponsorSig
+		}
+	} else {
+		metaTxSignData := &MetaTxSignData{
+			ChainID:        tx.ChainId(),
+			Nonce:          tx.Nonce(),
+			GasTipCap:      tx.GasTipCap(),
+			GasFeeCap:      tx.GasFeeCap(),
+			Gas:            tx.Gas(),
+			To:             tx.To(),
+			Value:          tx.Value(),
+			Data:           metaTxParams.Payload,
+			AccessList:     tx.AccessList(),
+			ExpireHeight:   metaTxParams.ExpireHeight,
+			SponsorPercent: metaTxParams.SponsorPercent,
+		}
+
+		gasFeeSponsorSigner, err = recoverPlain(metaTxSignData.Hash(), metaTxParams.R, metaTxParams.S, metaTxParams.V, true)
+		if err != nil {
+			return ErrInvalidGasFeeSponsorSig
+		}
+	}
+
+	if gasFeeSponsorSigner != metaTxParams.GasFeeSponsor {
+		return ErrGasFeeSponsorMismatch
+	}
+	return nil
+}
+
 func (metaTxSignData *MetaTxSignData) Hash() common.Hash {
+	return rlpHash(metaTxSignData)
+}
+func (metaTxSignData *MetaTxSignDataV2) Hash() common.Hash {
 	return rlpHash(metaTxSignData)
 }
