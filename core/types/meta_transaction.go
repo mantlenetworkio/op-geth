@@ -147,13 +147,13 @@ func DecodeAndVerifyMetaTxParams(tx *Transaction, currentHeight uint64) (*MetaTx
 		return nil, ErrInvalidSponsorPercent
 	}
 
-	var updateHeight uint64 = math.MaxUint64
+	var metaTxUpdataHeight uint64 = math.MaxUint64
 
 	//args := []uint64{updateHeight}
 	//if currentHeight != nil && len(currentHeight) > 0 {
 	//	args = append(args, currentHeight[0])
 	//}
-	if err := checkSponsorSignature(tx, metaTxParams, updateHeight, currentHeight); err != nil {
+	if err := checkSponsorSignature(tx, metaTxParams, metaTxUpdataHeight, currentHeight); err != nil {
 		return nil, err
 	}
 
