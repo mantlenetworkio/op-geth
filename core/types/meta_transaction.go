@@ -44,6 +44,7 @@ type MetaTxParamsCache struct {
 }
 
 type MetaTxSignData struct {
+	From           common.Address
 	ChainID        *big.Int
 	Nonce          uint64
 	GasTipCap      *big.Int
@@ -117,7 +118,13 @@ func DecodeAndVerifyMetaTxParams(tx *Transaction) (*MetaTxParams, error) {
 		return nil, ErrInvalidSponsorPercent
 	}
 
+	txSender, err := Sender(LatestSignerForChainID(tx.ChainId()), tx)
+	if err != nil {
+		return nil, err
+	}
+
 	metaTxSignData := &MetaTxSignData{
+		From:           txSender,
 		ChainID:        tx.ChainId(),
 		Nonce:          tx.Nonce(),
 		GasTipCap:      tx.GasTipCap(),
