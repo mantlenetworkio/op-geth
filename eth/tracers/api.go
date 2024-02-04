@@ -291,7 +291,7 @@ func (api *API) traceChain(start, end *types.Block, config *TraceConfig, closed 
 				var (
 					signer           = types.MakeSigner(api.backend.ChainConfig(), task.block.Number())
 					blockCtx         = core.NewEVMBlockContext(task.block.Header(), api.chainContext(ctx), nil, api.backend.ChainConfig(), task.statedb)
-					isMetaTxUpgraded = api.backend.ChainConfig().IsMetaTxV2(task.block.Number())
+					isMetaTxUpgraded = api.backend.ChainConfig().IsMetaTxV2(task.block.Time())
 				)
 				// Trace all the transactions contained within
 				for i, tx := range task.block.Transactions() {
@@ -579,7 +579,7 @@ func (api *API) IntermediateRoots(ctx context.Context, hash common.Hash, config 
 		chainConfig        = api.backend.ChainConfig()
 		vmctx              = core.NewEVMBlockContext(block.Header(), api.chainContext(ctx), nil, chainConfig, statedb)
 		deleteEmptyObjects = chainConfig.IsEIP158(block.Number())
-		isMetaTxUpgraded   = api.backend.ChainConfig().IsMetaTxV2(block.Number())
+		isMetaTxUpgraded   = api.backend.ChainConfig().IsMetaTxV2(block.Time())
 	)
 	for i, tx := range block.Transactions() {
 		if err := ctx.Err(); err != nil {
@@ -657,7 +657,7 @@ func (api *API) traceBlock(ctx context.Context, block *types.Block, config *Trac
 		blockCtx         = core.NewEVMBlockContext(block.Header(), api.chainContext(ctx), nil, api.backend.ChainConfig(), statedb)
 		signer           = types.MakeSigner(api.backend.ChainConfig(), block.Number())
 		results          = make([]*txTraceResult, len(txs))
-		isMetaTxUpgraded = api.backend.ChainConfig().IsMetaTxV2(block.Number())
+		isMetaTxUpgraded = api.backend.ChainConfig().IsMetaTxV2(block.Time())
 	)
 	for i, tx := range txs {
 		// Generate the next state snapshot fast without tracing
@@ -701,7 +701,7 @@ func (api *API) traceBlockParallel(ctx context.Context, block *types.Block, stat
 		pend.Add(1)
 		go func() {
 			defer pend.Done()
-			isMetaTxUpgraded := api.backend.ChainConfig().IsMetaTxV2(block.Number())
+			isMetaTxUpgraded := api.backend.ChainConfig().IsMetaTxV2(block.Time())
 			// Fetch and execute the next transaction trace tasks
 			for task := range jobs {
 				blockCtx := core.NewEVMBlockContext(block.Header(), api.chainContext(ctx), nil, api.backend.ChainConfig(), task.statedb)
@@ -737,7 +737,7 @@ txloop:
 		}
 
 		// Generate the next state snapshot fast without tracing
-		msg, _ := core.TransactionToMessage(tx, signer, block.BaseFee(), api.backend.ChainConfig().IsMetaTxV2(block.Number()))
+		msg, _ := core.TransactionToMessage(tx, signer, block.BaseFee(), api.backend.ChainConfig().IsMetaTxV2(block.Time()))
 		statedb.SetTxContext(tx.Hash(), i)
 		vmenv := vm.NewEVM(blockCtx, core.NewEVMTxContext(msg), statedb, api.backend.ChainConfig(), vm.Config{})
 		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.GasLimit)); err != nil {
@@ -814,7 +814,7 @@ func (api *API) standardTraceBlockToFile(ctx context.Context, block *types.Block
 		// Note: This copies the config, to not screw up the main config
 		chainConfig, canon = overrideConfig(chainConfig, config.Overrides)
 	}
-	isMetaTxUpgraded := chainConfig.IsMetaTxV2(block.Number())
+	isMetaTxUpgraded := chainConfig.IsMetaTxV2(block.Time())
 	for i, tx := range block.Transactions() {
 		// Prepare the transaction for un-traced execution
 		var (

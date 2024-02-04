@@ -94,7 +94,7 @@ var (
 		TerminalTotalDifficultyPassed: true,
 		ShanghaiTime:                  newUint64(1681338455),
 		Ethash:                        new(EthashConfig),
-		MetaTxUpgradeBlock:            big.NewInt(2744121),
+		MetaTxUpgradeTime:             newUint64(0), //newUint64(1707152400),
 	}
 
 	// MainnetTrustedCheckpoint contains the light client trusted checkpoint for the main network.
@@ -139,7 +139,7 @@ var (
 		MergeNetsplitBlock:            big.NewInt(1735371),
 		ShanghaiTime:                  newUint64(1677557088),
 		Ethash:                        new(EthashConfig),
-		MetaTxUpgradeBlock:            big.NewInt(2744121),
+		MetaTxUpgradeTime:             newUint64(0), // newUint64(1707152400),
 	}
 
 	// SepoliaTrustedCheckpoint contains the light client trusted checkpoint for the Sepolia test network.
@@ -464,7 +464,7 @@ type ChainConfig struct {
 	BVMETHMintUpgradeTime *uint64 `json:"bvmETHMintUpgradeTime,omitempty"` // BVM_ETH mint upgrade switch time (nil = no fork, 0 = already on)
 
 	// MetaTx upgrade config
-	MetaTxUpgradeBlock *big.Int `json:"metaTxUpgradeBlock,omitempty"` // MetaTxUpgradeBlock switch block ( nil = no fork, 0 = already forked)
+	MetaTxUpgradeTime *uint64 `json:"metaTxUpgradeTime,omitempty"` // MetaTxUpgradeTime switch time ( nil = no fork, 0 = already forked)
 
 	// Fork scheduling was switched from blocks to timestamps here
 
@@ -689,8 +689,8 @@ func (c *ChainConfig) IsMantleBVMETHMintUpgrade(time uint64) bool {
 }
 
 // IsMetaTxV2 returns whether time is either equal to the MetaTx fork time or greater.
-func (c *ChainConfig) IsMetaTxV2(num *big.Int) bool {
-	return isMetaTxForked(c.MetaTxUpgradeBlock, num)
+func (c *ChainConfig) IsMetaTxV2(time uint64) bool {
+	return isMetaTxForked(c.MetaTxUpgradeTime, time)
 }
 
 // IsArrowGlacier returns whether num is either equal to the Arrow Glacier (EIP-4345) fork block or greater.
@@ -946,11 +946,11 @@ func isBlockForked(s, head *big.Int) bool {
 	return s.Cmp(head) <= 0
 }
 
-func isMetaTxForked(s, head *big.Int) bool {
-	if s == nil || head == nil {
+func isMetaTxForked(s *uint64, head uint64) bool {
+	if s == nil {
 		return false
 	}
-	return s.Cmp(head) <= 0
+	return *s <= head
 }
 
 func configBlockEqual(x, y *big.Int) bool {
@@ -1098,7 +1098,7 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		IsShanghai:                c.IsShanghai(timestamp),
 		isCancun:                  c.IsCancun(timestamp),
 		isPrague:                  c.IsPrague(timestamp),
-		IsMetaTxV2:                c.IsMetaTxV2(num),
+		IsMetaTxV2:                c.IsMetaTxV2(timestamp),
 		// Optimism
 		IsOptimismBedrock:  c.IsOptimismBedrock(num),
 		IsOptimismRegolith: c.IsOptimismRegolith(timestamp),

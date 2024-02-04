@@ -163,7 +163,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	}
 
 	for i, tx := range txs {
-		msg, err := core.TransactionToMessage(tx, signer, pre.Env.BaseFee, chainConfig.IsMetaTxV2(new(big.Int).SetUint64(pre.Env.Number)))
+		msg, err := core.TransactionToMessage(tx, signer, pre.Env.BaseFee, chainConfig.IsMetaTxV2(pre.Env.Timestamp))
 		if err != nil {
 			log.Warn("rejected tx", "index", i, "hash", tx.Hash(), "error", err)
 			rejectedTxs = append(rejectedTxs, &rejectedTx{i, err.Error()})
