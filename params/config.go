@@ -94,7 +94,7 @@ var (
 		TerminalTotalDifficultyPassed: true,
 		ShanghaiTime:                  newUint64(1681338455),
 		Ethash:                        new(EthashConfig),
-		MetaTxUpgradeBlock:            big.NewInt(100), // 这里
+		MetaTxUpgradeBlock:            big.NewInt(2744121),
 	}
 
 	// MainnetTrustedCheckpoint contains the light client trusted checkpoint for the main network.
