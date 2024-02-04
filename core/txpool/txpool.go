@@ -689,7 +689,7 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 		cost = cost.Add(cost, l1Cost)
 	}
 
-	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx, pool.chain.CurrentBlock().Number.Uint64())
+	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx, pool.chainconfig.IsMetaTxUpgraded(pool.chain.CurrentBlock().Number))
 	if err != nil {
 		return err
 	}
@@ -1480,7 +1480,7 @@ func (pool *TxPool) validateMetaTxList(list *list) ([]*types.Transaction, *big.I
 	var invalidMetaTxs []*types.Transaction
 	sponsorCostSum := big.NewInt(0)
 	for _, tx := range list.txs.Flatten() {
-		metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx, currHeight)
+		metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx, pool.chainconfig.IsMetaTxUpgraded(pool.chain.CurrentBlock().Number))
 		if err != nil {
 			invalidMetaTxs = append(invalidMetaTxs, tx)
 			continue

@@ -3,7 +3,6 @@ package types
 import (
 	"bytes"
 	"errors"
-	"math"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -119,7 +118,7 @@ func DecodeMetaTxParams(txData []byte) (*MetaTxParams, error) {
 	return &metaTxParams, nil
 }
 
-func DecodeAndVerifyMetaTxParams(tx *Transaction, currentHeight uint64) (*MetaTxParams, error) {
+func DecodeAndVerifyMetaTxParams(tx *Transaction, isMetaTxUpgraded bool) (*MetaTxParams, error) {
 	if tx.Type() != DynamicFeeTxType {
 		return nil, nil
 	}
@@ -147,13 +146,7 @@ func DecodeAndVerifyMetaTxParams(tx *Transaction, currentHeight uint64) (*MetaTx
 		return nil, ErrInvalidSponsorPercent
 	}
 
-	var metaTxUpdataHeight uint64 = math.MaxUint64
-
-	//args := []uint64{updateHeight}
-	//if currentHeight != nil && len(currentHeight) > 0 {
-	//	args = append(args, currentHeight[0])
-	//}
-	if err := checkSponsorSignature(tx, metaTxParams, metaTxUpdataHeight, currentHeight); err != nil {
+	if err = checkSponsorSignature(tx, metaTxParams, isMetaTxUpgraded); err != nil {
 		return nil, err
 	}
 
@@ -164,62 +157,18 @@ func DecodeAndVerifyMetaTxParams(tx *Transaction, currentHeight uint64) (*MetaTx
 	return metaTxParams, nil
 }
 
-func checkSponsorSignature(tx *Transaction, metaTxParams *MetaTxParams, args ...uint64) error {
+func checkSponsorSignature(tx *Transaction, metaTxParams *MetaTxParams, isMetaTxUpgraded bool) error {
 	var (
-		gasFeeSponsorSigner         common.Address
-		updateHeight, currentHeight uint64
+		txSender, gasFeeSponsorSigner common.Address
+		err                           error
 	)
-	if args != nil {
-		if len(args) == 2 {
-			updateHeight, currentHeight = args[0], args[1]
-		} else if len(args) > 2 {
-			return errors.New("wrong args number")
-		}
-	}
 
-	txSender, err := Sender(LatestSignerForChainID(tx.ChainId()), tx)
+	txSender, err = Sender(LatestSignerForChainID(tx.ChainId()), tx)
 	if err != nil {
 		return err
 	}
 
-	if args == nil || len(args) < 2 {
-		metaTxSignData := &MetaTxSignDataV2{
-			From:           txSender,
-			ChainID:        tx.ChainId(),
-			Nonce:          tx.Nonce(),
-			GasTipCap:      tx.GasTipCap(),
-			GasFeeCap:      tx.GasFeeCap(),
-			Gas:            tx.Gas(),
-			To:             tx.To(),
-			Value:          tx.Value(),
-			Data:           metaTxParams.Payload,
-			AccessList:     tx.AccessList(),
-			ExpireHeight:   metaTxParams.ExpireHeight,
-			SponsorPercent: metaTxParams.SponsorPercent,
-		}
-
-		gasFeeSponsorSigner, err = recoverPlain(metaTxSignData.Hash(), metaTxParams.R, metaTxParams.S, metaTxParams.V, true)
-		if err != nil {
-			metaTxSignData := &MetaTxSignData{
-				ChainID:        tx.ChainId(),
-				Nonce:          tx.Nonce(),
-				GasTipCap:      tx.GasTipCap(),
-				GasFeeCap:      tx.GasFeeCap(),
-				Gas:            tx.Gas(),
-				To:             tx.To(),
-				Value:          tx.Value(),
-				Data:           metaTxParams.Payload,
-				AccessList:     tx.AccessList(),
-				ExpireHeight:   metaTxParams.ExpireHeight,
-				SponsorPercent: metaTxParams.SponsorPercent,
-			}
-
-			gasFeeSponsorSigner, err = recoverPlain(metaTxSignData.Hash(), metaTxParams.R, metaTxParams.S, metaTxParams.V, true)
-			if err != nil {
-				return ErrInvalidGasFeeSponsorSig
-			}
-		}
-	} else if currentHeight >= updateHeight {
+	if isMetaTxUpgraded {
 		metaTxSignData := &MetaTxSignDataV2{
 			From:           txSender,
 			ChainID:        tx.ChainId(),
@@ -265,6 +214,108 @@ func checkSponsorSignature(tx *Transaction, metaTxParams *MetaTxParams, args ...
 	}
 	return nil
 }
+
+//func checkSponsorSignature(tx *Transaction, metaTxParams *MetaTxParams, isMetaTxUpgraded bool) error {
+//	var (
+//		gasFeeSponsorSigner         common.Address
+//		updateHeight, currentHeight uint64
+//	)
+//	if args != nil {
+//		if len(args) == 2 {
+//			updateHeight, currentHeight = args[0], args[1]
+//		} else if len(args) > 2 {
+//			return errors.New("wrong args number")
+//		}
+//	}
+//
+//	txSender, err := Sender(LatestSignerForChainID(tx.ChainId()), tx)
+//	if err != nil {
+//		return err
+//	}
+//
+//	if args == nil || len(args) < 2 {
+//		metaTxSignData := &MetaTxSignDataV2{
+//			From:           txSender,
+//			ChainID:        tx.ChainId(),
+//			Nonce:          tx.Nonce(),
+//			GasTipCap:      tx.GasTipCap(),
+//			GasFeeCap:      tx.GasFeeCap(),
+//			Gas:            tx.Gas(),
+//			To:             tx.To(),
+//			Value:          tx.Value(),
+//			Data:           metaTxParams.Payload,
+//			AccessList:     tx.AccessList(),
+//			ExpireHeight:   metaTxParams.ExpireHeight,
+//			SponsorPercent: metaTxParams.SponsorPercent,
+//		}
+//
+//		gasFeeSponsorSigner, err = recoverPlain(metaTxSignData.Hash(), metaTxParams.R, metaTxParams.S, metaTxParams.V, true)
+//		if err != nil {
+//			metaTxSignData := &MetaTxSignData{
+//				ChainID:        tx.ChainId(),
+//				Nonce:          tx.Nonce(),
+//				GasTipCap:      tx.GasTipCap(),
+//				GasFeeCap:      tx.GasFeeCap(),
+//				Gas:            tx.Gas(),
+//				To:             tx.To(),
+//				Value:          tx.Value(),
+//				Data:           metaTxParams.Payload,
+//				AccessList:     tx.AccessList(),
+//				ExpireHeight:   metaTxParams.ExpireHeight,
+//				SponsorPercent: metaTxParams.SponsorPercent,
+//			}
+//
+//			gasFeeSponsorSigner, err = recoverPlain(metaTxSignData.Hash(), metaTxParams.R, metaTxParams.S, metaTxParams.V, true)
+//			if err != nil {
+//				return ErrInvalidGasFeeSponsorSig
+//			}
+//		}
+//	} else if currentHeight >= updateHeight {
+//		metaTxSignData := &MetaTxSignDataV2{
+//			From:           txSender,
+//			ChainID:        tx.ChainId(),
+//			Nonce:          tx.Nonce(),
+//			GasTipCap:      tx.GasTipCap(),
+//			GasFeeCap:      tx.GasFeeCap(),
+//			Gas:            tx.Gas(),
+//			To:             tx.To(),
+//			Value:          tx.Value(),
+//			Data:           metaTxParams.Payload,
+//			AccessList:     tx.AccessList(),
+//			ExpireHeight:   metaTxParams.ExpireHeight,
+//			SponsorPercent: metaTxParams.SponsorPercent,
+//		}
+//
+//		gasFeeSponsorSigner, err = recoverPlain(metaTxSignData.Hash(), metaTxParams.R, metaTxParams.S, metaTxParams.V, true)
+//		if err != nil {
+//			return ErrInvalidGasFeeSponsorSig
+//		}
+//	} else {
+//		metaTxSignData := &MetaTxSignData{
+//			ChainID:        tx.ChainId(),
+//			Nonce:          tx.Nonce(),
+//			GasTipCap:      tx.GasTipCap(),
+//			GasFeeCap:      tx.GasFeeCap(),
+//			Gas:            tx.Gas(),
+//			To:             tx.To(),
+//			Value:          tx.Value(),
+//			Data:           metaTxParams.Payload,
+//			AccessList:     tx.AccessList(),
+//			ExpireHeight:   metaTxParams.ExpireHeight,
+//			SponsorPercent: metaTxParams.SponsorPercent,
+//		}
+//
+//		gasFeeSponsorSigner, err = recoverPlain(metaTxSignData.Hash(), metaTxParams.R, metaTxParams.S, metaTxParams.V, true)
+//		if err != nil {
+//			return ErrInvalidGasFeeSponsorSig
+//		}
+//	}
+//
+//	if gasFeeSponsorSigner != metaTxParams.GasFeeSponsor {
+//		return ErrGasFeeSponsorMismatch
+//	}
+//	return nil
+//}
 
 func (metaTxSignData *MetaTxSignData) Hash() common.Hash {
 	return rlpHash(metaTxSignData)
