@@ -39,20 +39,6 @@ type MetaTxParams struct {
 	S *big.Int
 }
 
-//type MetaTxParamsV2 struct {
-//	ExpireHeight   uint64
-//	SponsorPercent uint64
-//	Payload        []byte
-//	From           common.Address
-//
-//	// In tx simulation, Signature will be empty, user can specify GasFeeSponsor to sponsor gas fee
-//	GasFeeSponsor common.Address
-//	// Signature values
-//	V *big.Int
-//	R *big.Int
-//	S *big.Int
-//}
-
 type MetaTxParamsCache struct {
 	metaTxParams *MetaTxParams
 }
@@ -214,108 +200,6 @@ func checkSponsorSignature(tx *Transaction, metaTxParams *MetaTxParams, isMetaTx
 	}
 	return nil
 }
-
-//func checkSponsorSignature(tx *Transaction, metaTxParams *MetaTxParams, isMetaTxUpgraded bool) error {
-//	var (
-//		gasFeeSponsorSigner         common.Address
-//		updateHeight, currentHeight uint64
-//	)
-//	if args != nil {
-//		if len(args) == 2 {
-//			updateHeight, currentHeight = args[0], args[1]
-//		} else if len(args) > 2 {
-//			return errors.New("wrong args number")
-//		}
-//	}
-//
-//	txSender, err := Sender(LatestSignerForChainID(tx.ChainId()), tx)
-//	if err != nil {
-//		return err
-//	}
-//
-//	if args == nil || len(args) < 2 {
-//		metaTxSignData := &MetaTxSignDataV2{
-//			From:           txSender,
-//			ChainID:        tx.ChainId(),
-//			Nonce:          tx.Nonce(),
-//			GasTipCap:      tx.GasTipCap(),
-//			GasFeeCap:      tx.GasFeeCap(),
-//			Gas:            tx.Gas(),
-//			To:             tx.To(),
-//			Value:          tx.Value(),
-//			Data:           metaTxParams.Payload,
-//			AccessList:     tx.AccessList(),
-//			ExpireHeight:   metaTxParams.ExpireHeight,
-//			SponsorPercent: metaTxParams.SponsorPercent,
-//		}
-//
-//		gasFeeSponsorSigner, err = recoverPlain(metaTxSignData.Hash(), metaTxParams.R, metaTxParams.S, metaTxParams.V, true)
-//		if err != nil {
-//			metaTxSignData := &MetaTxSignData{
-//				ChainID:        tx.ChainId(),
-//				Nonce:          tx.Nonce(),
-//				GasTipCap:      tx.GasTipCap(),
-//				GasFeeCap:      tx.GasFeeCap(),
-//				Gas:            tx.Gas(),
-//				To:             tx.To(),
-//				Value:          tx.Value(),
-//				Data:           metaTxParams.Payload,
-//				AccessList:     tx.AccessList(),
-//				ExpireHeight:   metaTxParams.ExpireHeight,
-//				SponsorPercent: metaTxParams.SponsorPercent,
-//			}
-//
-//			gasFeeSponsorSigner, err = recoverPlain(metaTxSignData.Hash(), metaTxParams.R, metaTxParams.S, metaTxParams.V, true)
-//			if err != nil {
-//				return ErrInvalidGasFeeSponsorSig
-//			}
-//		}
-//	} else if currentHeight >= updateHeight {
-//		metaTxSignData := &MetaTxSignDataV2{
-//			From:           txSender,
-//			ChainID:        tx.ChainId(),
-//			Nonce:          tx.Nonce(),
-//			GasTipCap:      tx.GasTipCap(),
-//			GasFeeCap:      tx.GasFeeCap(),
-//			Gas:            tx.Gas(),
-//			To:             tx.To(),
-//			Value:          tx.Value(),
-//			Data:           metaTxParams.Payload,
-//			AccessList:     tx.AccessList(),
-//			ExpireHeight:   metaTxParams.ExpireHeight,
-//			SponsorPercent: metaTxParams.SponsorPercent,
-//		}
-//
-//		gasFeeSponsorSigner, err = recoverPlain(metaTxSignData.Hash(), metaTxParams.R, metaTxParams.S, metaTxParams.V, true)
-//		if err != nil {
-//			return ErrInvalidGasFeeSponsorSig
-//		}
-//	} else {
-//		metaTxSignData := &MetaTxSignData{
-//			ChainID:        tx.ChainId(),
-//			Nonce:          tx.Nonce(),
-//			GasTipCap:      tx.GasTipCap(),
-//			GasFeeCap:      tx.GasFeeCap(),
-//			Gas:            tx.Gas(),
-//			To:             tx.To(),
-//			Value:          tx.Value(),
-//			Data:           metaTxParams.Payload,
-//			AccessList:     tx.AccessList(),
-//			ExpireHeight:   metaTxParams.ExpireHeight,
-//			SponsorPercent: metaTxParams.SponsorPercent,
-//		}
-//
-//		gasFeeSponsorSigner, err = recoverPlain(metaTxSignData.Hash(), metaTxParams.R, metaTxParams.S, metaTxParams.V, true)
-//		if err != nil {
-//			return ErrInvalidGasFeeSponsorSig
-//		}
-//	}
-//
-//	if gasFeeSponsorSigner != metaTxParams.GasFeeSponsor {
-//		return ErrGasFeeSponsorMismatch
-//	}
-//	return nil
-//}
 
 func (metaTxSignData *MetaTxSignData) Hash() common.Hash {
 	return rlpHash(metaTxSignData)

@@ -58,7 +58,7 @@ func (leth *LightEthereum) stateAtTransaction(ctx context.Context, block *types.
 	}
 	// Recompute transactions up to the target index.
 	signer := types.MakeSigner(leth.blockchain.Config(), block.Number())
-	isMetaTxUpgraded := leth.chainConfig.IsMetaTxUpgraded(block.Number())
+	isMetaTxUpgraded := leth.chainConfig.IsMetaTxV2(block.Number())
 	for idx, tx := range block.Transactions() {
 		// Assemble the transaction call message and return if the requested offset
 		msg, _ := core.TransactionToMessage(tx, signer, block.BaseFee(), isMetaTxUpgraded)

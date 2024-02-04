@@ -139,6 +139,7 @@ var (
 		MergeNetsplitBlock:            big.NewInt(1735371),
 		ShanghaiTime:                  newUint64(1677557088),
 		Ethash:                        new(EthashConfig),
+		MetaTxUpgradeBlock:            big.NewInt(2744121),
 	}
 
 	// SepoliaTrustedCheckpoint contains the light client trusted checkpoint for the Sepolia test network.
@@ -687,8 +688,8 @@ func (c *ChainConfig) IsMantleBVMETHMintUpgrade(time uint64) bool {
 	return isTimestampForked(c.BVMETHMintUpgradeTime, time)
 }
 
-// IsMetaTxUpgraded returns whether time is either equal to the MetaTx fork time or greater.
-func (c *ChainConfig) IsMetaTxUpgraded(num *big.Int) bool {
+// IsMetaTxV2 returns whether time is either equal to the MetaTx fork time or greater.
+func (c *ChainConfig) IsMetaTxV2(num *big.Int) bool {
 	return isMetaTxForked(c.MetaTxUpgradeBlock, num)
 }
 
@@ -1097,7 +1098,7 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		IsShanghai:                c.IsShanghai(timestamp),
 		isCancun:                  c.IsCancun(timestamp),
 		isPrague:                  c.IsPrague(timestamp),
-		IsMetaTxV2:                c.IsMetaTxUpgraded(num),
+		IsMetaTxV2:                c.IsMetaTxV2(num),
 		// Optimism
 		IsOptimismBedrock:  c.IsOptimismBedrock(num),
 		IsOptimismRegolith: c.IsOptimismRegolith(timestamp),
