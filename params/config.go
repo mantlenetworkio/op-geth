@@ -688,7 +688,7 @@ func (c *ChainConfig) IsMantleBVMETHMintUpgrade(time uint64) bool {
 
 // IsMetaTxV2 returns whether time is either equal to the MetaTx fork time or greater.
 func (c *ChainConfig) IsMetaTxV2(time uint64) bool {
-	return isMetaTxForked(c.MetaTxUpgradeTime, time)
+	return isTimestampForked(c.MetaTxUpgradeTime, time)
 }
 
 // IsArrowGlacier returns whether num is either equal to the Arrow Glacier (EIP-4345) fork block or greater.
@@ -942,13 +942,6 @@ func isBlockForked(s, head *big.Int) bool {
 		return false
 	}
 	return s.Cmp(head) <= 0
-}
-
-func isMetaTxForked(s *uint64, head uint64) bool {
-	if s == nil {
-		return false
-	}
-	return *s <= head
 }
 
 func configBlockEqual(x, y *big.Int) bool {
