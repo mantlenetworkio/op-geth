@@ -94,7 +94,6 @@ var (
 		TerminalTotalDifficultyPassed: true,
 		ShanghaiTime:                  newUint64(1681338455),
 		Ethash:                        new(EthashConfig),
-		MetaTxUpgradeTime:             newUint64(0), //newUint64(1707152400),
 	}
 
 	// MainnetTrustedCheckpoint contains the light client trusted checkpoint for the main network.
