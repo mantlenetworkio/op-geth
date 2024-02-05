@@ -1590,6 +1590,7 @@ type RPCTransaction struct {
 	SourceHash *common.Hash `json:"sourceHash,omitempty"`
 	Mint       *hexutil.Big `json:"mint,omitempty"`
 	EthValue   *hexutil.Big `json:"ethValue,omitempty"`
+	EthTxValue *hexutil.Big `json:"ethTxValue,omitempty"`
 	IsSystemTx *bool        `json:"isSystemTx,omitempty"`
 }
 
@@ -1630,6 +1631,7 @@ func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber
 		}
 		result.Mint = (*hexutil.Big)(tx.Mint())
 		result.EthValue = (*hexutil.Big)(tx.ETHValue())
+		result.EthTxValue = (*hexutil.Big)(tx.ETHTxValue())
 		if receipt != nil && receipt.DepositNonce != nil {
 			result.Nonce = hexutil.Uint64(*receipt.DepositNonce)
 		}

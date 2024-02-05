@@ -43,6 +43,8 @@ type DepositTx struct {
 	EthValue *big.Int `rlp:"nil"`
 	// Normal Tx data
 	Data []byte
+	// EthTxValue means L2 BVM_ETH tx tag, nil means that there is no need to transfer BVM_ETH to msg.To.
+	EthTxValue *big.Int `rlp:"optional"`
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
@@ -57,6 +59,7 @@ func (tx *DepositTx) copy() TxData {
 		IsSystemTransaction: tx.IsSystemTransaction,
 		Data:                common.CopyBytes(tx.Data),
 		EthValue:            nil,
+		EthTxValue:          nil,
 	}
 	if tx.Mint != nil {
 		cpy.Mint = new(big.Int).Set(tx.Mint)
@@ -66,6 +69,9 @@ func (tx *DepositTx) copy() TxData {
 	}
 	if tx.EthValue != nil {
 		cpy.EthValue = new(big.Int).Set(tx.EthValue)
+	}
+	if tx.EthTxValue != nil {
+		cpy.EthTxValue = new(big.Int).Set(tx.EthTxValue)
 	}
 	return cpy
 }
