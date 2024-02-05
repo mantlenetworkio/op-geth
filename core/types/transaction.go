@@ -354,6 +354,15 @@ func (tx *Transaction) ETHValue() *big.Int {
 	return nil
 }
 
+// ETHTxValue returns the BVM_ETH to be transferred in the deposit tx.
+// This returns nil if there is nothing to transfer, or if this is not a deposit tx.
+func (tx *Transaction) ETHTxValue() *big.Int {
+	if dep, ok := tx.inner.(*DepositTx); ok {
+		return dep.EthTxValue
+	}
+	return nil
+}
+
 // IsDepositTx returns true if the transaction is a deposit tx type.
 func (tx *Transaction) IsDepositTx() bool {
 	return tx.Type() == DepositTxType

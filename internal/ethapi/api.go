@@ -26,10 +26,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum"
-
-	"github.com/davecgh/go-spew/spew"
-	"github.com/tyler-smith/go-bip39"
-
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
@@ -50,10 +46,17 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
+
+	"github.com/davecgh/go-spew/spew"
+	"github.com/tyler-smith/go-bip39"
 )
 
-var (
-	gasBuffer = uint64(120)
+// estimateGasErrorRatio is the amount of overestimation eth_estimateGas is
+// allowed to produce in order to speed up calculations.
+// gasBuffer is used to enlarge a buffer for Estimation
+const (
+	estimateGasErrorRatio = 0.015
+	gasBuffer             = uint64(120)
 )
 
 // EthereumAPI provides an API to access Ethereum related information.
@@ -1171,27 +1174,25 @@ func (s *BlockChainAPI) Call(ctx context.Context, args TransactionArgs, blockNrO
 func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, gasCap uint64) (hexutil.Uint64, error) {
 	// Binary search the gas requirement, as it may be higher than the amount used
 	var (
-		lo  uint64 = params.TxGas - 1
-		hi  uint64
-		cap uint64
+		lo = params.TxGas - 1
+		hi uint64
 	)
 	// Use zero address if sender unspecified.
 	if args.From == nil {
 		args.From = new(common.Address)
 	}
+
+	data := hexutil.Bytes(args.data())
+	args.Data = &data
+
+	state, header, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
+	if err != nil {
+		return 0, err
+	}
 	// Determine the highest gas limit can be used during the estimation.
+	hi = header.GasLimit
 	if args.Gas != nil && uint64(*args.Gas) >= params.TxGas {
 		hi = uint64(*args.Gas)
-	} else {
-		// Retrieve the block to act as the gas ceiling
-		block, err := b.BlockByNumberOrHash(ctx, blockNrOrHash)
-		if err != nil {
-			return 0, err
-		}
-		if block == nil {
-			return 0, errors.New("block not found")
-		}
-		hi = block.GasLimit()
 	}
 
 	// Normalize the gasPrice used for estimateGas
@@ -1222,11 +1223,6 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 
 	// Recap the highest gas limit with account's available balance.
 	if feeCap.BitLen() != 0 {
-		state, _, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
-		if err != nil {
-			return 0, err
-		}
-
 		balance := state.GetBalance(*args.From) // from can't be nil
 		metaTxParams, err := types.DecodeMetaTxParams(args.data())
 		if err != nil {
@@ -1269,7 +1265,13 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		log.Warn("Caller gas above allowance, capping", "requested", hi, "cap", gasCap)
 		hi = gasCap
 	}
-	cap = hi
+
+	revertErr := func(result *core.ExecutionResult) error {
+		if len(result.Revert()) > 0 {
+			return newRevertError(result)
+		}
+		return result.Err
+	}
 
 	// Create a helper to check if a gas allowance results in an executable transaction
 	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
@@ -1284,38 +1286,90 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		}
 		return result.Failed(), result, nil
 	}
+
+	// If the transaction is a plain value transfer, short circuit estimation and
+	// directly try 21000. Returning 21000 without any execution is dangerous as
+	// some tx field combos might bump the price up even for plain transfers (e.g.
+	// unused access list items). Ever so slightly wasteful, but safer overall.
+	if args.Data == nil {
+		if args.To != nil && state.GetCodeSize(*args.To) == 0 {
+			failed, _, err := executable(params.TxGas)
+			if !failed && err == nil {
+				return hexutil.Uint64(params.TxGas), nil
+			}
+		}
+	}
+
+	// We first execute the transaction at the highest allowable gas limit, since if this fails we
+	// can return error immediately.
+	failed, result, err := executable(hi)
+	if err != nil {
+		return 0, err
+	}
+	if failed {
+		if result != nil && !errors.Is(result.Err, vm.ErrOutOfGas) {
+			return 0, revertErr(result)
+		}
+		return 0, fmt.Errorf("gas required exceeds allowance (%d)", hi)
+	}
+
+	// For almost any transaction, the gas consumed by the unconstrained execution
+	// above lower-bounds the gas limit required for it to succeed. One exception
+	// is those that explicitly check gas remaining in order to execute within a
+	// given limit, but we probably don't want to return the lowest possible gas
+	// limit for these cases anyway.
+	lo = result.UsedGas - 1
+
+	// There's a fairly high chance for the transaction to execute successfully
+	// with gasLimit set to the first execution's usedGas + gasRefund. Explicitly
+	// check that gas amount and use as a limit for the binary search.
+	optimisticGasLimit := (result.UsedGas + result.RefundedGas + params.CallStipend) * 64 / 63
+	if optimisticGasLimit < hi {
+		failed, _, err = executable(optimisticGasLimit)
+		if err != nil {
+			// This should not happen under normal conditions since if we make it this far the
+			// transaction had run without error at least once before.
+			log.Error("Execution error in estimate gas", "err", err)
+			return 0, err
+		}
+		if failed {
+			lo = optimisticGasLimit
+		} else {
+			hi = optimisticGasLimit
+		}
+	}
+
 	// Execute the binary search and hone in on an executable gas limit
 	for lo+1 < hi {
+		// It is a bit pointless to return a perfect estimation, as changing
+		// network conditions require the caller to bump it up anyway. Since
+		// wallets tend to use 20-25% bump, allowing a small approximation
+		// error is fine (as long as it's upwards).
+		if float64(hi-lo)/float64(hi) < estimateGasErrorRatio {
+			break
+		}
+
 		mid := (hi + lo) / 2
-		failed, _, err := executable(mid)
+		if mid > lo*2 {
+			// Most txs don't need much higher gas limit than their gas used, and most txs don't
+			// require near the full block limit of gas, so the selection of where to bisect the
+			// range here is skewed to favor the low side.
+			mid = lo * 2
+		}
+
+		failed, _, err = executable(mid)
 
 		// If the error is not nil(consensus error), it means the provided message
 		// call or transaction will never be accepted no matter how much gas it is
 		// assigned. Return the error directly, don't struggle any more.
 		if err != nil {
+			log.Error("Execution error in estimate gas", "err", err)
 			return 0, err
 		}
 		if failed {
 			lo = mid
 		} else {
 			hi = mid
-		}
-	}
-	// Reject the transaction as invalid if it still fails at the highest allowance
-	if hi == cap {
-		failed, result, err := executable(hi)
-		if err != nil {
-			return 0, err
-		}
-		if failed {
-			if result != nil && result.Err != vm.ErrOutOfGas {
-				if len(result.Revert()) > 0 {
-					return 0, newRevertError(result)
-				}
-				return 0, result.Err
-			}
-			// Otherwise, the specified gas cap is too low
-			return 0, fmt.Errorf("gas required exceeds allowance (%d)", cap)
 		}
 	}
 	return hexutil.Uint64(hi * gasBuffer / 100), nil
@@ -1503,6 +1557,7 @@ type RPCTransaction struct {
 	SourceHash *common.Hash `json:"sourceHash,omitempty"`
 	Mint       *hexutil.Big `json:"mint,omitempty"`
 	EthValue   *hexutil.Big `json:"ethValue,omitempty"`
+	EthTxValue *hexutil.Big `json:"ethTxValue,omitempty"`
 	IsSystemTx *bool        `json:"isSystemTx,omitempty"`
 }
 
@@ -1543,6 +1598,7 @@ func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber
 		}
 		result.Mint = (*hexutil.Big)(tx.Mint())
 		result.EthValue = (*hexutil.Big)(tx.ETHValue())
+		result.EthTxValue = (*hexutil.Big)(tx.ETHTxValue())
 		if receipt != nil && receipt.DepositNonce != nil {
 			result.Nonce = hexutil.Uint64(*receipt.DepositNonce)
 		}
