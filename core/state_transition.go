@@ -17,6 +17,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -170,8 +171,11 @@ type Message struct {
 }
 
 // TransactionToMessage converts a transaction into a Message.
-func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.Int, isMetaTxUpgraded bool) (*Message, error) {
-	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx, isMetaTxUpgraded)
+func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.Int, rules *params.Rules) (*Message, error) {
+	if rules == nil {
+		return nil, errors.New("param rules is nil pointer")
+	}
+	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx, rules.IsMetaTxV2)
 	if err != nil {
 		return nil, err
 	}

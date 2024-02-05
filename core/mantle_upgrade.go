@@ -18,7 +18,7 @@ var (
 		ChainID:               params.MantleSepoliaChainId,
 		BaseFeeTime:           u64Ptr(1_704_891_600),
 		BVMETHMintUpgradeTime: nil, //TODO set upgrade timestamp
-		MetaTxUpgradeTime:     nil,
+		MetaTxUpgradeTime:     nil, //TODO set upgrade timestamp
 	}
 	MantleLocalUpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               params.MantleLocalChainId,
