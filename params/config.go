@@ -138,7 +138,6 @@ var (
 		MergeNetsplitBlock:            big.NewInt(1735371),
 		ShanghaiTime:                  newUint64(1677557088),
 		Ethash:                        new(EthashConfig),
-		MetaTxUpgradeTime:             newUint64(0), // newUint64(1707152400),
 	}
 
 	// SepoliaTrustedCheckpoint contains the light client trusted checkpoint for the Sepolia test network.
