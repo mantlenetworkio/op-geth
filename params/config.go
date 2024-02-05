@@ -458,8 +458,8 @@ type ChainConfig struct {
 	MergeNetsplitBlock  *big.Int `json:"mergeNetsplitBlock,omitempty"`  // Virtual fork after The Merge to use as a network splitter
 
 	// Mantle upgrade configs
-	BaseFeeTime *uint64 `json:"baseFeeTime,omitempty"` // Mantle BaseFee switch time (nil = no fork, 0 = already on mantle baseFee)
-
+	BaseFeeTime           *uint64 `json:"baseFeeTime,omitempty"`           // Mantle BaseFee switch time (nil = no fork, 0 = already on mantle baseFee)
+	BVMETHMintUpgradeTime *uint64 `json:"bvmETHMintUpgradeTime,omitempty"` // BVM_ETH mint upgrade switch time (nil = no fork, 0 = already on)
 	// Fork scheduling was switched from blocks to timestamps here
 
 	ShanghaiTime *uint64 `json:"shanghaiTime,omitempty"` // Shanghai switch time (nil = no fork, 0 = already on shanghai)
@@ -675,6 +675,11 @@ func (c *ChainConfig) IsLondon(num *big.Int) bool {
 // IsMantleBaseFee returns whether time is either equal to the BaseFee fork time or greater.
 func (c *ChainConfig) IsMantleBaseFee(time uint64) bool {
 	return isTimestampForked(c.BaseFeeTime, time)
+}
+
+// IsMantleBVMETHMintUpgrade returns whether time is either equal to the BVM_ETH mint upgrade fork time or greater.
+func (c *ChainConfig) IsMantleBVMETHMintUpgrade(time uint64) bool {
+	return isTimestampForked(c.BVMETHMintUpgradeTime, time)
 }
 
 // IsArrowGlacier returns whether num is either equal to the Arrow Glacier (EIP-4345) fork block or greater.
@@ -1046,7 +1051,7 @@ type Rules struct {
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
 	IsBerlin, IsLondon                                      bool
 	IsMerge, IsShanghai, isCancun, isPrague                 bool
-	IsMantleBaseFee                                         bool
+	IsMantleBaseFee, IsMantleBVMETHMintUpgrade              bool
 	IsOptimismBedrock, IsOptimismRegolith                   bool
 }
 
@@ -1057,22 +1062,23 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		chainID = new(big.Int)
 	}
 	return Rules{
-		ChainID:          new(big.Int).Set(chainID),
-		IsHomestead:      c.IsHomestead(num),
-		IsEIP150:         c.IsEIP150(num),
-		IsEIP155:         c.IsEIP155(num),
-		IsEIP158:         c.IsEIP158(num),
-		IsByzantium:      c.IsByzantium(num),
-		IsConstantinople: c.IsConstantinople(num),
-		IsPetersburg:     c.IsPetersburg(num),
-		IsIstanbul:       c.IsIstanbul(num),
-		IsBerlin:         c.IsBerlin(num),
-		IsLondon:         c.IsLondon(num),
-		IsMerge:          isMerge,
-		IsMantleBaseFee:  c.IsMantleBaseFee(timestamp),
-		IsShanghai:       c.IsShanghai(timestamp),
-		isCancun:         c.IsCancun(timestamp),
-		isPrague:         c.IsPrague(timestamp),
+		ChainID:                   new(big.Int).Set(chainID),
+		IsHomestead:               c.IsHomestead(num),
+		IsEIP150:                  c.IsEIP150(num),
+		IsEIP155:                  c.IsEIP155(num),
+		IsEIP158:                  c.IsEIP158(num),
+		IsByzantium:               c.IsByzantium(num),
+		IsConstantinople:          c.IsConstantinople(num),
+		IsPetersburg:              c.IsPetersburg(num),
+		IsIstanbul:                c.IsIstanbul(num),
+		IsBerlin:                  c.IsBerlin(num),
+		IsLondon:                  c.IsLondon(num),
+		IsMerge:                   isMerge,
+		IsMantleBaseFee:           c.IsMantleBaseFee(timestamp),
+		IsMantleBVMETHMintUpgrade: c.IsMantleBVMETHMintUpgrade(timestamp),
+		IsShanghai:                c.IsShanghai(timestamp),
+		isCancun:                  c.IsCancun(timestamp),
+		isPrague:                  c.IsPrague(timestamp),
 		// Optimism
 		IsOptimismBedrock:  c.IsOptimismBedrock(num),
 		IsOptimismRegolith: c.IsOptimismRegolith(timestamp),
