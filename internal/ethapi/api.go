@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/consensus"
 	"math/big"
 	"strings"
 	"time"
@@ -52,8 +53,11 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
-var (
-	gasBuffer = uint64(120)
+// estimateGasErrorRatio is the amount of overestimation eth_estimateGas is
+// allowed to produce in order to speed up calculations.
+const (
+	estimateGasErrorRatio = 0.015
+	gasBuffer             = uint64(120 / 100)
 )
 
 // EthereumAPI provides an API to access Ethereum related information.
@@ -1171,27 +1175,25 @@ func (s *BlockChainAPI) Call(ctx context.Context, args TransactionArgs, blockNrO
 func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, gasCap uint64) (hexutil.Uint64, error) {
 	// Binary search the gas requirement, as it may be higher than the amount used
 	var (
-		lo  uint64 = params.TxGas - 1
-		hi  uint64
-		cap uint64
+		lo = params.TxGas - 1
+		hi uint64
 	)
 	// Use zero address if sender unspecified.
 	if args.From == nil {
 		args.From = new(common.Address)
 	}
+
+	data := hexutil.Bytes(args.data())
+	args.Data = &data
+
+	state, header, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
+	if err != nil {
+		return 0, err
+	}
 	// Determine the highest gas limit can be used during the estimation.
+	hi = header.GasLimit
 	if args.Gas != nil && uint64(*args.Gas) >= params.TxGas {
 		hi = uint64(*args.Gas)
-	} else {
-		// Retrieve the block to act as the gas ceiling
-		block, err := b.BlockByNumberOrHash(ctx, blockNrOrHash)
-		if err != nil {
-			return 0, err
-		}
-		if block == nil {
-			return 0, errors.New("block not found")
-		}
-		hi = block.GasLimit()
 	}
 
 	// Normalize the gasPrice used for estimateGas
@@ -1222,11 +1224,6 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 
 	// Recap the highest gas limit with account's available balance.
 	if feeCap.BitLen() != 0 {
-		state, _, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
-		if err != nil {
-			return 0, err
-		}
-
 		balance := state.GetBalance(*args.From) // from can't be nil
 		metaTxParams, err := types.DecodeMetaTxParams(args.data())
 		if err != nil {
@@ -1269,7 +1266,13 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		log.Warn("Caller gas above allowance, capping", "requested", hi, "cap", gasCap)
 		hi = gasCap
 	}
-	cap = hi
+
+	revertErr := func(result *core.ExecutionResult) error {
+		if len(result.Revert()) > 0 {
+			return newRevertError(result)
+		}
+		return result.Err
+	}
 
 	// Create a helper to check if a gas allowance results in an executable transaction
 	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
@@ -1284,15 +1287,84 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		}
 		return result.Failed(), result, nil
 	}
+
+	// If the transaction is a plain value transfer, short circuit estimation and
+	// directly try 21000. Returning 21000 without any execution is dangerous as
+	// some tx field combos might bump the price up even for plain transfers (e.g.
+	// unused access list items). Ever so slightly wasteful, but safer overall.
+	if args.Data == nil {
+		if args.To != nil && state.GetCodeSize(*args.To) == 0 {
+			failed, _, err := executable(params.TxGas)
+			if !failed && err == nil {
+				return hexutil.Uint64(params.TxGas), nil
+			}
+		}
+	}
+
+	// We first execute the transaction at the highest allowable gas limit, since if this fails we
+	// can return error immediately.
+	failed, result, err := executable(hi)
+	if err != nil {
+		return 0, err
+	}
+	if failed {
+		if result != nil && !errors.Is(result.Err, vm.ErrOutOfGas) {
+			return 0, revertErr(result)
+		}
+		return 0, fmt.Errorf("gas required exceeds allowance (%d)", hi)
+	}
+
+	// For almost any transaction, the gas consumed by the unconstrained execution
+	// above lower-bounds the gas limit required for it to succeed. One exception
+	// is those that explicitly check gas remaining in order to execute within a
+	// given limit, but we probably don't want to return the lowest possible gas
+	// limit for these cases anyway.
+	lo = result.UsedGas - 1
+
+	// There's a fairly high chance for the transaction to execute successfully
+	// with gasLimit set to the first execution's usedGas + gasRefund. Explicitly
+	// check that gas amount and use as a limit for the binary search.
+	optimisticGasLimit := (result.UsedGas + result.RefundedGas + params.CallStipend) * 64 / 63
+	if optimisticGasLimit < hi {
+		failed, _, err = executable(optimisticGasLimit)
+		if err != nil {
+			// This should not happen under normal conditions since if we make it this far the
+			// transaction had run without error at least once before.
+			log.Error("Execution error in estimate gas", "err", err)
+			return 0, err
+		}
+		if failed {
+			lo = optimisticGasLimit
+		} else {
+			hi = optimisticGasLimit
+		}
+	}
+
 	// Execute the binary search and hone in on an executable gas limit
 	for lo+1 < hi {
+		// It is a bit pointless to return a perfect estimation, as changing
+		// network conditions require the caller to bump it up anyway. Since
+		// wallets tend to use 20-25% bump, allowing a small approximation
+		// error is fine (as long as it's upwards).
+		if float64(hi-lo)/float64(hi) < estimateGasErrorRatio {
+			break
+		}
+
 		mid := (hi + lo) / 2
-		failed, _, err := executable(mid)
+		if mid > lo*2 {
+			// Most txs don't need much higher gas limit than their gas used, and most txs don't
+			// require near the full block limit of gas, so the selection of where to bisect the
+			// range here is skewed to favor the low side.
+			mid = lo * 2
+		}
+
+		failed, _, err = executable(mid)
 
 		// If the error is not nil(consensus error), it means the provided message
 		// call or transaction will never be accepted no matter how much gas it is
 		// assigned. Return the error directly, don't struggle any more.
 		if err != nil {
+			log.Error("Execution error in estimate gas", "err", err)
 			return 0, err
 		}
 		if failed {
@@ -1301,24 +1373,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 			hi = mid
 		}
 	}
-	// Reject the transaction as invalid if it still fails at the highest allowance
-	if hi == cap {
-		failed, result, err := executable(hi)
-		if err != nil {
-			return 0, err
-		}
-		if failed {
-			if result != nil && result.Err != vm.ErrOutOfGas {
-				if len(result.Revert()) > 0 {
-					return 0, newRevertError(result)
-				}
-				return 0, result.Err
-			}
-			// Otherwise, the specified gas cap is too low
-			return 0, fmt.Errorf("gas required exceeds allowance (%d)", cap)
-		}
-	}
-	return hexutil.Uint64(hi * gasBuffer / 100), nil
+	return hexutil.Uint64(hi * gasBuffer), nil
 }
 
 func calculateGasWithAllowance(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, gasPriceForEstimate *big.Int, gasCap uint64) (uint64, error) {
@@ -1386,6 +1441,38 @@ func (s *BlockChainAPI) EstimateGas(ctx context.Context, args TransactionArgs, b
 	}
 
 	return DoEstimateGas(ctx, s.b, args, bNrOrHash, s.b.RPCGasCap())
+}
+
+// ChainContextBackend provides methods required to implement ChainContext.
+type ChainContextBackend interface {
+	Engine() consensus.Engine
+	HeaderByNumber(context.Context, rpc.BlockNumber) (*types.Header, error)
+}
+
+// ChainContext is an implementation of core.ChainContext. It's main use-case
+// is instantiating a vm.BlockContext without having access to the BlockChain object.
+type ChainContext struct {
+	b   ChainContextBackend
+	ctx context.Context
+}
+
+func (context *ChainContext) Engine() consensus.Engine {
+	return context.b.Engine()
+}
+
+func (context *ChainContext) GetHeader(hash common.Hash, number uint64) *types.Header {
+	// This method is called to get the hash for a block number when executing the BLOCKHASH
+	// opcode. Hence no need to search for non-canonical blocks.
+	header, err := context.b.HeaderByNumber(context.ctx, rpc.BlockNumber(number))
+	if err != nil || header.Hash() != hash {
+		return nil
+	}
+	return header
+}
+
+// NewChainContext creates a new ChainContext object.
+func NewChainContext(ctx context.Context, backend ChainContextBackend) *ChainContext {
+	return &ChainContext{ctx: ctx, b: backend}
 }
 
 // RPCMarshalHeader converts the given header to the RPC output .
