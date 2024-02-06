@@ -633,6 +633,9 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	if tx.Type() == types.DepositTxType {
 		return core.ErrTxTypeNotSupported
 	}
+	if tx.Type() == types.BlobTxType {
+		return errors.New("BlobTxType of transaction is currently not supported.")
+	}
 	// Accept only legacy transactions until EIP-2718/2930 activates.
 	if !pool.eip2718 && tx.Type() != types.LegacyTxType {
 		return core.ErrTxTypeNotSupported
@@ -689,7 +692,7 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 		cost = cost.Add(cost, l1Cost)
 	}
 
-	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx)
+	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx, pool.chainconfig.IsMetaTxV2(pool.chain.CurrentBlock().Time))
 	if err != nil {
 		return err
 	}
@@ -1480,7 +1483,7 @@ func (pool *TxPool) validateMetaTxList(list *list) ([]*types.Transaction, *big.I
 	var invalidMetaTxs []*types.Transaction
 	sponsorCostSum := big.NewInt(0)
 	for _, tx := range list.txs.Flatten() {
-		metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx)
+		metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx, pool.chainconfig.IsMetaTxV2(pool.chain.CurrentBlock().Time))
 		if err != nil {
 			invalidMetaTxs = append(invalidMetaTxs, tx)
 			continue

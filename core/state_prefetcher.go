@@ -57,13 +57,15 @@ func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.StateDB, c
 	)
 	// Iterate over and process the individual transactions
 	byzantium := p.config.IsByzantium(block.Number())
+	rules := evm.ChainConfig().Rules(block.Number(), false, header.Time)
+
 	for i, tx := range block.Transactions() {
 		// If block precaching was interrupted, abort
 		if interrupt != nil && atomic.LoadUint32(interrupt) == 1 {
 			return
 		}
 		// Convert the transaction into an executable message and pre-cache its sender
-		msg, err := TransactionToMessage(tx, signer, header.BaseFee)
+		msg, err := TransactionToMessage(tx, signer, header.BaseFee, &rules)
 		if err != nil {
 			return // Also invalid block, bail out
 		}

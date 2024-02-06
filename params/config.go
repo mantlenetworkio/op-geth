@@ -460,6 +460,10 @@ type ChainConfig struct {
 	// Mantle upgrade configs
 	BaseFeeTime           *uint64 `json:"baseFeeTime,omitempty"`           // Mantle BaseFee switch time (nil = no fork, 0 = already on mantle baseFee)
 	BVMETHMintUpgradeTime *uint64 `json:"bvmETHMintUpgradeTime,omitempty"` // BVM_ETH mint upgrade switch time (nil = no fork, 0 = already on)
+
+	// MetaTx upgrade config
+	MetaTxUpgradeTime *uint64 `json:"metaTxUpgradeTime,omitempty"` // MetaTxUpgradeTime switch time ( nil = no fork, 0 = already forked)
+
 	// Fork scheduling was switched from blocks to timestamps here
 
 	ShanghaiTime *uint64 `json:"shanghaiTime,omitempty"` // Shanghai switch time (nil = no fork, 0 = already on shanghai)
@@ -680,6 +684,11 @@ func (c *ChainConfig) IsMantleBaseFee(time uint64) bool {
 // IsMantleBVMETHMintUpgrade returns whether time is either equal to the BVM_ETH mint upgrade fork time or greater.
 func (c *ChainConfig) IsMantleBVMETHMintUpgrade(time uint64) bool {
 	return isTimestampForked(c.BVMETHMintUpgradeTime, time)
+}
+
+// IsMetaTxV2 returns whether time is either equal to the MetaTx fork time or greater.
+func (c *ChainConfig) IsMetaTxV2(time uint64) bool {
+	return isTimestampForked(c.MetaTxUpgradeTime, time)
 }
 
 // IsArrowGlacier returns whether num is either equal to the Arrow Glacier (EIP-4345) fork block or greater.
@@ -1053,6 +1062,7 @@ type Rules struct {
 	IsMerge, IsShanghai, isCancun, isPrague                 bool
 	IsMantleBaseFee, IsMantleBVMETHMintUpgrade              bool
 	IsOptimismBedrock, IsOptimismRegolith                   bool
+	IsMetaTxV2                                              bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -1079,6 +1089,7 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		IsShanghai:                c.IsShanghai(timestamp),
 		isCancun:                  c.IsCancun(timestamp),
 		isPrague:                  c.IsPrague(timestamp),
+		IsMetaTxV2:                c.IsMetaTxV2(timestamp),
 		// Optimism
 		IsOptimismBedrock:  c.IsOptimismBedrock(num),
 		IsOptimismRegolith: c.IsOptimismRegolith(timestamp),
