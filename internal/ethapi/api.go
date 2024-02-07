@@ -21,16 +21,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/consensus"
 	"math/big"
 	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
-
-	"github.com/davecgh/go-spew/spew"
-	"github.com/tyler-smith/go-bip39"
-
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
@@ -51,13 +46,17 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
+
+	"github.com/davecgh/go-spew/spew"
+	"github.com/tyler-smith/go-bip39"
 )
 
 // estimateGasErrorRatio is the amount of overestimation eth_estimateGas is
 // allowed to produce in order to speed up calculations.
+// gasBuffer is used to enlarge a buffer for Estimation
 const (
 	estimateGasErrorRatio = 0.015
-	gasBuffer             = uint64(120 / 100)
+	gasBuffer             = uint64(120)
 )
 
 // EthereumAPI provides an API to access Ethereum related information.
@@ -1373,7 +1372,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 			hi = mid
 		}
 	}
-	return hexutil.Uint64(hi * gasBuffer), nil
+	return hexutil.Uint64(hi * gasBuffer / 100), nil
 }
 
 func calculateGasWithAllowance(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, gasPriceForEstimate *big.Int, gasCap uint64) (uint64, error) {
@@ -1441,38 +1440,6 @@ func (s *BlockChainAPI) EstimateGas(ctx context.Context, args TransactionArgs, b
 	}
 
 	return DoEstimateGas(ctx, s.b, args, bNrOrHash, s.b.RPCGasCap())
-}
-
-// ChainContextBackend provides methods required to implement ChainContext.
-type ChainContextBackend interface {
-	Engine() consensus.Engine
-	HeaderByNumber(context.Context, rpc.BlockNumber) (*types.Header, error)
-}
-
-// ChainContext is an implementation of core.ChainContext. It's main use-case
-// is instantiating a vm.BlockContext without having access to the BlockChain object.
-type ChainContext struct {
-	b   ChainContextBackend
-	ctx context.Context
-}
-
-func (context *ChainContext) Engine() consensus.Engine {
-	return context.b.Engine()
-}
-
-func (context *ChainContext) GetHeader(hash common.Hash, number uint64) *types.Header {
-	// This method is called to get the hash for a block number when executing the BLOCKHASH
-	// opcode. Hence no need to search for non-canonical blocks.
-	header, err := context.b.HeaderByNumber(context.ctx, rpc.BlockNumber(number))
-	if err != nil || header.Hash() != hash {
-		return nil
-	}
-	return header
-}
-
-// NewChainContext creates a new ChainContext object.
-func NewChainContext(ctx context.Context, backend ChainContextBackend) *ChainContext {
-	return &ChainContext{ctx: ctx, b: backend}
 }
 
 // RPCMarshalHeader converts the given header to the RPC output .
