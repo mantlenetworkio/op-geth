@@ -294,7 +294,8 @@ func (b *EthAPIBackend) SendTx(ctx context.Context, tx *types.Transaction) error
 			return err
 		}
 		if err = b.eth.seqRPCService.CallContext(ctx, nil, "eth_sendRawTransaction", hexutil.Encode(data)); err != nil {
-			return fmt.Errorf("failed to forward tx to sequencer, please try again")
+			//return fmt.Errorf("failed to forward tx to sequencer, please try again")
+			return fmt.Errorf("failed to forward tx to sequencer, please try again. Error message: '%w'", err)
 		}
 		if b.disableTxPool {
 			return nil
