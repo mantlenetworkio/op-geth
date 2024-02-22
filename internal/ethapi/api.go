@@ -57,6 +57,7 @@ import (
 const (
 	estimateGasErrorRatio = 0.015
 	gasBuffer             = uint64(120)
+	bufferPercentage      = 90
 )
 
 // EthereumAPI provides an API to access Ethereum related information.
@@ -1247,7 +1248,13 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 			}
 		}
 
-		allowance := new(big.Int).Div(available, feeCap)
+		// allowance := new(big.Int).Div(available, feeCap)
+		// Calculate the maximum value that can be used to pay for gas fees, based on the dynamic buffer ratio.
+		maxGasPayment := new(big.Int).Mul(available, big.NewInt(bufferPercentage))
+		maxGasPayment.Div(maxGasPayment, big.NewInt(100))
+
+		// Calculate gas limit based on buffer.
+		allowance := new(big.Int).Div(maxGasPayment, feeCap)
 
 		// If the allowance is larger than maximum uint64, skip checking
 		if allowance.IsUint64() && hi > allowance.Uint64() {
