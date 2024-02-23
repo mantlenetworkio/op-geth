@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -46,8 +47,6 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
-
-	"github.com/davecgh/go-spew/spew"
 	"github.com/tyler-smith/go-bip39"
 )
 
@@ -57,7 +56,6 @@ import (
 const (
 	estimateGasErrorRatio = 0.015
 	gasBuffer             = uint64(120)
-	bufferPercentage      = 90
 )
 
 // EthereumAPI provides an API to access Ethereum related information.
@@ -1051,7 +1049,7 @@ func (diff *BlockOverrides) Apply(blockCtx *vm.BlockContext) {
 	}
 }
 
-func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *StateOverride, timeout time.Duration, globalGasCap uint64, runMode core.RunMode, gasPriceForEstimate *hexutil.Big) (*core.ExecutionResult, error) {
+func DoCalculateL1Cost(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *StateOverride, timeout time.Duration, globalGasCap uint64, runMode core.RunMode) (*big.Int, error) {
 	defer func(start time.Time) { log.Debug("Executing EVM call finished", "runtime", time.Since(start)) }(time.Now())
 
 	state, header, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
@@ -1074,7 +1072,54 @@ func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash 
 	defer cancel()
 
 	// Get a new instance of the EVM.
-	msg, err := args.ToMessage(globalGasCap, header.BaseFee, runMode, gasPriceForEstimate)
+	msg, err := args.ToMessage(globalGasCap, header.BaseFee, runMode)
+	if err != nil {
+		return nil, err
+	}
+	evm, _, err := b.GetEVM(ctx, msg, state, header, &vm.Config{NoBaseFee: true})
+	if err != nil {
+		return nil, err
+	}
+	// Wait for the context to be done and cancel the evm. Even if the
+	// EVM has finished, cancelling may be done (repeatedly)
+	go func() {
+		<-ctx.Done()
+		evm.Cancel()
+	}()
+
+	// Execute the message.
+	gp := new(core.GasPool).AddGas(core.DefaultMantleBlockGasLimit)
+	l1Cost, err := core.CalculateL1Cost(evm, msg, gp)
+	if err != nil {
+		return nil, err
+	}
+	return l1Cost, nil
+}
+
+func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *StateOverride, timeout time.Duration, globalGasCap uint64, runMode core.RunMode) (*core.ExecutionResult, error) {
+	defer func(start time.Time) { log.Debug("Executing EVM call finished", "runtime", time.Since(start)) }(time.Now())
+
+	state, header, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
+	if state == nil || err != nil {
+		return nil, err
+	}
+	if err := overrides.Apply(state); err != nil {
+		return nil, err
+	}
+	// Setup context so it may be cancelled the call has completed
+	// or, in case of unmetered gas, setup a context with a timeout.
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+	} else {
+		ctx, cancel = context.WithCancel(ctx)
+	}
+	// Make sure the context is cancelled when the call has completed
+	// this makes sure resources are cleaned up.
+	defer cancel()
+
+	// Get a new instance of the EVM.
+	msg, err := args.ToMessage(globalGasCap, header.BaseFee, runMode)
 	if err != nil {
 		return nil, err
 	}
@@ -1161,7 +1206,7 @@ func (s *BlockChainAPI) Call(ctx context.Context, args TransactionArgs, blockNrO
 		}
 	}
 
-	result, err := DoCall(ctx, s.b, args, blockNrOrHash, overrides, s.b.RPCEVMTimeout(), s.b.RPCGasCap(), core.EthcallMode, args.GasPrice)
+	result, err := DoCall(ctx, s.b, args, blockNrOrHash, overrides, s.b.RPCEVMTimeout(), s.b.RPCGasCap(), core.EthcallMode)
 	if err != nil {
 		return nil, err
 	}
@@ -1248,13 +1293,14 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 			}
 		}
 
-		// allowance := new(big.Int).Div(available, feeCap)
-		// Calculate the maximum value that can be used to pay for gas fees, based on the dynamic buffer ratio.
-		maxGasPayment := new(big.Int).Mul(available, big.NewInt(bufferPercentage))
-		maxGasPayment.Div(maxGasPayment, big.NewInt(100))
+		l1Cost, err := DoCalculateL1Cost(ctx, b, args, blockNrOrHash, nil, 0, gasCap, runMode)
+		if err != nil {
+			return 0, fmt.Errorf("failed to calculate L1 cost: %w", err)
+		}
+		available.Sub(available, l1Cost)
 
 		// Calculate gas limit based on buffer.
-		allowance := new(big.Int).Div(maxGasPayment, feeCap)
+		allowance := new(big.Int).Div(available, feeCap)
 
 		// If the allowance is larger than maximum uint64, skip checking
 		if allowance.IsUint64() && hi > allowance.Uint64() {
@@ -1284,7 +1330,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
 		args.Gas = (*hexutil.Uint64)(&gas)
 
-		result, err := DoCall(ctx, b, args, blockNrOrHash, nil, 0, gasCap, runMode, (*hexutil.Big)(gasPriceForEstimateGas))
+		result, err := DoCall(ctx, b, args, blockNrOrHash, nil, 0, gasCap, runMode)
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) {
 				return true, nil, nil // Special case, raise gas limit
@@ -1771,7 +1817,7 @@ func AccessList(ctx context.Context, b Backend, blockNrOrHash rpc.BlockNumberOrH
 		statedb := db.Copy()
 		// Set the accesslist to the last al
 		args.AccessList = &accessList
-		msg, err := args.ToMessage(b.RPCGasCap(), header.BaseFee, core.EthcallMode, args.GasPrice)
+		msg, err := args.ToMessage(b.RPCGasCap(), header.BaseFee, core.EthcallMode)
 		if err != nil {
 			return nil, 0, nil, err
 		}

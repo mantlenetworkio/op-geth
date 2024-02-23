@@ -233,6 +233,11 @@ func ApplyMessage(evm *vm.EVM, msg *Message, gp *GasPool) (*ExecutionResult, err
 	return NewStateTransition(evm, msg, gp).TransitionDb()
 }
 
+// CalculateL1Cost calculates the L1 cost for a transaction without modifying the state.
+func CalculateL1Cost(evm *vm.EVM, msg *Message, gp *GasPool) (*big.Int, error) {
+	return NewStateTransition(evm, msg, gp).CalculateL1Cost()
+}
+
 // StateTransition represents a state transition.
 //
 // == The State Transitioning Model
@@ -280,6 +285,23 @@ func (st *StateTransition) to() common.Address {
 		return common.Address{}
 	}
 	return *st.msg.To
+}
+
+// CalculateL1Cost calculates the L1 cost for a transaction without modifying the state.
+func (st *StateTransition) CalculateL1Cost() (*big.Int, error) {
+	var l1Cost *big.Int
+
+	// Calculate rollup gas data from the message if necessary
+	if st.msg.RunMode == GasEstimationMode || st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode {
+		st.CalculateRollupGasDataFromMessage()
+	}
+
+	// Calculate L1 cost if L1CostFunc is defined and not in EthcallMode
+	if st.evm.Context.L1CostFunc != nil && st.msg.RunMode != EthcallMode {
+		l1Cost = st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupDataGas, st.msg.IsDepositTx, st.msg.To)
+	}
+
+	return l1Cost, nil
 }
 
 func (st *StateTransition) buyGas() (*big.Int, error) {
@@ -442,9 +464,9 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 		st.state.AddBalance(st.msg.From, mint)
 	}
 
-	//Mint BVM_ETH
+	// Mint BVM_ETH
 	rules := st.evm.ChainConfig().Rules(st.evm.Context.BlockNumber, st.evm.Context.Random != nil, st.evm.Context.Time)
-	//add eth value
+	// add eth value
 	if ethValue := st.msg.ETHValue; ethValue != nil && ethValue.Cmp(big.NewInt(0)) != 0 {
 		st.mintBVMETH(ethValue, rules)
 	}
@@ -785,7 +807,7 @@ func (st *StateTransition) generateBVMETHTransferEvent(from, to common.Address, 
 	topics[0] = methodHash
 	topics[1] = from.Hash()
 	topics[2] = to.Hash()
-	//data means the transfer amount in Transfer EVENT.
+	// data means the transfer amount in Transfer EVENT.
 	data := common.HexToHash(common.Bytes2Hex(amount.Bytes())).Bytes()
 	st.evm.StateDB.AddLog(&types.Log{
 		Address: BVM_ETH_ADDR,
