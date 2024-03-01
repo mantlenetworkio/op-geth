@@ -162,8 +162,9 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		misc.ApplyDAOHardFork(statedb)
 	}
 
+	rules := chainConfig.Rules(new(big.Int).SetUint64(pre.Env.Number), false, pre.Env.Timestamp)
 	for i, tx := range txs {
-		msg, err := core.TransactionToMessage(tx, signer, pre.Env.BaseFee)
+		msg, err := core.TransactionToMessage(tx, signer, pre.Env.BaseFee, &rules)
 		if err != nil {
 			log.Warn("rejected tx", "index", i, "hash", tx.Hash(), "error", err)
 			rejectedTxs = append(rejectedTxs, &rejectedTx{i, err.Error()})

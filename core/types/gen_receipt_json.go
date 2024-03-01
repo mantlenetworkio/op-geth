@@ -48,11 +48,19 @@ func (r Receipt) MarshalJSON() ([]byte, error) {
 	enc.TxHash = r.TxHash
 	enc.ContractAddress = r.ContractAddress
 	enc.GasUsed = hexutil.Uint64(r.GasUsed)
-	effectiveGasPrice := hexutil.Big(*r.EffectiveGasPrice)
-	enc.EffectiveGasPrice = &effectiveGasPrice
+	if r.EffectiveGasPrice != nil{
+		effectiveGasPrice := hexutil.Big(*r.EffectiveGasPrice)
+		enc.EffectiveGasPrice = &effectiveGasPrice
+	} else {
+		enc.EffectiveGasPrice = nil
+	}
 	enc.BlobGasUsed = hexutil.Uint64(r.BlobGasUsed)
-	blobGasPrice := hexutil.Big(*r.BlobGasPrice)
-	enc.BlobGasPrice = &blobGasPrice
+	if r.BlobGasPrice != nil{
+		blobGasPrice := hexutil.Big(*r.BlobGasPrice)
+		enc.BlobGasPrice = &blobGasPrice
+	} else {
+		enc.BlobGasPrice = nil
+	}
 	if r.DepositNonce != nil {
 		depositNonce := hexutil.Uint64(*r.DepositNonce)
 		enc.DepositNonce = &depositNonce

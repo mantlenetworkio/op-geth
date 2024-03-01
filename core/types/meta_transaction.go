@@ -57,6 +57,21 @@ type MetaTxSignData struct {
 	SponsorPercent uint64
 }
 
+type MetaTxSignDataV2 struct {
+	From           common.Address
+	ChainID        *big.Int
+	Nonce          uint64
+	GasTipCap      *big.Int
+	GasFeeCap      *big.Int
+	Gas            uint64
+	To             *common.Address `rlp:"nil"`
+	Value          *big.Int
+	Data           []byte
+	AccessList     AccessList
+	ExpireHeight   uint64
+	SponsorPercent uint64
+}
+
 func CalculateSponsorPercentAmount(mxParams *MetaTxParams, amount *big.Int) (*big.Int, *big.Int) {
 	if mxParams == nil {
 		return nil, nil
@@ -89,7 +104,7 @@ func DecodeMetaTxParams(txData []byte) (*MetaTxParams, error) {
 	return &metaTxParams, nil
 }
 
-func DecodeAndVerifyMetaTxParams(tx *Transaction) (*MetaTxParams, error) {
+func DecodeAndVerifyMetaTxParams(tx *Transaction, isMetaTxUpgraded bool) (*MetaTxParams, error) {
 	if tx.Type() != DynamicFeeTxType {
 		return nil, nil
 	}
@@ -117,27 +132,8 @@ func DecodeAndVerifyMetaTxParams(tx *Transaction) (*MetaTxParams, error) {
 		return nil, ErrInvalidSponsorPercent
 	}
 
-	metaTxSignData := &MetaTxSignData{
-		ChainID:        tx.ChainId(),
-		Nonce:          tx.Nonce(),
-		GasTipCap:      tx.GasTipCap(),
-		GasFeeCap:      tx.GasFeeCap(),
-		Gas:            tx.Gas(),
-		To:             tx.To(),
-		Value:          tx.Value(),
-		Data:           metaTxParams.Payload,
-		AccessList:     tx.AccessList(),
-		ExpireHeight:   metaTxParams.ExpireHeight,
-		SponsorPercent: metaTxParams.SponsorPercent,
-	}
-
-	gasFeeSponsorSigner, err := recoverPlain(metaTxSignData.Hash(), metaTxParams.R, metaTxParams.S, metaTxParams.V, true)
-	if err != nil {
-		return nil, ErrInvalidGasFeeSponsorSig
-	}
-
-	if gasFeeSponsorSigner != metaTxParams.GasFeeSponsor {
-		return nil, ErrGasFeeSponsorMismatch
+	if err = checkSponsorSignature(tx, metaTxParams, isMetaTxUpgraded); err != nil {
+		return nil, err
 	}
 
 	tx.metaTxParams.Store(&MetaTxParamsCache{
@@ -147,6 +143,67 @@ func DecodeAndVerifyMetaTxParams(tx *Transaction) (*MetaTxParams, error) {
 	return metaTxParams, nil
 }
 
+func checkSponsorSignature(tx *Transaction, metaTxParams *MetaTxParams, isMetaTxUpgraded bool) error {
+	var (
+		txSender, gasFeeSponsorSigner common.Address
+		err                           error
+	)
+
+	txSender, err = Sender(LatestSignerForChainID(tx.ChainId()), tx)
+	if err != nil {
+		return err
+	}
+
+	if isMetaTxUpgraded {
+		metaTxSignData := &MetaTxSignDataV2{
+			From:           txSender,
+			ChainID:        tx.ChainId(),
+			Nonce:          tx.Nonce(),
+			GasTipCap:      tx.GasTipCap(),
+			GasFeeCap:      tx.GasFeeCap(),
+			Gas:            tx.Gas(),
+			To:             tx.To(),
+			Value:          tx.Value(),
+			Data:           metaTxParams.Payload,
+			AccessList:     tx.AccessList(),
+			ExpireHeight:   metaTxParams.ExpireHeight,
+			SponsorPercent: metaTxParams.SponsorPercent,
+		}
+
+		gasFeeSponsorSigner, err = recoverPlain(metaTxSignData.Hash(), metaTxParams.R, metaTxParams.S, metaTxParams.V, true)
+		if err != nil {
+			return ErrInvalidGasFeeSponsorSig
+		}
+	} else {
+		metaTxSignData := &MetaTxSignData{
+			ChainID:        tx.ChainId(),
+			Nonce:          tx.Nonce(),
+			GasTipCap:      tx.GasTipCap(),
+			GasFeeCap:      tx.GasFeeCap(),
+			Gas:            tx.Gas(),
+			To:             tx.To(),
+			Value:          tx.Value(),
+			Data:           metaTxParams.Payload,
+			AccessList:     tx.AccessList(),
+			ExpireHeight:   metaTxParams.ExpireHeight,
+			SponsorPercent: metaTxParams.SponsorPercent,
+		}
+
+		gasFeeSponsorSigner, err = recoverPlain(metaTxSignData.Hash(), metaTxParams.R, metaTxParams.S, metaTxParams.V, true)
+		if err != nil {
+			return ErrInvalidGasFeeSponsorSig
+		}
+	}
+
+	if gasFeeSponsorSigner != metaTxParams.GasFeeSponsor {
+		return ErrGasFeeSponsorMismatch
+	}
+	return nil
+}
+
 func (metaTxSignData *MetaTxSignData) Hash() common.Hash {
+	return rlpHash(metaTxSignData)
+}
+func (metaTxSignData *MetaTxSignDataV2) Hash() common.Hash {
 	return rlpHash(metaTxSignData)
 }
