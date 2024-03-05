@@ -656,7 +656,7 @@ func (st *StateTransition) refundGas(refundQuotient, tokenRatio uint64) {
 	}
 	st.gasRemaining += refund
 
-	// Return ETH for remaining gas, exchanged at the original rate.
+	// Return MNT for remaining gas, exchanged at the original rate.
 	st.gasRemaining = st.gasRemaining * tokenRatio
 	remaining := new(big.Int).Mul(new(big.Int).SetUint64(st.gasRemaining), st.msg.GasPrice)
 	if st.msg.MetaTxParams != nil {
