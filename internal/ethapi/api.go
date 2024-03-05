@@ -952,6 +952,38 @@ func headerByNumberOrHash(ctx context.Context, b Backend, blockNrOrHash rpc.Bloc
 	return header, err
 }
 
+func (s *BlockChainAPI) GetBlockRange(ctx context.Context, startNumber rpc.BlockNumber, endNumber rpc.BlockNumber, fullTx bool) ([]map[string]interface{}, error) {
+	// Basic assertions about start and end block numbers.
+	if endNumber < startNumber {
+		return nil, fmt.Errorf("start of block range (%d) is greater than end of block range (%d)", startNumber, endNumber)
+	}
+
+	// Assert that the number of blocks is < 1k (? configurable?).
+	if endNumber-startNumber > 1000 {
+		return nil, fmt.Errorf("requested block range is too large (max is 1000, requested %d blocks)", endNumber-startNumber)
+	}
+
+	// Make sure the end exists. If start doesn't exist, will be caught immediately below.
+	if _, err := s.GetBlockByNumber(ctx, endNumber, fullTx); err != nil {
+		return nil, fmt.Errorf("end of requested block range (%d) does not exist: %w", endNumber, err)
+	}
+
+	// Create an empty output array.
+	blocks := make([]map[string]interface{}, 0)
+	// For each block in range, get block and append to array.
+	for number := startNumber; number <= endNumber; number++ {
+		block, err := s.GetBlockByNumber(ctx, number, fullTx)
+		if err != nil {
+			return nil, err
+		}
+		if block == nil {
+			return nil, errors.New("block in range not indexed, this should never happen")
+		}
+		blocks = append(blocks, block)
+	}
+	return blocks, nil
+}
+
 // OverrideAccount indicates the overriding fields of account during the execution
 // of a message call.
 // Note, state and stateDiff can't be specified at the same time. If state is
