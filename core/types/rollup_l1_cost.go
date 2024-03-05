@@ -70,10 +70,7 @@ func NewL1CostFunc(config *params.ChainConfig, statedb StateGetter) L1CostFunc {
 			return common.Big0
 		}
 		if blockNum != cacheBlockNum {
-			l1BaseFee = statedb.GetState(L1BlockAddr, L1BaseFeeSlot).Big()
-			overhead = statedb.GetState(L1BlockAddr, OverheadSlot).Big()
-			scalar = statedb.GetState(L1BlockAddr, ScalarSlot).Big()
-			tokenRatio = statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
+			l1BaseFee, overhead, scalar, _, tokenRatio = DeriveL1GasInfo(statedb)
 			cacheBlockNum = blockNum
 		}
 

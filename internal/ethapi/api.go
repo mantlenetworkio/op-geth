@@ -1321,44 +1321,6 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 	return hexutil.Uint64(hi * gasBuffer / 100), nil
 }
 
-func calculateGasWithAllowance(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, gasPriceForEstimate *big.Int, gasCap uint64) (uint64, error) {
-	state, _, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
-	if err != nil {
-		return 0, err
-	}
-	balance := state.GetBalance(*args.From) // from can't be nil
-	metaTxParams, err := types.DecodeMetaTxParams(args.data())
-	if err != nil {
-		return 0, err
-	}
-
-	available := new(big.Int).Set(balance)
-	if args.Value != nil {
-		if args.Value.ToInt().Cmp(available) > 0 {
-			return 0, core.ErrInsufficientFundsForTransfer
-		}
-		available.Sub(available, args.Value.ToInt())
-	}
-	if metaTxParams != nil {
-		feeCap := new(big.Int).Mul(gasPriceForEstimate, big.NewInt(0).SetUint64(gasCap))
-		sponsorAmount, _ := types.CalculateSponsorPercentAmount(metaTxParams, feeCap)
-		sponsorBalance := state.GetBalance(metaTxParams.GasFeeSponsor)
-		if sponsorAmount.Cmp(sponsorBalance) < 0 {
-			available.Add(available, sponsorAmount)
-		} else {
-			available.Add(available, sponsorBalance)
-		}
-	}
-
-	allowanceGas := new(big.Int).Div(available, gasPriceForEstimate)
-
-	if allowanceGas.Uint64() < gasCap {
-		return allowanceGas.Uint64(), nil
-	}
-
-	return gasCap, nil
-}
-
 // EstimateGas returns an estimate of the amount of gas needed to execute the
 // given transaction against the current pending block.
 func (s *BlockChainAPI) EstimateGas(ctx context.Context, args TransactionArgs, blockNrOrHash *rpc.BlockNumberOrHash) (hexutil.Uint64, error) {
@@ -1433,7 +1395,7 @@ func RPCMarshalBlock(ctx context.Context, block *types.Block, inclTx bool, fullT
 			return tx.Hash()
 		}
 		if fullTx {
-			formatTx = func(idx int, tx *types.Transaction) interface{} {
+			formatTx = func(idx int, _ *types.Transaction) interface{} {
 				return newRPCTransactionFromBlockIndex(ctx, block, uint64(idx), backend)
 			}
 		}

@@ -81,10 +81,7 @@ func validate(jt JumpTable) JumpTable {
 }
 
 func newPUSH0InstructionSet() JumpTable {
-	instructionSet := newMergeInstructionSet()
-	enable3855(&instructionSet) // PUSH0 instruction
-	enable3860(&instructionSet) // Limit and meter initcode
-	return validate(instructionSet)
+	return newShanghaiInstructionSet()
 }
 
 func newShanghaiInstructionSet() JumpTable {

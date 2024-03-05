@@ -84,7 +84,7 @@ func CalculateSponsorPercentAmount(mxParams *MetaTxParams, amount *big.Int) (*bi
 }
 
 func DecodeMetaTxParams(txData []byte) (*MetaTxParams, error) {
-	if len(txData) <= len(MetaTxPrefix) {
+	if len(txData) <= MetaTxPrefixLength {
 		return nil, nil
 	}
 	if !bytes.Equal(txData[:MetaTxPrefixLength], MetaTxPrefix) {
