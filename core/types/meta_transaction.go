@@ -97,7 +97,7 @@ func DecodeMetaTxParams(txData []byte) (*MetaTxParams, error) {
 		return nil, err
 	}
 
-	if metaTxParams.SponsorPercent > OneHundredPercent {
+	if metaTxParams.SponsorPercent > OneHundredPercent || metaTxParams.SponsorPercent == 0 {
 		return nil, ErrInvalidSponsorPercent
 	}
 
@@ -126,11 +126,6 @@ func DecodeAndVerifyMetaTxParams(tx *Transaction, isMetaTxUpgraded bool) (*MetaT
 			metaTxParams: nil,
 		})
 		return nil, nil
-	}
-
-	// metaTxParams.SponsorPercent > OneHundredPercent checked in DecodeMetaTxParams function
-	if metaTxParams.SponsorPercent == 0 {
-		return nil, ErrInvalidSponsorPercent
 	}
 
 	if err = checkSponsorSignature(tx, metaTxParams, isMetaTxUpgraded); err != nil {
