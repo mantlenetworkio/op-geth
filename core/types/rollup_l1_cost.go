@@ -23,16 +23,21 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 )
 
+const (
+	UnknownTransactionFieldsSize    = 80 // This is to cover transaction fields that are unknown at the time of estimation but will carry non-zero bytes data during execution.
+	BeforeRegolithUpdateNonZeroSize = 68 // Before the Regolith update, a magic value of 68 is added to the NonZero.
+)
+
 type RollupGasData struct {
-	Zeroes, Ones uint64
+	Zeroes, NonZero uint64
 }
 
 func (r RollupGasData) DataGas(time uint64, cfg *params.ChainConfig) (gas uint64) {
 	gas = r.Zeroes * params.TxDataZeroGas
 	if cfg.IsRegolith(time) {
-		gas += r.Ones * params.TxDataNonZeroGasEIP2028
+		gas += r.NonZero * params.TxDataNonZeroGasEIP2028
 	} else {
-		gas += (r.Ones + 68) * params.TxDataNonZeroGasEIP2028
+		gas += (r.NonZero + BeforeRegolithUpdateNonZeroSize) * params.TxDataNonZeroGasEIP2028
 	}
 	return gas
 }

@@ -401,7 +401,7 @@ func (tx *Transaction) RollupDataGas() RollupGasData {
 		if byt == 0 {
 			out.Zeroes++
 		} else {
-			out.Ones++
+			out.NonZero++
 		}
 	}
 	tx.rollupGas.Store(out)

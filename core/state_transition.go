@@ -222,7 +222,7 @@ func (st *StateTransition) CalculateRollupGasDataFromMessage() {
 
 	// add a constant to cover sigs(V,R,S) and other data to make sure that the gasLimit from eth_estimateGas can cover L1 cost
 	// just used for estimateGas and the actual L1 cost depends on users' tx when executing
-	st.msg.RollupDataGas.Ones += 80
+	st.msg.RollupDataGas.NonZero += types.UnknownTransactionFieldsSize
 }
 
 // ApplyMessage computes the new state by applying the given message

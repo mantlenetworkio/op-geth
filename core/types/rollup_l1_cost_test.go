@@ -14,8 +14,8 @@ func TestRollupGasData(t *testing.T) {
 		ones := rand.Uint64()
 
 		r := RollupGasData{
-			Zeroes: zeroes,
-			Ones:   ones,
+			Zeroes:  zeroes,
+			NonZero: ones,
 		}
 		time := uint64(1)
 		cfg := &params.ChainConfig{
@@ -24,7 +24,7 @@ func TestRollupGasData(t *testing.T) {
 		gasPreRegolith := r.DataGas(0, cfg)
 		gasPostRegolith := r.DataGas(1, cfg)
 
-		require.Equal(t, r.Zeroes*params.TxDataZeroGas+(r.Ones+68)*params.TxDataNonZeroGasEIP2028, gasPreRegolith)
-		require.Equal(t, r.Zeroes*params.TxDataZeroGas+r.Ones*params.TxDataNonZeroGasEIP2028, gasPostRegolith)
+		require.Equal(t, r.Zeroes*params.TxDataZeroGas+(r.NonZero+BeforeRegolithUpdateNonZeroSize)*params.TxDataNonZeroGasEIP2028, gasPreRegolith)
+		require.Equal(t, r.Zeroes*params.TxDataZeroGas+r.NonZero*params.TxDataNonZeroGasEIP2028, gasPostRegolith)
 	}
 }
