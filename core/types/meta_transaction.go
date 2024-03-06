@@ -22,7 +22,7 @@ var (
 	ErrExpiredMetaTx           = errors.New("expired meta transaction")
 	ErrInvalidGasFeeSponsorSig = errors.New("invalid gas fee sponsor signature")
 	ErrGasFeeSponsorMismatch   = errors.New("gas fee sponsor address is mismatch with signature")
-	ErrInvalidSponsorPercent   = errors.New("invalid sponsor percent, expected range [0, 100]")
+	ErrInvalidSponsorPercent   = errors.New("invalid sponsor percent, expected range (0, 100]")
 	ErrSponsorBalanceNotEnough = errors.New("sponsor doesn't have enough balance")
 )
 
@@ -128,7 +128,8 @@ func DecodeAndVerifyMetaTxParams(tx *Transaction, isMetaTxUpgraded bool) (*MetaT
 		return nil, nil
 	}
 
-	if metaTxParams.SponsorPercent > OneHundredPercent {
+	if metaTxParams.SponsorPercent > OneHundredPercent ||
+		metaTxParams.SponsorPercent == 0 {
 		return nil, ErrInvalidSponsorPercent
 	}
 

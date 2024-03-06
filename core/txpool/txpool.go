@@ -713,7 +713,7 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 		if selfBalance.Cmp(selfPayAmount) < 0 {
 			return core.ErrInsufficientFunds
 		}
-		userBalance = new(big.Int).Add(selfBalance, sponsorBalance)
+		userBalance = new(big.Int).Add(selfBalance, sponsorAmount)
 	} else {
 		userBalance = pool.currentState.GetBalance(from)
 		// Transactor should have enough funds to cover the costs
