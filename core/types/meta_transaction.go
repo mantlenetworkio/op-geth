@@ -128,8 +128,8 @@ func DecodeAndVerifyMetaTxParams(tx *Transaction, isMetaTxUpgraded bool) (*MetaT
 		return nil, nil
 	}
 
-	if metaTxParams.SponsorPercent > OneHundredPercent ||
-		metaTxParams.SponsorPercent == 0 {
+	// metaTxParams.SponsorPercent > OneHundredPercent checked in DecodeMetaTxParams function
+	if metaTxParams.SponsorPercent == 0 {
 		return nil, ErrInvalidSponsorPercent
 	}
 
