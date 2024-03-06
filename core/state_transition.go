@@ -301,9 +301,9 @@ func (st *StateTransition) buyGas() (*big.Int, error) {
 	if l1Cost != nil && (st.msg.RunMode == GasEstimationMode || st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode) {
 		mgval = mgval.Add(mgval, l1Cost)
 	}
-	balanceCheck := mgval
+	balanceCheck := new(big.Int).Set(mgval)
 	if st.msg.GasFeeCap != nil {
-		balanceCheck = new(big.Int).SetUint64(st.msg.GasLimit)
+		balanceCheck.SetUint64(st.msg.GasLimit)
 		balanceCheck = balanceCheck.Mul(balanceCheck, st.msg.GasFeeCap)
 		balanceCheck.Add(balanceCheck, st.msg.Value)
 		if l1Cost != nil && st.msg.RunMode == GasEstimationMode {
@@ -656,7 +656,7 @@ func (st *StateTransition) refundGas(refundQuotient, tokenRatio uint64) {
 	}
 	st.gasRemaining += refund
 
-	// Return ETH for remaining gas, exchanged at the original rate.
+	// Return MNT for remaining gas, exchanged at the original rate.
 	st.gasRemaining = st.gasRemaining * tokenRatio
 	remaining := new(big.Int).Mul(new(big.Int).SetUint64(st.gasRemaining), st.msg.GasPrice)
 	if st.msg.MetaTxParams != nil {
