@@ -25,6 +25,7 @@ import (
 	"net"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -341,6 +342,15 @@ func TestEthClientHistoricalBackend(t *testing.T) {
 	defer client.Close()
 
 	testHistoricalRPC(t, client)
+}
+
+func TestEthClientGetBlockRangeBackend(t *testing.T) {
+	backend, _ := newTestBackend(t, true)
+	client, _ := backend.Attach()
+	defer backend.Close()
+	defer client.Close()
+
+	testGetBlockRangeRPC(t, client)
 }
 
 func TestEthClient(t *testing.T) {
@@ -799,6 +809,44 @@ func testEstimateGas(t *testing.T, client *rpc.Client) {
 	}
 	if gas != 21000 {
 		t.Fatalf("unexpected gas price: %v", gas)
+	}
+}
+
+func testGetBlockRangeRPC(t *testing.T, client *rpc.Client) {
+	type args struct {
+		startNumber string
+		endNumber   string
+		fullTx      bool
+	}
+	tests := []struct {
+		name             string
+		args             args
+		wantBlocksLength int
+		wantErr          bool
+		containsErr      string
+	}{
+		{"0-0", args{"0x0", "0x0", true}, 1, false, ""},
+		{"0-1", args{"0x0", "0x1", true}, 2, false, ""},
+		{"0-2", args{"0x0", "0x2", true}, 3, false, ""},
+		{"0-30", args{"0x0", "0x1e", true}, 0, true, "block in range not indexed, this should never happen"},
+		{"0-1030", args{"0x0", "0x406", true}, 0, true, "requested block range is too large (max is 1000"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := make([]map[string]interface{}, 0)
+			err := client.CallContext(context.Background(), &got, "eth_getBlockRange", tt.args.startNumber, tt.args.endNumber, tt.args.fullTx)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("BlockChainAPI.GetBlockRange() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !reflect.DeepEqual(len(got), tt.wantBlocksLength) {
+				t.Errorf("BlockChainAPI.GetBlockRange() = %v, want %v", len(got), tt.wantBlocksLength)
+			}
+			if tt.wantErr && !strings.Contains(err.Error(), tt.containsErr) {
+				t.Errorf("BlockChainAPI.GetBlockRange() error = %v, wantErr %v", err, tt.containsErr)
+				return
+			}
+		})
 	}
 }
 
