@@ -195,7 +195,7 @@ func (h UnprefixedHash) MarshalText() ([]byte, error) {
 	return []byte(hex.EncodeToString(h[:])), nil
 }
 
-/////////// Address
+// ///////// Address
 
 // Address represents the 20 byte address of an Ethereum account.
 type Address [AddressLength]byte
@@ -307,6 +307,11 @@ func (a *Address) SetBytes(b []byte) {
 		b = b[len(b)-AddressLength:]
 	}
 	copy(a[AddressLength-len(b):], b)
+}
+
+// Cmp compares two addresses.
+func (a Address) Cmp(other Address) int {
+	return bytes.Compare(a[:], other[:])
 }
 
 // MarshalText returns the hex representation of a.

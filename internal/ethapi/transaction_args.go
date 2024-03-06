@@ -200,7 +200,7 @@ func (args *TransactionArgs) setLondonFeeDefaults(ctx context.Context, head *typ
 // ToMessage converts the transaction arguments to the Message type used by the
 // core evm. This method is used in calls and traces that do not require a real
 // live transaction.
-func (args *TransactionArgs) ToMessage(globalGasCap uint64, baseFee *big.Int, runMode core.RunMode, gasPriceForEstimate *hexutil.Big) (*core.Message, error) {
+func (args *TransactionArgs) ToMessage(globalGasCap uint64, baseFee *big.Int, runMode core.RunMode) (*core.Message, error) {
 	// Reject invalid combinations of pre- and post-1559 fee styles
 	if args.GasPrice != nil && (args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil) {
 		return nil, errors.New("both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified")
@@ -256,31 +256,31 @@ func (args *TransactionArgs) ToMessage(globalGasCap uint64, baseFee *big.Int, ru
 		}
 	}
 
-	// use suggested gasPrice for estimateGas to calculate gasUsed
-	if runMode == core.GasEstimationMode || runMode == core.GasEstimationWithSkipCheckBalanceMode {
-		// use default gasPrice if user does not set gasPrice or gasPrice is 0
-		if args.GasPrice == nil && gasPrice.Cmp(common.Big0) == 0 {
-			gasPrice = gasPriceForEstimate.ToInt()
-		}
-		// use gasTipCap to set gasFeeCap
-		if args.MaxFeePerGas == nil && args.MaxPriorityFeePerGas != nil {
-			gasFeeCap = args.MaxPriorityFeePerGas.ToInt()
-		}
-		// use gasFeeCap to set gasTipCap
-		if args.MaxPriorityFeePerGas == nil && args.MaxFeePerGas != nil {
-			gasTipCap = args.MaxFeePerGas.ToInt()
-		}
-		// use default gasPrice to set gasFeeCap & gasTipCap if user set gasPrice
-		if args.GasPrice != nil {
-			gasFeeCap = gasPrice
-			gasTipCap = gasPrice
-		}
-		// use default gasPrice to set gasFeeCap & gasTipCap if user does not set any value
-		if args.MaxFeePerGas == nil && args.MaxPriorityFeePerGas == nil && args.GasPrice == nil {
-			gasFeeCap = gasPriceForEstimate.ToInt()
-			gasTipCap = gasPriceForEstimate.ToInt()
-		}
-	}
+	// // use suggested gasPrice for estimateGas to calculate gasUsed
+	// if runMode == core.GasEstimationMode || runMode == core.GasEstimationWithSkipCheckBalanceMode {
+	// 	// use default gasPrice if user does not set gasPrice or gasPrice is 0
+	// 	if args.GasPrice == nil && gasPrice.Cmp(common.Big0) == 0 {
+	// 		gasPrice = gasPriceForEstimate.ToInt()
+	// 	}
+	// 	// use gasTipCap to set gasFeeCap
+	// 	if args.MaxFeePerGas == nil && args.MaxPriorityFeePerGas != nil {
+	// 		gasFeeCap = args.MaxPriorityFeePerGas.ToInt()
+	// 	}
+	// 	// use gasFeeCap to set gasTipCap
+	// 	if args.MaxPriorityFeePerGas == nil && args.MaxFeePerGas != nil {
+	// 		gasTipCap = args.MaxFeePerGas.ToInt()
+	// 	}
+	// 	// use default gasPrice to set gasFeeCap & gasTipCap if user set gasPrice
+	// 	if args.GasPrice != nil {
+	// 		gasFeeCap = gasPrice
+	// 		gasTipCap = gasPrice
+	// 	}
+	// 	// use default gasPrice to set gasFeeCap & gasTipCap if user does not set any value
+	// 	if args.MaxFeePerGas == nil && args.MaxPriorityFeePerGas == nil && args.GasPrice == nil {
+	// 		gasFeeCap = gasPriceForEstimate.ToInt()
+	// 		gasTipCap = gasPriceForEstimate.ToInt()
+	// 	}
+	// }
 
 	value := new(big.Int)
 	if args.Value != nil {
