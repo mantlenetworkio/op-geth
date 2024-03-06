@@ -41,7 +41,7 @@ type txJSON struct {
 	MaxFeePerBlobGas     *hexutil.Big    `json:"maxFeePerBlobGas,omitempty"`
 	Gas                  *hexutil.Uint64 `json:"gas"`
 	Value                *hexutil.Big    `json:"value"`
-	Data                 *hexutil.Bytes  `json:"input"`
+	Input                *hexutil.Bytes  `json:"input"`
 	BlobVersionedHashes  []common.Hash   `json:"blobVersionedHashes,omitempty"`
 	V                    *hexutil.Big    `json:"v"`
 	R                    *hexutil.Big    `json:"r"`
@@ -99,7 +99,7 @@ func (tx *Transaction) MarshalJSON() ([]byte, error) {
 		enc.Gas = (*hexutil.Uint64)(&itx.Gas)
 		enc.GasPrice = (*hexutil.Big)(itx.GasPrice)
 		enc.Value = (*hexutil.Big)(itx.Value)
-		enc.Data = (*hexutil.Bytes)(&itx.Data)
+		enc.Input = (*hexutil.Bytes)(&itx.Data)
 		enc.To = tx.To()
 		enc.V = (*hexutil.Big)(itx.V)
 		enc.R = (*hexutil.Big)(itx.R)
@@ -111,7 +111,7 @@ func (tx *Transaction) MarshalJSON() ([]byte, error) {
 		enc.Gas = (*hexutil.Uint64)(&itx.Gas)
 		enc.GasPrice = (*hexutil.Big)(itx.GasPrice)
 		enc.Value = (*hexutil.Big)(itx.Value)
-		enc.Data = (*hexutil.Bytes)(&itx.Data)
+		enc.Input = (*hexutil.Bytes)(&itx.Data)
 		enc.To = tx.To()
 		enc.V = (*hexutil.Big)(itx.V)
 		enc.R = (*hexutil.Big)(itx.R)
@@ -124,7 +124,7 @@ func (tx *Transaction) MarshalJSON() ([]byte, error) {
 		enc.MaxFeePerGas = (*hexutil.Big)(itx.GasFeeCap)
 		enc.MaxPriorityFeePerGas = (*hexutil.Big)(itx.GasTipCap)
 		enc.Value = (*hexutil.Big)(itx.Value)
-		enc.Data = (*hexutil.Bytes)(&itx.Data)
+		enc.Input = (*hexutil.Bytes)(&itx.Data)
 		enc.To = tx.To()
 		enc.V = (*hexutil.Big)(itx.V)
 		enc.R = (*hexutil.Big)(itx.R)
@@ -132,7 +132,7 @@ func (tx *Transaction) MarshalJSON() ([]byte, error) {
 	case *DepositTx:
 		enc.Gas = (*hexutil.Uint64)(&itx.Gas)
 		enc.Value = (*hexutil.Big)(itx.Value)
-		enc.Data = (*hexutil.Bytes)(&itx.Data)
+		enc.Input = (*hexutil.Bytes)(&itx.Data)
 		enc.To = tx.To()
 		enc.SourceHash = &itx.SourceHash
 		enc.From = &itx.From
@@ -183,10 +183,10 @@ func (tx *Transaction) UnmarshalJSON(input []byte) error {
 			return errors.New("missing required field 'value' in transaction")
 		}
 		itx.Value = (*big.Int)(dec.Value)
-		if dec.Data == nil {
+		if dec.Input == nil {
 			return errors.New("missing required field 'input' in transaction")
 		}
-		itx.Data = *dec.Data
+		itx.Data = *dec.Input
 		if dec.V == nil {
 			return errors.New("missing required field 'v' in transaction")
 		}
@@ -236,10 +236,10 @@ func (tx *Transaction) UnmarshalJSON(input []byte) error {
 			return errors.New("missing required field 'value' in transaction")
 		}
 		itx.Value = (*big.Int)(dec.Value)
-		if dec.Data == nil {
+		if dec.Input == nil {
 			return errors.New("missing required field 'input' in transaction")
 		}
-		itx.Data = *dec.Data
+		itx.Data = *dec.Input
 		if dec.V == nil {
 			return errors.New("missing required field 'v' in transaction")
 		}
@@ -293,10 +293,10 @@ func (tx *Transaction) UnmarshalJSON(input []byte) error {
 			return errors.New("missing required field 'value' in transaction")
 		}
 		itx.Value = (*big.Int)(dec.Value)
-		if dec.Data == nil {
+		if dec.Input == nil {
 			return errors.New("missing required field 'input' in transaction")
 		}
-		itx.Data = *dec.Data
+		itx.Data = *dec.Input
 		if dec.V == nil {
 			return errors.New("missing required field 'v' in transaction")
 		}
@@ -350,10 +350,10 @@ func (tx *Transaction) UnmarshalJSON(input []byte) error {
 			return errors.New("missing required field 'value' in transaction")
 		}
 		itx.Value = uint256.MustFromBig((*big.Int)(dec.Value))
-		if dec.Data == nil {
+		if dec.Input == nil {
 			return errors.New("missing required field 'input' in transaction")
 		}
-		itx.Data = *dec.Data
+		itx.Data = *dec.Input
 		if dec.AccessList != nil {
 			itx.AccessList = *dec.AccessList
 		}
@@ -425,10 +425,10 @@ func (tx *Transaction) UnmarshalJSON(input []byte) error {
 		itx.EthValue = (*big.Int)(dec.EthValue)
 		// ethValue may be omitted or nil if there is nothing to transfer to msg.To.
 		itx.EthTxValue = (*big.Int)(dec.EthTxValue)
-		if dec.Data == nil {
+		if dec.Input == nil {
 			return errors.New("missing required field 'input' in transaction")
 		}
-		itx.Data = *dec.Data
+		itx.Data = *dec.Input
 		if dec.From == nil {
 			return errors.New("missing required field 'from' in transaction")
 		}
