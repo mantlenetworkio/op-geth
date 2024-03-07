@@ -1309,7 +1309,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 
 		available := new(big.Int).Set(balance)
 		if args.Value != nil {
-			if args.Value.ToInt().Cmp(available) > 0 {
+			if args.Value.ToInt().Cmp(available) >= 0 {
 				return 0, core.ErrInsufficientFundsForTransfer
 			}
 			available.Sub(available, args.Value.ToInt())
@@ -1473,7 +1473,7 @@ func calculateGasWithAllowance(ctx context.Context, b Backend, args TransactionA
 
 	available := new(big.Int).Set(balance)
 	if args.Value != nil {
-		if args.Value.ToInt().Cmp(available) > 0 {
+		if args.Value.ToInt().Cmp(available) >= 0 {
 			return 0, core.ErrInsufficientFundsForTransfer
 		}
 		available.Sub(available, args.Value.ToInt())

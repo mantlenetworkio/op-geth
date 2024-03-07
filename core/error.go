@@ -103,4 +103,7 @@ var (
 
 	// ErrSystemTxNotSupported is returned for any deposit tx with IsSystemTx=true after the Regolith fork
 	ErrSystemTxNotSupported = errors.New("system tx not supported")
+
+	// ErrEthTxValueTooLarge is returned when EthTxValue is larger than the BVM balance of msg.from
+	ErrEthTxValueTooLarge = errors.New("eth tx value is too large")
 )

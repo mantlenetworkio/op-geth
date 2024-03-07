@@ -713,7 +713,7 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 		if selfBalance.Cmp(selfPayAmount) < 0 {
 			return core.ErrInsufficientFunds
 		}
-		userBalance = new(big.Int).Add(selfBalance, sponsorBalance)
+		userBalance = new(big.Int).Add(selfBalance, sponsorAmount)
 	} else {
 		userBalance = pool.currentState.GetBalance(from)
 		// Transactor should have enough funds to cover the costs
@@ -1482,6 +1482,7 @@ func (pool *TxPool) validateMetaTxList(list *list) ([]*types.Transaction, *big.I
 
 	var invalidMetaTxs []*types.Transaction
 	sponsorCostSum := big.NewInt(0)
+	sponsorCostSumPerSponsor := make(map[common.Address]*big.Int)
 	for _, tx := range list.txs.Flatten() {
 		metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx, pool.chainconfig.IsMetaTxV2(pool.chain.CurrentBlock().Time))
 		if err != nil {
@@ -1493,6 +1494,7 @@ func (pool *TxPool) validateMetaTxList(list *list) ([]*types.Transaction, *big.I
 		}
 		if metaTxParams.ExpireHeight < currHeight {
 			invalidMetaTxs = append(invalidMetaTxs, tx)
+			continue
 		}
 		txGasCost := new(big.Int).Mul(tx.GasPrice(), new(big.Int).SetUint64(tx.Gas()))
 		l1Cost := pool.l1CostFn(tx.RollupDataGas(), tx.IsDepositTx(), tx.To())
@@ -1500,10 +1502,18 @@ func (pool *TxPool) validateMetaTxList(list *list) ([]*types.Transaction, *big.I
 			txGasCost = new(big.Int).Add(txGasCost, l1Cost) // gas fee sponsor must sponsor additional l1Cost fee
 		}
 		sponsorAmount, _ := types.CalculateSponsorPercentAmount(metaTxParams, txGasCost)
-		if pool.currentState.GetBalance(metaTxParams.GasFeeSponsor).Cmp(sponsorAmount) >= 0 {
+		var sponsorAmountAccumulated *big.Int
+		sponsorAmountAccumulated, ok := sponsorCostSumPerSponsor[metaTxParams.GasFeeSponsor]
+		if !ok {
+			sponsorAmountAccumulated = big.NewInt(0)
+		}
+		sponsorAmountAccumulated = big.NewInt(0).Add(sponsorAmountAccumulated, sponsorAmount)
+		sponsorCostSumPerSponsor[metaTxParams.GasFeeSponsor] = sponsorAmountAccumulated
+		if pool.currentState.GetBalance(metaTxParams.GasFeeSponsor).Cmp(sponsorAmountAccumulated) >= 0 {
 			sponsorCostSum = new(big.Int).Add(sponsorCostSum, sponsorAmount)
 		} else {
 			invalidMetaTxs = append(invalidMetaTxs, tx)
+			continue
 		}
 	}
 	return invalidMetaTxs, sponsorCostSum
