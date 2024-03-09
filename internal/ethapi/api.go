@@ -1081,7 +1081,7 @@ func (diff *BlockOverrides) Apply(blockCtx *vm.BlockContext) {
 	}
 }
 
-func DoCalculateL1Cost(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *StateOverride, timeout time.Duration, globalGasCap uint64, runMode core.RunMode) (*big.Int, error) {
+func DoCalculateL1Cost(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *StateOverride, timeout time.Duration, globalGasCap uint64, runMode core.RunMode, gasPriceForEstimate *hexutil.Big) (*big.Int, error) {
 	defer func(start time.Time) { log.Debug("Executing EVM call finished", "runtime", time.Since(start)) }(time.Now())
 
 	state, header, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
@@ -1104,7 +1104,7 @@ func DoCalculateL1Cost(ctx context.Context, b Backend, args TransactionArgs, blo
 	defer cancel()
 
 	// Get a new instance of the EVM.
-	msg, err := args.ToMessage(globalGasCap, header.BaseFee, runMode)
+	msg, err := args.ToMessage(globalGasCap, header.BaseFee, runMode, gasPriceForEstimate)
 	if err != nil {
 		return nil, err
 	}
@@ -1128,7 +1128,7 @@ func DoCalculateL1Cost(ctx context.Context, b Backend, args TransactionArgs, blo
 	return l1Cost, nil
 }
 
-func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *StateOverride, timeout time.Duration, globalGasCap uint64, runMode core.RunMode) (*core.ExecutionResult, error) {
+func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *StateOverride, timeout time.Duration, globalGasCap uint64, runMode core.RunMode, gasPriceForEstimate *hexutil.Big) (*core.ExecutionResult, error) {
 	defer func(start time.Time) { log.Debug("Executing EVM call finished", "runtime", time.Since(start)) }(time.Now())
 
 	state, header, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
@@ -1151,7 +1151,7 @@ func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash 
 	defer cancel()
 
 	// Get a new instance of the EVM.
-	msg, err := args.ToMessage(globalGasCap, header.BaseFee, runMode)
+	msg, err := args.ToMessage(globalGasCap, header.BaseFee, runMode, gasPriceForEstimate)
 	if err != nil {
 		return nil, err
 	}
@@ -1238,7 +1238,7 @@ func (s *BlockChainAPI) Call(ctx context.Context, args TransactionArgs, blockNrO
 		}
 	}
 
-	result, err := DoCall(ctx, s.b, args, blockNrOrHash, overrides, s.b.RPCEVMTimeout(), s.b.RPCGasCap(), core.EthcallMode)
+	result, err := DoCall(ctx, s.b, args, blockNrOrHash, overrides, s.b.RPCEVMTimeout(), s.b.RPCGasCap(), core.EthcallMode, args.GasPrice)
 	if err != nil {
 		return nil, err
 	}
@@ -1325,7 +1325,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 			}
 		}
 
-		l1Cost, err := DoCalculateL1Cost(ctx, b, args, blockNrOrHash, nil, 0, gasCap, runMode)
+		l1Cost, err := DoCalculateL1Cost(ctx, b, args, blockNrOrHash, nil, 0, gasCap, runMode, (*hexutil.Big)(gasPriceForEstimateGas))
 		if err != nil {
 			return 0, fmt.Errorf("failed to calculate L1 cost: %w", err)
 		}
@@ -1362,7 +1362,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
 		args.Gas = (*hexutil.Uint64)(&gas)
 
-		result, err := DoCall(ctx, b, args, blockNrOrHash, nil, 0, gasCap, runMode)
+		result, err := DoCall(ctx, b, args, blockNrOrHash, nil, 0, gasCap, runMode, (*hexutil.Big)(gasPriceForEstimateGas))
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) {
 				return true, nil, nil // Special case, raise gas limit
@@ -1849,7 +1849,7 @@ func AccessList(ctx context.Context, b Backend, blockNrOrHash rpc.BlockNumberOrH
 		statedb := db.Copy()
 		// Set the accesslist to the last al
 		args.AccessList = &accessList
-		msg, err := args.ToMessage(b.RPCGasCap(), header.BaseFee, core.EthcallMode)
+		msg, err := args.ToMessage(b.RPCGasCap(), header.BaseFee, core.EthcallMode, args.GasPrice)
 		if err != nil {
 			return nil, 0, nil, err
 		}
