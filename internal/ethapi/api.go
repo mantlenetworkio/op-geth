@@ -1157,9 +1157,6 @@ func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash 
 		return nil, err
 	}
 
-	log.Info("Args after ToMessage", "GasPrice", msg.GasPrice,
-		"GasFeeCap", msg.GasFeeCap, "GasTipCap", msg.GasTipCap)
-
 	evm, vmError, err := b.GetEVM(ctx, msg, state, header, &vm.Config{NoBaseFee: true})
 	if err != nil {
 		return nil, err

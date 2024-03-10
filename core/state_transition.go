@@ -283,6 +283,14 @@ func NewStateTransition(evm *vm.EVM, msg *Message, gp *GasPool) *StateTransition
 	}
 }
 
+// to returns the recipient of the message.
+func (st *StateTransition) to() common.Address {
+	if st.msg == nil || st.msg.To == nil /* contract creation */ {
+		return common.Address{}
+	}
+	return *st.msg.To
+}
+
 // CalculateL1Cost calculates the L1 cost for a transaction without modifying the state.
 func (st *StateTransition) CalculateL1Cost() (*big.Int, error) {
 	var l1Cost *big.Int
@@ -298,14 +306,6 @@ func (st *StateTransition) CalculateL1Cost() (*big.Int, error) {
 	}
 
 	return l1Cost, nil
-}
-
-// to returns the recipient of the message.
-func (st *StateTransition) to() common.Address {
-	if st.msg == nil || st.msg.To == nil /* contract creation */ {
-		return common.Address{}
-	}
-	return *st.msg.To
 }
 
 func (st *StateTransition) buyGas() (*big.Int, error) {
@@ -324,7 +324,6 @@ func (st *StateTransition) buyGas() (*big.Int, error) {
 	if l1Cost != nil && (st.msg.RunMode == GasEstimationMode || st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode) {
 		mgval = mgval.Add(mgval, l1Cost)
 	}
-
 	balanceCheck := new(big.Int).Set(mgval)
 	if st.msg.GasFeeCap != nil {
 		balanceCheck.SetUint64(st.msg.GasLimit)
