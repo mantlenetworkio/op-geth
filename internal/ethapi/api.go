@@ -56,6 +56,7 @@ import (
 const (
 	estimateGasErrorRatio = 0.015
 	gasBuffer             = uint64(120)
+	l1CostBuffer          = 101
 )
 
 // EthereumAPI provides an API to access Ethereum related information.
@@ -1343,6 +1344,11 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		if err != nil {
 			return 0, fmt.Errorf("failed to calculate L1 cost: %w", err)
 		}
+		log.Info("Gas estimation capped by limited funds", "l1Cost", l1Cost.String())
+		floatL1Cost := new(big.Float).SetInt(l1Cost)
+		scaleFactor := new(big.Float).SetFloat64(1.01)
+		floatL1Cost.Mul(floatL1Cost, scaleFactor)
+		floatL1Cost.Int(l1Cost)
 		available.Sub(available, l1Cost)
 		log.Info("Gas estimation capped by limited funds", "l1Cost", l1Cost.String())
 
