@@ -1081,6 +1081,53 @@ func (diff *BlockOverrides) Apply(blockCtx *vm.BlockContext) {
 	}
 }
 
+func DoCalculateL1Cost(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *StateOverride, timeout time.Duration, globalGasCap uint64, runMode core.RunMode, gasPriceForEstimate *hexutil.Big) (*big.Int, error) {
+	defer func(start time.Time) { log.Debug("Executing EVM call finished", "runtime", time.Since(start)) }(time.Now())
+
+	state, header, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
+	if state == nil || err != nil {
+		return nil, err
+	}
+	if err := overrides.Apply(state); err != nil {
+		return nil, err
+	}
+	// Setup context so it may be cancelled the call has completed
+	// or, in case of unmetered gas, setup a context with a timeout.
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+	} else {
+		ctx, cancel = context.WithCancel(ctx)
+	}
+	// Make sure the context is cancelled when the call has completed
+	// this makes sure resources are cleaned up.
+	defer cancel()
+
+	// Get a new instance of the EVM.
+	msg, err := args.ToMessage(globalGasCap, header.BaseFee, runMode, gasPriceForEstimate)
+	if err != nil {
+		return nil, err
+	}
+	evm, _, err := b.GetEVM(ctx, msg, state, header, &vm.Config{NoBaseFee: true})
+	if err != nil {
+		return nil, err
+	}
+	// Wait for the context to be done and cancel the evm. Even if the
+	// EVM has finished, cancelling may be done (repeatedly)
+	go func() {
+		<-ctx.Done()
+		evm.Cancel()
+	}()
+
+	// Execute the message.
+	gp := new(core.GasPool).AddGas(core.DefaultMantleBlockGasLimit)
+	l1Cost, err := core.CalculateL1Cost(evm, msg, gp)
+	if err != nil {
+		return nil, err
+	}
+	return l1Cost, nil
+}
+
 func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *StateOverride, timeout time.Duration, globalGasCap uint64, runMode core.RunMode, gasPriceForEstimate *hexutil.Big) (*core.ExecutionResult, error) {
 	defer func(start time.Time) { log.Debug("Executing EVM call finished", "runtime", time.Since(start)) }(time.Now())
 
@@ -1291,6 +1338,13 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 				available.Add(available, sponsorBalance)
 			}
 		}
+
+		l1Cost, err := DoCalculateL1Cost(ctx, b, args, blockNrOrHash, nil, 0, gasCap, runMode, (*hexutil.Big)(gasPriceForEstimateGas))
+		if err != nil {
+			return 0, fmt.Errorf("failed to calculate L1 cost: %w", err)
+		}
+		available.Sub(available, l1Cost)
+		log.Info("Gas estimation capped by limited funds", "l1Cost", l1Cost.String())
 
 		// Calculate gas limit based on buffer.
 		allowance := new(big.Int).Div(available, feeCap)
