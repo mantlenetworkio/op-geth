@@ -237,11 +237,6 @@ func ApplyMessage(evm *vm.EVM, msg *Message, gp *GasPool) (*ExecutionResult, err
 	return NewStateTransition(evm, msg, gp).TransitionDb()
 }
 
-// CalculateL1Cost calculates the L1 cost for a transaction without modifying the state.
-func CalculateL1Cost(evm *vm.EVM, msg *Message, gp *GasPool) (*big.Int, error) {
-	return NewStateTransition(evm, msg, gp).CalculateL1Cost()
-}
-
 // StateTransition represents a state transition.
 //
 // == The State Transitioning Model
@@ -289,23 +284,6 @@ func (st *StateTransition) to() common.Address {
 		return common.Address{}
 	}
 	return *st.msg.To
-}
-
-// CalculateL1Cost calculates the L1 cost for a transaction without modifying the state.
-func (st *StateTransition) CalculateL1Cost() (*big.Int, error) {
-	var l1Cost *big.Int
-
-	// Calculate rollup gas data from the message if necessary
-	if st.msg.RunMode == GasEstimationMode || st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode {
-		st.CalculateRollupGasDataFromMessage()
-	}
-
-	// Calculate L1 cost if L1CostFunc is defined and not in EthcallMode
-	if st.evm.Context.L1CostFunc != nil && st.msg.RunMode != EthcallMode {
-		l1Cost = st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupDataGas, st.msg.IsDepositTx, st.msg.To)
-	}
-
-	return l1Cost, nil
 }
 
 func (st *StateTransition) buyGas() (*big.Int, error) {
