@@ -1108,6 +1108,10 @@ func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash 
 	if err != nil {
 		return nil, err
 	}
+
+	log.Info("Args after ToMessage", "GasPrice", msg.GasPrice,
+		"GasFeeCap", msg.GasFeeCap, "GasTipCap", msg.GasTipCap)
+
 	evm, vmError, err := b.GetEVM(ctx, msg, state, header, &vm.Config{NoBaseFee: true})
 	if err != nil {
 		return nil, err
@@ -1241,11 +1245,21 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		return 0, errors.New("both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified")
 	} else if args.GasPrice != nil {
 		feeCap = args.GasPrice.ToInt()
+		log.Info("Gas estimation capped by limited funds", "GasPrice", args.GasPrice.String())
 	} else if args.MaxFeePerGas != nil {
 		feeCap = args.MaxFeePerGas.ToInt()
+		log.Info("Gas estimation capped by limited funds", "MaxFeePerGas", args.MaxFeePerGas.String())
 	} else {
 		feeCap = gasPriceForEstimateGas
+		log.Info("Gas estimation capped by limited funds", "gasPriceForEstimateGas", gasPriceForEstimateGas.String())
 	}
+
+	if args.MaxPriorityFeePerGas != nil {
+		log.Info("Gas estimation capped by limited funds", "MaxPriorityFeePerGas", args.MaxPriorityFeePerGas.String())
+	}
+
+	log.Info("Gas estimation capped by limited funds", "original", hi, "gasPrice", args.GasPrice,
+		"feeCap", feeCap, "maxFeePerGas", feeCap)
 
 	runMode := core.GasEstimationMode
 	if args.GasPrice == nil && args.MaxFeePerGas == nil && args.MaxPriorityFeePerGas == nil {
@@ -1291,6 +1305,8 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 				"sent", transfer.ToInt(), "maxFeePerGas", feeCap, "fundable", allowance)
 			hi = allowance.Uint64()
 		}
+		log.Info("Gas estimation capped by limited funds", "original", hi, "balance", balance,
+			"feeCap", feeCap, "maxFeePerGas", feeCap, "fundable", allowance)
 	}
 	// Recap the highest gas allowance with specified gascap.
 	if gasCap != 0 && hi > gasCap {

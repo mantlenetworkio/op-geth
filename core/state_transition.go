@@ -302,8 +302,14 @@ func (st *StateTransition) buyGas() (*big.Int, error) {
 	if l1Cost != nil && (st.msg.RunMode == GasEstimationMode || st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode) {
 		mgval = mgval.Add(mgval, l1Cost)
 	}
+	log.Info("In the buygas", "GasPrice", st.msg.GasPrice.String(), "GasLimit", st.msg.GasLimit)
+	if l1Cost != nil {
+		log.Info("In the buygas", "l1Cost", l1Cost.String())
+	}
 	balanceCheck := new(big.Int).Set(mgval)
 	if st.msg.GasFeeCap != nil {
+		log.Info("In the buygas",
+			"GasFeeCap", st.msg.GasFeeCap.String(), "GasTipCap", st.msg.GasTipCap.String())
 		balanceCheck.SetUint64(st.msg.GasLimit)
 		balanceCheck = balanceCheck.Mul(balanceCheck, st.msg.GasFeeCap)
 		balanceCheck.Add(balanceCheck, st.msg.Value)
@@ -311,6 +317,7 @@ func (st *StateTransition) buyGas() (*big.Int, error) {
 			balanceCheck.Add(balanceCheck, l1Cost)
 		}
 	}
+	log.Info("In the buygas", "balanceCheck", balanceCheck.String())
 	if st.msg.RunMode != GasEstimationWithSkipCheckBalanceMode && st.msg.RunMode != EthcallMode {
 		if st.msg.MetaTxParams != nil {
 			pureGasFeeValue := new(big.Int).Sub(balanceCheck, st.msg.Value)
