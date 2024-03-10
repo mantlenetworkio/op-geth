@@ -50,13 +50,13 @@ import (
 	"github.com/tyler-smith/go-bip39"
 )
 
-// estimateGasErrorRatio is the amount of overestimation eth_estimateGas is
-// allowed to produce in order to speed up calculations.
+// estimateGasErrorRatio is the amount of overestimation eth_estimateGas is allowed to produce in order to speed up calculations.
 // gasBuffer is used to enlarge a buffer for Estimation
+// l1CostBuffer is used to enlarge a buffer for l1Cost when using allowance to run Estimation
 const (
 	estimateGasErrorRatio = 0.015
 	gasBuffer             = uint64(120)
-	l1CostBuffer          = 101
+	l1CostBuffer          = float64(1.05)
 )
 
 // EthereumAPI provides an API to access Ethereum related information.
@@ -1346,7 +1346,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		}
 		log.Info("Gas estimation capped by limited funds", "l1Cost", l1Cost.String())
 		floatL1Cost := new(big.Float).SetInt(l1Cost)
-		scaleFactor := new(big.Float).SetFloat64(1.01)
+		scaleFactor := new(big.Float).SetFloat64(l1CostBuffer)
 		floatL1Cost.Mul(floatL1Cost, scaleFactor)
 		floatL1Cost.Int(l1Cost)
 		available.Sub(available, l1Cost)
