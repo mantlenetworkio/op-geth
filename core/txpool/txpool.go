@@ -1508,9 +1508,9 @@ func (pool *TxPool) validateMetaTxList(list *list) ([]*types.Transaction, *big.I
 			sponsorAmountAccumulated = big.NewInt(0)
 		}
 		sponsorAmountAccumulated = big.NewInt(0).Add(sponsorAmountAccumulated, sponsorAmount)
-		sponsorCostSumPerSponsor[metaTxParams.GasFeeSponsor] = sponsorAmountAccumulated
 		if pool.currentState.GetBalance(metaTxParams.GasFeeSponsor).Cmp(sponsorAmountAccumulated) >= 0 {
 			sponsorCostSum = new(big.Int).Add(sponsorCostSum, sponsorAmount)
+			sponsorCostSumPerSponsor[metaTxParams.GasFeeSponsor] = sponsorAmountAccumulated
 		} else {
 			invalidMetaTxs = append(invalidMetaTxs, tx)
 			continue
