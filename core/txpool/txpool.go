@@ -735,6 +735,15 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 			if l1Cost := pool.l1CostFn(tx.RollupDataGas(), tx.IsDepositTx(), tx.To()); l1Cost != nil { // add rollup cost
 				replL1Cost = replL1Cost.Add(cost, l1Cost)
 			}
+			replMetaTxParams, err := types.DecodeAndVerifyMetaTxParams(repl, pool.chainconfig.IsMetaTxV2(pool.chain.CurrentBlock().Time))
+			if err != nil {
+				return err
+			}
+			if replMetaTxParams != nil {
+				replTxGasCost := new(big.Int).Sub(repl.Cost(), repl.Value())
+				sponsorAmount, _ := types.CalculateSponsorPercentAmount(replMetaTxParams, replTxGasCost)
+				replL1Cost = new(big.Int).Sub(replL1Cost, sponsorAmount)
+			}
 			sum.Sub(sum, replL1Cost)
 		}
 		if userBalance.Cmp(sum) < 0 {
