@@ -536,10 +536,10 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
 		if st.msg.GasPrice.Cmp(common.Big0) > 0 && l1Cost != nil {
 			l1Gas = new(big.Int).Div(l1Cost, st.msg.GasPrice).Uint64()
-			if st.msg.GasLimit < l1Gas {
-				log.Info("innerTransitionDb-1", "st.gasRemaining", st.gasRemaining, "l1Gas", l1Gas)
-				return nil, fmt.Errorf("%w: have %d, want %d", ErrInsufficientGasForL1Cost, st.gasRemaining, l1Gas)
-			}
+			//if st.msg.GasLimit < l1Gas {
+			//	log.Info("innerTransitionDb-1", "st.gasRemaining", st.gasRemaining, "l1Gas", l1Gas)
+			//	return nil, fmt.Errorf("%w: have %d, want %d", ErrInsufficientGasForL1Cost, st.gasRemaining, l1Gas)
+			//}
 		}
 		if st.gasRemaining < l1Gas {
 			log.Info("innerTransitionDb-2", "st.gasRemaining", st.gasRemaining, "l1Gas", l1Gas)
