@@ -1247,6 +1247,10 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		feeCap = gasPriceForEstimateGas
 	}
 
+	if feeCap.Cmp(gasPriceForEstimateGas) < 0 {
+		feeCap = gasPriceForEstimateGas
+	}
+
 	runMode := core.GasEstimationMode
 	if args.GasPrice == nil && args.MaxFeePerGas == nil && args.MaxPriorityFeePerGas == nil {
 		runMode = core.GasEstimationWithSkipCheckBalanceMode
