@@ -39,10 +39,9 @@ var (
 // ExecutionResult includes all output after executing given evm
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
-	UsedGas     uint64 // Total used gas but include the refunded gas
-	RefundedGas uint64 // Total gas refunded after execution
-	Err         error  // Any error encountered during the execution(listed in core/vm/errors.go)
-	ReturnData  []byte // Returned data from evm(function result or data supplied with revert opcode)
+	UsedGas    uint64 // Total used gas but include the refunded gas
+	Err        error  // Any error encountered during the execution(listed in core/vm/errors.go)
+	ReturnData []byte // Returned data from evm(function result or data supplied with revert opcode)
 }
 
 // Unwrap returns the internal evm error which allows us for further
@@ -237,11 +236,6 @@ func ApplyMessage(evm *vm.EVM, msg *Message, gp *GasPool) (*ExecutionResult, err
 	return NewStateTransition(evm, msg, gp).TransitionDb()
 }
 
-// CalculateL1Cost calculates the L1 cost for a transaction without modifying the state.
-func CalculateL1Cost(evm *vm.EVM, msg *Message, gp *GasPool) (*big.Int, error) {
-	return NewStateTransition(evm, msg, gp).CalculateL1Cost()
-}
-
 // StateTransition represents a state transition.
 //
 // == The State Transitioning Model
@@ -289,23 +283,6 @@ func (st *StateTransition) to() common.Address {
 		return common.Address{}
 	}
 	return *st.msg.To
-}
-
-// CalculateL1Cost calculates the L1 cost for a transaction without modifying the state.
-func (st *StateTransition) CalculateL1Cost() (*big.Int, error) {
-	var l1Cost *big.Int
-
-	// Calculate rollup gas data from the message if necessary
-	if st.msg.RunMode == GasEstimationMode || st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode {
-		st.CalculateRollupGasDataFromMessage()
-	}
-
-	// Calculate L1 cost if L1CostFunc is defined and not in EthcallMode
-	if st.evm.Context.L1CostFunc != nil && st.msg.RunMode != EthcallMode {
-		l1Cost = st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupDataGas, st.msg.IsDepositTx, st.msg.To)
-	}
-
-	return l1Cost, nil
 }
 
 func (st *StateTransition) buyGas() (*big.Int, error) {
@@ -468,9 +445,9 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 		st.state.AddBalance(st.msg.From, mint)
 	}
 
-	// Mint BVM_ETH
+	//Mint BVM_ETH
 	rules := st.evm.ChainConfig().Rules(st.evm.Context.BlockNumber, st.evm.Context.Random != nil, st.evm.Context.Time)
-	// add eth value
+	//add eth value
 	if ethValue := st.msg.ETHValue; ethValue != nil && ethValue.Cmp(big.NewInt(0)) != 0 {
 		st.mintBVMETH(ethValue, rules)
 	}
@@ -616,24 +593,22 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	// Note for deposit tx there is no ETH refunded for unused gas, but that's taken care of by the fact that gasPrice
 	// is always 0 for deposit tx. So calling refundGas will ensure the gasUsed accounting is correct without actually
 	// changing the sender's balance
-	var gasRefund uint64
 	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
 		if !rules.IsLondon {
 			// Before EIP-3529: refunds were capped to gasUsed / 2
-			gasRefund = st.refundGas(params.RefundQuotient, tokenRatio)
+			st.refundGas(params.RefundQuotient, tokenRatio)
 		} else {
 			// After EIP-3529: refunds are capped to gasUsed / 5
-			gasRefund = st.refundGas(params.RefundQuotientEIP3529, tokenRatio)
+			st.refundGas(params.RefundQuotientEIP3529, tokenRatio)
 		}
 	}
 
 	if st.msg.IsDepositTx && rules.IsOptimismRegolith {
 		// Skip coinbase payments for deposit tx in Regolith
 		return &ExecutionResult{
-			UsedGas:     st.gasUsed(),
-			RefundedGas: gasRefund,
-			Err:         vmerr,
-			ReturnData:  ret,
+			UsedGas:    st.gasUsed(),
+			Err:        vmerr,
+			ReturnData: ret,
 		}, nil
 	}
 	effectiveTip := msg.GasPrice
@@ -656,24 +631,23 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	if optimismConfig := st.evm.ChainConfig().Optimism; optimismConfig != nil && rules.IsOptimismBedrock {
 		st.state.AddBalance(params.OptimismBaseFeeRecipient, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.evm.Context.BaseFee))
 		// Can not collect l1 fee here again, all l1 fee has been collected by CoinBase & OptimismBaseFeeRecipient
-		// if cost := st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupDataGas, st.msg.IsDepositTx); cost != nil {
+		//if cost := st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupDataGas, st.msg.IsDepositTx); cost != nil {
 		//	st.state.AddBalance(params.OptimismL1FeeRecipient, cost)
-		// }
+		//}
 	}
 
 	return &ExecutionResult{
-		UsedGas:     st.gasUsed(),
-		RefundedGas: gasRefund,
-		Err:         vmerr,
-		ReturnData:  ret,
+		UsedGas:    st.gasUsed(),
+		Err:        vmerr,
+		ReturnData: ret,
 	}, nil
 }
 
-func (st *StateTransition) refundGas(refundQuotient, tokenRatio uint64) uint64 {
+func (st *StateTransition) refundGas(refundQuotient, tokenRatio uint64) {
 	if st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode || st.msg.RunMode == EthcallMode {
 		st.gasRemaining = st.gasRemaining * tokenRatio
 		st.gp.AddGas(st.gasRemaining)
-		return 0
+		return
 	}
 	// Apply refund counter, capped to a refund quotient
 	refund := st.gasUsed() / refundQuotient
@@ -699,8 +673,6 @@ func (st *StateTransition) refundGas(refundQuotient, tokenRatio uint64) uint64 {
 	// Also return remaining gas to the block gas counter so it is
 	// available for the next transaction.
 	st.gp.AddGas(st.gasRemaining)
-
-	return refund
 }
 
 // gasUsed returns the amount of gas used up by the state transition.
@@ -801,7 +773,7 @@ func (st *StateTransition) generateBVMETHMintEvent(mintAddress common.Address, m
 	topics := make([]common.Hash, 2)
 	topics[0] = methodHash
 	topics[1] = mintAddress.Hash()
-	// data means the mint amount in MINT EVENT.
+	//data means the mint amount in MINT EVENT.
 	d := common.HexToHash(common.Bytes2Hex(mintValue.Bytes())).Bytes()
 	st.evm.StateDB.AddLog(&types.Log{
 		Address: BVM_ETH_ADDR,
@@ -820,7 +792,7 @@ func (st *StateTransition) generateBVMETHTransferEvent(from, to common.Address, 
 	topics[0] = methodHash
 	topics[1] = from.Hash()
 	topics[2] = to.Hash()
-	// data means the transfer amount in Transfer EVENT.
+	//data means the transfer amount in Transfer EVENT.
 	data := common.HexToHash(common.Bytes2Hex(amount.Bytes())).Bytes()
 	st.evm.StateDB.AddLog(&types.Log{
 		Address: BVM_ETH_ADDR,
