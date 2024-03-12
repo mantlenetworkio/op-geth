@@ -523,6 +523,7 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	log.Info("innerTransitionDb", "tx.Gas()", st.gasRemaining, "tokenRatio", tokenRatio, "gas", gas)
 	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
 		gas = gas * tokenRatio
 	}
