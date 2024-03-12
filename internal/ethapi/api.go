@@ -1355,40 +1355,49 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 
 	// We first execute the transaction at the highest allowable gas limit, since if this fails we
 	// can return error immediately.
+	var isErrInsufFunds bool
 	failed, result, err := executable(hi)
 	if err != nil {
-		return 0, err
+		// If estimating account for some reason can not pay gas, then estimate gas in the original way
+		if errors.Is(err, core.ErrInsufficientFunds) {
+			isErrInsufFunds = true
+		} else {
+			return 0, err
+		}
 	}
-	if failed {
+	if failed && !isErrInsufFunds {
 		if result != nil && !errors.Is(result.Err, vm.ErrOutOfGas) {
 			return 0, revertErr(result)
 		}
 		return 0, fmt.Errorf("gas required exceeds allowance (%d)", hi)
 	}
 
-	// For almost any transaction, the gas consumed by the unconstrained execution
-	// above lower-bounds the gas limit required for it to succeed. One exception
-	// is those that explicitly check gas remaining in order to execute within a
-	// given limit, but we probably don't want to return the lowest possible gas
-	// limit for these cases anyway.
-	lo = result.UsedGas - 1
+	if !isErrInsufFunds {
+		// For almost any transaction, the gas consumed by the unconstrained execution
+		// above lower-bounds the gas limit required for it to succeed. One exception
+		// is those that explicitly check gas remaining in order to execute within a
+		// given limit, but we probably don't want to return the lowest possible gas
+		// limit for these cases anyway.
+		lo = result.UsedGas - 1
 
-	// There's a fairly high chance for the transaction to execute successfully
-	// with gasLimit set to the first execution's usedGas + gasRefund. Explicitly
-	// check that gas amount and use as a limit for the binary search.
-	optimisticGasLimit := (result.UsedGas + result.RefundedGas + params.CallStipend) * 64 / 63
-	if optimisticGasLimit < hi {
-		failed, _, err = executable(optimisticGasLimit)
-		if err != nil {
-			// This should not happen under normal conditions since if we make it this far the
-			// transaction had run without error at least once before.
-			log.Error("Execution error in estimate gas", "err", err)
-			return 0, err
-		}
-		if failed {
-			lo = optimisticGasLimit
-		} else {
-			hi = optimisticGasLimit
+		// There's a fairly high chance for the transaction to execute successfully
+		// with gasLimit set to the first execution's usedGas + gasRefund. Explicitly
+		// check that gas amount and use as a limit for the binary search.
+		optimisticGasLimit := (result.UsedGas + result.RefundedGas + params.CallStipend) * 64 / 63
+		if optimisticGasLimit < hi {
+
+			failed, _, err = executable(optimisticGasLimit)
+			if err != nil {
+				// This should not happen under normal conditions since if we make it this far the
+				// transaction had run without error at least once before.
+				log.Error("Execution error in estimate gas", "err", err)
+				return 0, err
+			}
+			if failed {
+				lo = optimisticGasLimit
+			} else {
+				hi = optimisticGasLimit
+			}
 		}
 	}
 
