@@ -78,6 +78,10 @@ var (
 	// than required to start the invocation.
 	ErrIntrinsicGas = errors.New("intrinsic gas too low")
 
+	// ErrInsufficientGasForL1Cost is returned if the transaction is specified to use less gas
+	// than required for l1Cost.
+	ErrInsufficientGasForL1Cost = errors.New("insufficient gas for l1Cost")
+
 	// ErrTxTypeNotSupported is returned if a transaction is not supported in the
 	// current network configuration.
 	ErrTxTypeNotSupported = types.ErrTxTypeNotSupported

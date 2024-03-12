@@ -688,7 +688,8 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	// Transactor should have enough funds to cover the costs
 	// cost == V + GP * GL
 	cost := tx.Cost()
-	if l1Cost := pool.l1CostFn(tx.RollupDataGas(), tx.IsDepositTx(), tx.To()); l1Cost != nil { // add rollup cost
+	var l1Cost *big.Int
+	if l1Cost = pool.l1CostFn(tx.RollupDataGas(), tx.IsDepositTx(), tx.To()); l1Cost != nil { // add rollup cost
 		cost = cost.Add(cost, l1Cost)
 	}
 
@@ -732,7 +733,7 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 		if repl := list.txs.Get(tx.Nonce()); repl != nil {
 			// Deduct the cost of a transaction replaced by this
 			replL1Cost := repl.Cost()
-			if l1Cost := pool.l1CostFn(tx.RollupDataGas(), tx.IsDepositTx(), tx.To()); l1Cost != nil { // add rollup cost
+			if l1Cost = pool.l1CostFn(tx.RollupDataGas(), tx.IsDepositTx(), tx.To()); l1Cost != nil { // add rollup cost
 				replL1Cost = replL1Cost.Add(cost, l1Cost)
 			}
 			replMetaTxParams, err := types.DecodeAndVerifyMetaTxParams(repl, pool.chainconfig.IsMetaTxV2(pool.chain.CurrentBlock().Time))
@@ -765,6 +766,19 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	if tx.Gas() < intrGas*tokenRatio {
 		return core.ErrIntrinsicGas
 	}
+
+	gasRemaining := big.NewInt(int64(tx.Gas() - intrGas*tokenRatio))
+	// legacyTxL1Cost gas used to cover L1 Cost for legacy tx
+	legacyTxL1Cost := new(big.Int).Mul(new(big.Int).Add(tx.GasPrice(), tx.GasTipCap()), gasRemaining)
+	if l1Cost != nil && legacyTxL1Cost.Cmp(l1Cost) <= 0 {
+		return core.ErrInsufficientGasForL1Cost
+	}
+	// DynamicFeeTxL1Cost gas used to cover L1 Cost for dynamic fee tx
+	dynamicFeeTxL1Cost := new(big.Int).Mul(tx.GasFeeCap(), gasRemaining)
+	if l1Cost != nil && dynamicFeeTxL1Cost.Cmp(l1Cost) <= 0 {
+		return core.ErrInsufficientGasForL1Cost
+	}
+
 	return nil
 }
 

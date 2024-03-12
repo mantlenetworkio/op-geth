@@ -538,12 +538,12 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 			l1Gas = new(big.Int).Div(l1Cost, st.msg.GasPrice).Uint64()
 			if st.msg.GasLimit < l1Gas {
 				log.Info("innerTransitionDb-1", "st.gasRemaining", st.gasRemaining, "l1Gas", l1Gas)
-				return nil, fmt.Errorf("%w: have %d, want %d", ErrInsufficientFundsForTransfer, st.gasRemaining, l1Gas)
+				return nil, fmt.Errorf("%w: have %d, want %d", ErrInsufficientGasForL1Cost, st.gasRemaining, l1Gas)
 			}
 		}
 		if st.gasRemaining < l1Gas {
 			log.Info("innerTransitionDb-2", "st.gasRemaining", st.gasRemaining, "l1Gas", l1Gas)
-			return nil, fmt.Errorf("%w: have %d, want %d", ErrInsufficientFundsForTransfer, st.gasRemaining, l1Gas)
+			return nil, fmt.Errorf("%w: have %d, want %d", ErrInsufficientGasForL1Cost, st.gasRemaining, l1Gas)
 		}
 		st.gasRemaining -= l1Gas
 		if tokenRatio > 0 {
