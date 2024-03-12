@@ -54,16 +54,16 @@ func (b *Long) UnmarshalGraphQL(input interface{}) error {
 	switch input := input.(type) {
 	case string:
 		// uncomment to support hex values
-		// if strings.HasPrefix(input, "0x") {
+		//if strings.HasPrefix(input, "0x") {
 		//	// apply leniency and support hex representations of longs.
 		//	value, err := hexutil.DecodeUint64(input)
 		//	*b = Long(value)
 		//	return err
-		// } else {
+		//} else {
 		value, err := strconv.ParseInt(input, 10, 64)
 		*b = Long(value)
 		return err
-		// }
+		//}
 	case int32:
 		*b = Long(input)
 	case int64:
@@ -1070,7 +1070,7 @@ func (b *Block) Call(ctx context.Context, args struct {
 			return nil, err
 		}
 	}
-	result, err := ethapi.DoCall(ctx, b.r.backend, args.Data, *b.numberOrHash, nil, b.r.backend.RPCEVMTimeout(), b.r.backend.RPCGasCap(), core.EthcallMode)
+	result, err := ethapi.DoCall(ctx, b.r.backend, args.Data, *b.numberOrHash, nil, b.r.backend.RPCEVMTimeout(), b.r.backend.RPCGasCap(), core.EthcallMode, args.Data.GasPrice)
 	if err != nil {
 		return nil, err
 	}
@@ -1140,7 +1140,7 @@ func (p *Pending) Call(ctx context.Context, args struct {
 	Data ethapi.TransactionArgs
 }) (*CallResult, error) {
 	pendingBlockNr := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
-	result, err := ethapi.DoCall(ctx, p.r.backend, args.Data, pendingBlockNr, nil, p.r.backend.RPCEVMTimeout(), p.r.backend.RPCGasCap(), core.EthcallMode)
+	result, err := ethapi.DoCall(ctx, p.r.backend, args.Data, pendingBlockNr, nil, p.r.backend.RPCEVMTimeout(), p.r.backend.RPCGasCap(), core.EthcallMode, args.Data.GasPrice)
 	if err != nil {
 		return nil, err
 	}
