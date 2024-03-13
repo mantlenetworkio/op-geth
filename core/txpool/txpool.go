@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	cmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/common/prque"
 	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/core"
@@ -788,14 +787,14 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 		}
 	}
 
-	if tx.Type() == types.DynamicFeeTxType {
-		// dynamicBaseFeeTxL1Cost gas used to cover L1 Cost for dynamic fee tx
-		effectiveGas := cmath.BigMin(new(big.Int).Add(tx.GasTipCap(), baseFee), tx.GasFeeCap())
-		dynamicFeeTxL1Cost := new(big.Int).Mul(effectiveGas, gasRemaining)
-		if l1Cost != nil && dynamicFeeTxL1Cost.Cmp(l1Cost) <= 0 {
-			return core.ErrInsufficientGasForL1Cost
-		}
-	}
+	//if tx.Type() == types.DynamicFeeTxType {
+	//	// dynamicBaseFeeTxL1Cost gas used to cover L1 Cost for dynamic fee tx
+	//	effectiveGas := cmath.BigMin(new(big.Int).Add(tx.GasTipCap(), baseFee), tx.GasFeeCap())
+	//	dynamicFeeTxL1Cost := new(big.Int).Mul(effectiveGas, gasRemaining)
+	//	if l1Cost != nil && dynamicFeeTxL1Cost.Cmp(l1Cost) <= 0 {
+	//		return core.ErrInsufficientGasForL1Cost
+	//	}
+	//}
 
 	return nil
 }
