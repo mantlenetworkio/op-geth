@@ -1241,10 +1241,14 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		return 0, errors.New("both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified")
 	} else if args.GasPrice != nil {
 		feeCap = args.GasPrice.ToInt()
+		log.Info("DoEstimateGas", "args.GasPrice", args.GasPrice.String())
 	} else if args.MaxFeePerGas != nil {
 		feeCap = args.MaxFeePerGas.ToInt()
+		log.Info("DoEstimateGas", "args.MaxFeePerGas", args.MaxFeePerGas.String())
 	} else {
 		feeCap = gasPriceForEstimateGas
+		log.Info("DoEstimateGas", "gasPriceForEstimateGas", gasPriceForEstimateGas.String())
+
 	}
 
 	if feeCap.Cmp(gasPriceForEstimateGas) < 0 {

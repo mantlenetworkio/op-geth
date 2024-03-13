@@ -289,6 +289,8 @@ func (args *TransactionArgs) ToMessage(globalGasCap uint64, baseFee *big.Int, ru
 		}
 	}
 
+	log.Info("ToMessage", "gasPrice", gasPrice.String(), "gasFeeCap", gasFeeCap.String(), "gasTipCap", gasTipCap.String())
+
 	value := new(big.Int)
 	if args.Value != nil {
 		value = args.Value.ToInt()

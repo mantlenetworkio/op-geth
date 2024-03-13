@@ -767,18 +767,19 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 
 	gasRemaining := big.NewInt(int64(tx.Gas() - intrGas*tokenRatio))
 	baseFee := pool.chain.CurrentBlock().BaseFee
-
+	log.Info("validateTx", "intrGas", intrGas, "tokenRatio", tokenRatio, "baseFee", baseFee.String(), "tx.Gas()", tx.Gas(), "gasRemaining", gasRemaining.String())
 	if tx.Type() == types.LegacyTxType {
 		if tx.GasPrice().Cmp(baseFee) < 0 {
 			return core.ErrGasPriceTooLow
 		}
-
+		log.Info("validateTx", "tx.GasPrice()", tx.GasPrice().String(), "baseFee", baseFee.String())
 		// legacyTxL1Cost gas used to cover L1 Cost for legacy tx
 		legacyTxL1Cost := new(big.Int).Mul(tx.GasPrice(), gasRemaining)
 		if l1Cost != nil && legacyTxL1Cost.Cmp(l1Cost) <= 0 {
 			return core.ErrInsufficientGasForL1Cost
 		}
 	} else if tx.Type() == types.DynamicFeeTxType {
+		log.Info("validateTx", "tx.GasTipCap()", tx.GasTipCap().String(), "baseFee", baseFee.String(), "tx.GasFeeCap()", tx.GasFeeCap().String())
 		// dynamicBaseFeeTxL1Cost gas used to cover L1 Cost for dynamic fee tx
 		effectiveGas := cmath.BigMin(new(big.Int).Add(tx.GasTipCap(), baseFee), tx.GasFeeCap())
 		dynamicFeeTxL1Cost := new(big.Int).Mul(effectiveGas, gasRemaining)
