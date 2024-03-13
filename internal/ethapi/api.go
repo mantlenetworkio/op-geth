@@ -1247,6 +1247,10 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		feeCap = gasPriceForEstimateGas
 	}
 
+	if feeCap.Cmp(gasPriceForEstimateGas) < 0 {
+		feeCap = gasPriceForEstimateGas
+	}
+
 	runMode := core.GasEstimationMode
 	if args.GasPrice == nil && args.MaxFeePerGas == nil && args.MaxPriorityFeePerGas == nil {
 		runMode = core.GasEstimationWithSkipCheckBalanceMode
@@ -1309,7 +1313,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 
 		result, err := DoCall(ctx, b, args, blockNrOrHash, nil, 0, gasCap, runMode, (*hexutil.Big)(gasPriceForEstimateGas))
 		if err != nil {
-			if errors.Is(err, core.ErrIntrinsicGas) {
+			if errors.Is(err, core.ErrIntrinsicGas) || errors.Is(err, core.ErrInsufficientGasForL1Cost) {
 				return true, nil, nil // Special case, raise gas limit
 			}
 			return true, nil, err // Bail out
