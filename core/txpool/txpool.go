@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	cmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/common/prque"
 	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/core"
@@ -760,20 +761,12 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	}
 	tokenRatio := pool.currentState.GetState(types.GasOracleAddr, types.TokenRatioSlot).Big().Uint64()
 
-	log.Info("validateTx", "tx.Gas()", tx.Gas(), "tokenRatio", tokenRatio, "intrGas", intrGas)
-	if l1Cost != nil {
-		log.Info("validateTx", "l1Cost", l1Cost.String())
-	} else {
-		log.Info("validateTx no l1Cost")
-	}
-
 	if tx.Gas() < intrGas*tokenRatio {
 		return core.ErrIntrinsicGas
 	}
 
 	gasRemaining := big.NewInt(int64(tx.Gas() - intrGas*tokenRatio))
 	baseFee := pool.chain.CurrentBlock().BaseFee
-	log.Info("validateTx", "tx.GasPrice()", tx.GasPrice(), "tx.GasTipCap()", tx.GasTipCap(), "tx.GasFeeCap()", tx.GasFeeCap(), "gasRemaining", gasRemaining, "BaseFee", baseFee)
 
 	if tx.Type() == types.LegacyTxType {
 		if tx.GasPrice().Cmp(baseFee) < 0 {
@@ -785,16 +778,14 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 		if l1Cost != nil && legacyTxL1Cost.Cmp(l1Cost) <= 0 {
 			return core.ErrInsufficientGasForL1Cost
 		}
+	} else if tx.Type() == types.DynamicFeeTxType {
+		// dynamicBaseFeeTxL1Cost gas used to cover L1 Cost for dynamic fee tx
+		effectiveGas := cmath.BigMin(new(big.Int).Add(tx.GasTipCap(), baseFee), tx.GasFeeCap())
+		dynamicFeeTxL1Cost := new(big.Int).Mul(effectiveGas, gasRemaining)
+		if l1Cost != nil && dynamicFeeTxL1Cost.Cmp(l1Cost) <= 0 {
+			return core.ErrInsufficientGasForL1Cost
+		}
 	}
-
-	//if tx.Type() == types.DynamicFeeTxType {
-	//	// dynamicBaseFeeTxL1Cost gas used to cover L1 Cost for dynamic fee tx
-	//	effectiveGas := cmath.BigMin(new(big.Int).Add(tx.GasTipCap(), baseFee), tx.GasFeeCap())
-	//	dynamicFeeTxL1Cost := new(big.Int).Mul(effectiveGas, gasRemaining)
-	//	if l1Cost != nil && dynamicFeeTxL1Cost.Cmp(l1Cost) <= 0 {
-	//		return core.ErrInsufficientGasForL1Cost
-	//	}
-	//}
 
 	return nil
 }
