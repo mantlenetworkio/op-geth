@@ -986,7 +986,7 @@ func (w *worker) commitTransactions(env *environment, txs *types.TransactionsByP
 		default:
 			// Strange error, discard the transaction and get the next in line (note, the
 			// nonce-too-high clause will prevent us from executing in vain).
-			log.Debug("Transaction failed, account skipped", "hash", tx.Hash(), "err", err)
+			log.Info("Transaction failed, account skipped", "hash", tx.Hash(), "err", err)
 			txs.Pop()
 		}
 	}
