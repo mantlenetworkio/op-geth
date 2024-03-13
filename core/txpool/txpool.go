@@ -763,6 +763,8 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	log.Info("validateTx", "tx.Gas()", tx.Gas(), "tokenRatio", tokenRatio, "intrGas", intrGas)
 	if l1Cost != nil {
 		log.Info("validateTx", "l1Cost", l1Cost.String())
+	} else {
+		log.Info("validateTx no l1Cost")
 	}
 
 	if tx.Gas() < intrGas*tokenRatio {
