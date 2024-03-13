@@ -760,9 +760,6 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	}
 	tokenRatio := pool.currentState.GetState(types.GasOracleAddr, types.TokenRatioSlot).Big().Uint64()
 
-	log.Info("validateTx", "tx.Gas()", tx.Gas(), "tokenRatio", tokenRatio, "intrGas", intrGas)
-	log.Info("validateTx", "tx", *tx, "txhash", tx.Hash().String())
-
 	if tx.Gas() < intrGas*tokenRatio {
 		return core.ErrIntrinsicGas
 	}
