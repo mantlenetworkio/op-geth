@@ -775,11 +775,20 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	log.Info("validateTx", "tx.GasPrice()", tx.GasPrice(), "tx.GasTipCap()", tx.GasTipCap(), "tx.GasFeeCap()", tx.GasFeeCap(), "gasRemaining", gasRemaining)
 
 	// legacyTxL1Cost gas used to cover L1 Cost for legacy tx
-	legacyTxL1Cost := new(big.Int).Mul(new(big.Int).Add(tx.GasPrice(), tx.GasTipCap()), gasRemaining)
+	legacyTxL1Cost := new(big.Int).Mul(tx.GasPrice(), gasRemaining)
 	if l1Cost != nil && legacyTxL1Cost.Cmp(l1Cost) <= 0 {
 		return core.ErrInsufficientGasForL1Cost
 	}
-	// DynamicFeeTxL1Cost gas used to cover L1 Cost for dynamic fee tx
+
+	baseFee := pool.chain.CurrentBlock().BaseFee
+	log.Info("validateTx", "baseFee", baseFee)
+	// dynamicBaseFeeTxL1Cost gas used to cover L1 Cost for dynamic fee tx when baseFee + tipCap < feeCap
+	dynamicBaseFeeTxL1Cost := new(big.Int).Mul(new(big.Int).Add(baseFee, tx.GasTipCap()), gasRemaining)
+	if l1Cost != nil && dynamicBaseFeeTxL1Cost.Cmp(l1Cost) <= 0 {
+		return core.ErrInsufficientGasForL1Cost
+	}
+
+	// dynamicFeeTxL1Cost gas used to cover L1 Cost for dynamic fee tx when feeCap < baseFee + tipCap
 	dynamicFeeTxL1Cost := new(big.Int).Mul(tx.GasFeeCap(), gasRemaining)
 	if l1Cost != nil && dynamicFeeTxL1Cost.Cmp(l1Cost) <= 0 {
 		return core.ErrInsufficientGasForL1Cost
