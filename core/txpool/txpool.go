@@ -760,11 +760,18 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	}
 	tokenRatio := pool.currentState.GetState(types.GasOracleAddr, types.TokenRatioSlot).Big().Uint64()
 
+	log.Info("validateTx", "tx.Gas()", tx.Gas(), "tokenRatio", tokenRatio, "intrGas", intrGas)
+	if l1Cost != nil {
+		log.Info("validateTx", "l1Cost", l1Cost.String())
+	}
+
 	if tx.Gas() < intrGas*tokenRatio {
 		return core.ErrIntrinsicGas
 	}
 
 	gasRemaining := big.NewInt(int64(tx.Gas() - intrGas*tokenRatio))
+	log.Info("validateTx", "tx.GasPrice()", tx.GasPrice(), "tx.GasTipCap()", tx.GasTipCap(), "tx.GasFeeCap()", tx.GasFeeCap(), "gasRemaining", gasRemaining)
+
 	// legacyTxL1Cost gas used to cover L1 Cost for legacy tx
 	legacyTxL1Cost := new(big.Int).Mul(new(big.Int).Add(tx.GasPrice(), tx.GasTipCap()), gasRemaining)
 	if l1Cost != nil && legacyTxL1Cost.Cmp(l1Cost) <= 0 {
