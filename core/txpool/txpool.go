@@ -733,9 +733,9 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 		sum := new(big.Int).Add(cost, list.totalcost)
 		if repl := list.txs.Get(tx.Nonce()); repl != nil {
 			// Deduct the cost of a transaction replaced by this
-			replL1Cost := repl.Cost()
-			if l1Cost = pool.l1CostFn(tx.RollupDataGas(), tx.IsDepositTx(), tx.To()); l1Cost != nil { // add rollup cost
-				replL1Cost = replL1Cost.Add(cost, l1Cost)
+			replCost := repl.Cost()
+			if replL1Cost := pool.l1CostFn(repl.RollupDataGas(), repl.IsDepositTx(), repl.To()); replL1Cost != nil { // add rollup cost
+				replCost = replCost.Add(cost, replL1Cost)
 			}
 			replMetaTxParams, err := types.DecodeAndVerifyMetaTxParams(repl, pool.chainconfig.IsMetaTxV2(pool.chain.CurrentBlock().Time))
 			if err != nil {
@@ -744,9 +744,9 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 			if replMetaTxParams != nil {
 				replTxGasCost := new(big.Int).Sub(repl.Cost(), repl.Value())
 				sponsorAmount, _ := types.CalculateSponsorPercentAmount(replMetaTxParams, replTxGasCost)
-				replL1Cost = new(big.Int).Sub(replL1Cost, sponsorAmount)
+				replCost = new(big.Int).Sub(replCost, sponsorAmount)
 			}
-			sum.Sub(sum, replL1Cost)
+			sum.Sub(sum, replCost)
 		}
 		if userBalance.Cmp(sum) < 0 {
 			log.Trace("Replacing transactions would overdraft", "sender", from, "balance", userBalance, "required", sum)
