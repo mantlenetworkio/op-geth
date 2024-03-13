@@ -80,7 +80,7 @@ var (
 
 	// ErrInsufficientGasForL1Cost is returned if the transaction is specified to use less gas
 	// than required for l1Cost.
-	ErrInsufficientGasForL1Cost = errors.New("insufficient gas for l1Cost")
+	ErrInsufficientGasForL1Cost = errors.New("insufficient gas for l1Cost. Please use estimateGas to get gasLimit")
 
 	// ErrTxTypeNotSupported is returned if a transaction is not supported in the
 	// current network configuration.
@@ -101,6 +101,10 @@ var (
 	// ErrFeeCapTooLow is returned if the transaction fee cap is less than the
 	// base fee of the block.
 	ErrFeeCapTooLow = errors.New("max fee per gas less than block base fee")
+
+	// ErrGasPriceTooLow is returned if the transaction gasPrice is less than the
+	// base fee of the block for legacy tx
+	ErrGasPriceTooLow = errors.New("legacy tx's gasPrice less than block base fee")
 
 	// ErrSenderNoEOA is returned if the sender of a transaction is a contract.
 	ErrSenderNoEOA = errors.New("sender not an eoa")
