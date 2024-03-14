@@ -17,6 +17,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -161,6 +162,7 @@ type Message struct {
 	IsDepositTx   bool                // IsDepositTx indicates the message is force-included and can persist a mint.
 	Mint          *big.Int            // Mint is the amount to mint before EVM processing, or nil if there is no minting.
 	ETHValue      *big.Int            // ETHValue is the amount to mint BVM_ETH before EVM processing, or nil if there is no minting.
+	ETHTxValue    *big.Int            // ETHTxValue is the amount to be transferred to msg.To before EVM processing, and the transfer will be reverted if EVM failed
 	MetaTxParams  *types.MetaTxParams // MetaTxParams contains necessary parameter to sponsor gas fee for msg.From.
 	RollupDataGas types.RollupGasData // RollupDataGas indicates the rollup cost of the message, 0 if not a rollup or no cost.
 
@@ -169,8 +171,11 @@ type Message struct {
 }
 
 // TransactionToMessage converts a transaction into a Message.
-func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.Int) (*Message, error) {
-	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx)
+func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.Int, rules *params.Rules) (*Message, error) {
+	if rules == nil {
+		return nil, errors.New("param rules is nil pointer")
+	}
+	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx, rules.IsMetaTxV2)
 	if err != nil {
 		return nil, err
 	}
@@ -189,6 +194,7 @@ func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.In
 		Mint:              tx.Mint(),
 		RollupDataGas:     tx.RollupDataGas(),
 		ETHValue:          tx.ETHValue(),
+		ETHTxValue:        tx.ETHTxValue(),
 		MetaTxParams:      metaTxParams,
 		SkipAccountChecks: false,
 		RunMode:           CommitMode,
@@ -295,9 +301,9 @@ func (st *StateTransition) buyGas() (*big.Int, error) {
 	if l1Cost != nil && (st.msg.RunMode == GasEstimationMode || st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode) {
 		mgval = mgval.Add(mgval, l1Cost)
 	}
-	balanceCheck := mgval
+	balanceCheck := new(big.Int).Set(mgval)
 	if st.msg.GasFeeCap != nil {
-		balanceCheck = new(big.Int).SetUint64(st.msg.GasLimit)
+		balanceCheck.SetUint64(st.msg.GasLimit)
 		balanceCheck = balanceCheck.Mul(balanceCheck, st.msg.GasFeeCap)
 		balanceCheck.Add(balanceCheck, st.msg.Value)
 		if l1Cost != nil && st.msg.RunMode == GasEstimationMode {
@@ -438,19 +444,15 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	if mint := st.msg.Mint; mint != nil {
 		st.state.AddBalance(st.msg.From, mint)
 	}
+
+	//Mint BVM_ETH
+	rules := st.evm.ChainConfig().Rules(st.evm.Context.BlockNumber, st.evm.Context.Random != nil, st.evm.Context.Time)
 	//add eth value
 	if ethValue := st.msg.ETHValue; ethValue != nil && ethValue.Cmp(big.NewInt(0)) != 0 {
-		var ethRecipient common.Address
-		if st.msg.To != nil {
-			ethRecipient = *st.msg.To
-		} else {
-			ethRecipient = crypto.CreateAddress(st.msg.From, st.evm.StateDB.GetNonce(st.msg.From))
-		}
-		st.addBVMETHBalance(ethRecipient, ethValue)
-		st.addBVMETHTotalSupply(ethValue)
-		st.generateBVMETHMintEvent(ethRecipient, ethValue)
+		st.mintBVMETH(ethValue, rules)
 	}
 	snap := st.state.Snapshot()
+	// Will be reverted if failed
 
 	result, err := st.innerTransitionDb()
 	// Failed deposits must still be included. Unless we cannot produce the block at all due to the gas limit.
@@ -478,6 +480,14 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 }
 
 func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
+	rules := st.evm.ChainConfig().Rules(st.evm.Context.BlockNumber, st.evm.Context.Random != nil, st.evm.Context.Time)
+	if ethTxValue := st.msg.ETHTxValue; ethTxValue != nil && ethTxValue.Cmp(big.NewInt(0)) != 0 {
+		err := st.transferBVMETH(ethTxValue, rules)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	// First check this message satisfies all consensus rules before
 	// applying the message. The rules include these clauses
 	//
@@ -505,7 +515,6 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	var (
 		msg              = st.msg
 		sender           = vm.AccountRef(msg.From)
-		rules            = st.evm.ChainConfig().Rules(st.evm.Context.BlockNumber, st.evm.Context.Random != nil, st.evm.Context.Time)
 		contractCreation = msg.To == nil
 	)
 
@@ -514,6 +523,7 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
 		gas = gas * tokenRatio
 	}
@@ -526,12 +536,9 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
 		if st.msg.GasPrice.Cmp(common.Big0) > 0 && l1Cost != nil {
 			l1Gas = new(big.Int).Div(l1Cost, st.msg.GasPrice).Uint64()
-			if st.msg.GasLimit < l1Gas {
-				return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, l1Gas)
-			}
 		}
 		if st.gasRemaining < l1Gas {
-			return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, l1Gas)
+			return nil, fmt.Errorf("%w: have %d, want %d", ErrInsufficientGasForL1Cost, st.gasRemaining, l1Gas)
 		}
 		st.gasRemaining -= l1Gas
 		if tokenRatio > 0 {
@@ -647,7 +654,7 @@ func (st *StateTransition) refundGas(refundQuotient, tokenRatio uint64) {
 	}
 	st.gasRemaining += refund
 
-	// Return ETH for remaining gas, exchanged at the original rate.
+	// Return MNT for remaining gas, exchanged at the original rate.
 	st.gasRemaining = st.gasRemaining * tokenRatio
 	remaining := new(big.Int).Mul(new(big.Int).SetUint64(st.gasRemaining), st.msg.GasPrice)
 	if st.msg.MetaTxParams != nil {
@@ -671,12 +678,33 @@ func (st *StateTransition) gasUsed() uint64 {
 	return st.initialGas - st.gasRemaining
 }
 
-func (st *StateTransition) addBVMETHBalance(ethRecipient common.Address, ethValue *big.Int) {
-	key := getBVMETHBalanceKey(ethRecipient)
+func (st *StateTransition) mintBVMETH(ethValue *big.Int, rules params.Rules) {
+	if !rules.IsMantleBVMETHMintUpgrade {
+		var key common.Hash
+		var ethRecipient common.Address
+		if st.msg.To != nil {
+			ethRecipient = *st.msg.To
+		} else {
+			ethRecipient = crypto.CreateAddress(st.msg.From, st.evm.StateDB.GetNonce(st.msg.From))
+		}
+		key = getBVMETHBalanceKey(ethRecipient)
+		value := st.state.GetState(BVM_ETH_ADDR, key)
+		bal := value.Big()
+		bal = bal.Add(bal, ethValue)
+		st.state.SetState(BVM_ETH_ADDR, key, common.BigToHash(bal))
+
+		st.addBVMETHTotalSupply(ethValue)
+		st.generateBVMETHMintEvent(ethRecipient, ethValue)
+		return
+	}
+	key := getBVMETHBalanceKey(st.msg.From)
 	value := st.state.GetState(BVM_ETH_ADDR, key)
 	bal := value.Big()
 	bal = bal.Add(bal, ethValue)
 	st.state.SetState(BVM_ETH_ADDR, key, common.BigToHash(bal))
+
+	st.addBVMETHTotalSupply(ethValue)
+	st.generateBVMETHMintEvent(st.msg.From, ethValue)
 }
 
 func (st *StateTransition) addBVMETHTotalSupply(ethValue *big.Int) {
@@ -685,6 +713,43 @@ func (st *StateTransition) addBVMETHTotalSupply(ethValue *big.Int) {
 	bal := value.Big()
 	bal = bal.Add(bal, ethValue)
 	st.state.SetState(BVM_ETH_ADDR, key, common.BigToHash(bal))
+}
+
+func (st *StateTransition) transferBVMETH(ethValue *big.Int, rules params.Rules) error {
+	if !rules.IsMantleBVMETHMintUpgrade {
+		return nil
+	}
+	var ethRecipient common.Address
+	if st.msg.To != nil {
+		ethRecipient = *st.msg.To
+	} else {
+		ethRecipient = crypto.CreateAddress(st.msg.From, st.evm.StateDB.GetNonce(st.msg.From))
+	}
+	if ethRecipient == st.msg.From {
+		return nil
+	}
+
+	fromKey := getBVMETHBalanceKey(st.msg.From)
+	toKey := getBVMETHBalanceKey(ethRecipient)
+
+	fromBalanceValue := st.state.GetState(BVM_ETH_ADDR, fromKey)
+	toBalanceValue := st.state.GetState(BVM_ETH_ADDR, toKey)
+
+	fromBalance := fromBalanceValue.Big()
+	toBalance := toBalanceValue.Big()
+
+	if fromBalance.Cmp(ethValue) < 0 {
+		return ErrEthTxValueTooLarge
+	}
+
+	fromBalance = new(big.Int).Sub(fromBalance, ethValue)
+	toBalance = new(big.Int).Add(toBalance, ethValue)
+
+	st.state.SetState(BVM_ETH_ADDR, fromKey, common.BigToHash(fromBalance))
+	st.state.SetState(BVM_ETH_ADDR, toKey, common.BigToHash(toBalance))
+
+	st.generateBVMETHTransferEvent(st.msg.From, ethRecipient, ethValue)
+	return nil
 }
 
 func getBVMETHBalanceKey(addr common.Address) common.Hash {
@@ -712,6 +777,25 @@ func (st *StateTransition) generateBVMETHMintEvent(mintAddress common.Address, m
 		Address: BVM_ETH_ADDR,
 		Topics:  topics,
 		Data:    d,
+		// This is a non-consensus field, but assigned here because
+		// core/state doesn't know the current block number.
+		BlockNumber: st.evm.Context.BlockNumber.Uint64(),
+	})
+}
+
+func (st *StateTransition) generateBVMETHTransferEvent(from, to common.Address, amount *big.Int) {
+	// keccak("Transfer(address,address,uint256)") = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+	methodHash := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+	topics := make([]common.Hash, 3)
+	topics[0] = methodHash
+	topics[1] = from.Hash()
+	topics[2] = to.Hash()
+	//data means the transfer amount in Transfer EVENT.
+	data := common.HexToHash(common.Bytes2Hex(amount.Bytes())).Bytes()
+	st.evm.StateDB.AddLog(&types.Log{
+		Address: BVM_ETH_ADDR,
+		Topics:  topics,
+		Data:    data,
 		// This is a non-consensus field, but assigned here because
 		// core/state doesn't know the current block number.
 		BlockNumber: st.evm.Context.BlockNumber.Uint64(),

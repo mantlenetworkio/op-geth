@@ -379,7 +379,7 @@ func (pool *TxPool) validateTx(ctx context.Context, tx *types.Transaction) error
 		return txpool.ErrNegativeValue
 	}
 
-	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx)
+	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx, pool.config.IsMetaTxV2(header.Time))
 	if err != nil {
 		return err
 	}
@@ -392,7 +392,7 @@ func (pool *TxPool) validateTx(ctx context.Context, tx *types.Transaction) error
 		selfPayAmount = new(big.Int).Add(selfPayAmount, tx.Value())
 		sponsorBalance := currentState.GetBalance(metaTxParams.GasFeeSponsor)
 		if sponsorBalance.Cmp(sponsorAmount) < 0 {
-			return core.ErrInsufficientFunds
+			return types.ErrSponsorBalanceNotEnough
 		}
 		userBalance := currentState.GetBalance(from)
 		if userBalance.Cmp(selfPayAmount) < 0 {

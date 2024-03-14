@@ -291,10 +291,11 @@ func (api *API) traceChain(start, end *types.Block, config *TraceConfig, closed 
 				var (
 					signer   = types.MakeSigner(api.backend.ChainConfig(), task.block.Number())
 					blockCtx = core.NewEVMBlockContext(task.block.Header(), api.chainContext(ctx), nil, api.backend.ChainConfig(), task.statedb)
+					rules    = api.backend.ChainConfig().Rules(task.block.Number(), false, task.block.Time())
 				)
 				// Trace all the transactions contained within
 				for i, tx := range task.block.Transactions() {
-					msg, _ := core.TransactionToMessage(tx, signer, task.block.BaseFee())
+					msg, _ := core.TransactionToMessage(tx, signer, task.block.BaseFee(), &rules)
 					txctx := &Context{
 						BlockHash:   task.block.Hash(),
 						BlockNumber: task.block.Number(),
@@ -578,13 +579,14 @@ func (api *API) IntermediateRoots(ctx context.Context, hash common.Hash, config 
 		chainConfig        = api.backend.ChainConfig()
 		vmctx              = core.NewEVMBlockContext(block.Header(), api.chainContext(ctx), nil, chainConfig, statedb)
 		deleteEmptyObjects = chainConfig.IsEIP158(block.Number())
+		rules              = api.backend.ChainConfig().Rules(block.Number(), false, block.Time())
 	)
 	for i, tx := range block.Transactions() {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		var (
-			msg, _    = core.TransactionToMessage(tx, signer, block.BaseFee())
+			msg, _    = core.TransactionToMessage(tx, signer, block.BaseFee(), &rules)
 			txContext = core.NewEVMTxContext(msg)
 			vmenv     = vm.NewEVM(vmctx, txContext, statedb, chainConfig, vm.Config{})
 		)
@@ -655,10 +657,11 @@ func (api *API) traceBlock(ctx context.Context, block *types.Block, config *Trac
 		blockCtx  = core.NewEVMBlockContext(block.Header(), api.chainContext(ctx), nil, api.backend.ChainConfig(), statedb)
 		signer    = types.MakeSigner(api.backend.ChainConfig(), block.Number())
 		results   = make([]*txTraceResult, len(txs))
+		rules     = api.backend.ChainConfig().Rules(block.Number(), false, block.Time())
 	)
 	for i, tx := range txs {
 		// Generate the next state snapshot fast without tracing
-		msg, _ := core.TransactionToMessage(tx, signer, block.BaseFee())
+		msg, _ := core.TransactionToMessage(tx, signer, block.BaseFee(), &rules)
 		txctx := &Context{
 			BlockHash:   blockHash,
 			BlockNumber: block.Number(),
@@ -698,10 +701,11 @@ func (api *API) traceBlockParallel(ctx context.Context, block *types.Block, stat
 		pend.Add(1)
 		go func() {
 			defer pend.Done()
+			rules := api.backend.ChainConfig().Rules(block.Number(), false, block.Time())
 			// Fetch and execute the next transaction trace tasks
 			for task := range jobs {
 				blockCtx := core.NewEVMBlockContext(block.Header(), api.chainContext(ctx), nil, api.backend.ChainConfig(), task.statedb)
-				msg, _ := core.TransactionToMessage(txs[task.index], signer, block.BaseFee())
+				msg, _ := core.TransactionToMessage(txs[task.index], signer, block.BaseFee(), &rules)
 				txctx := &Context{
 					BlockHash:   blockHash,
 					BlockNumber: block.Number(),
@@ -721,6 +725,7 @@ func (api *API) traceBlockParallel(ctx context.Context, block *types.Block, stat
 	// Feed the transactions into the tracers and return
 	var failed error
 	blockCtx := core.NewEVMBlockContext(block.Header(), api.chainContext(ctx), nil, api.backend.ChainConfig(), statedb)
+	rules := api.backend.ChainConfig().Rules(block.Number(), false, block.Time())
 txloop:
 	for i, tx := range txs {
 		// Send the trace task over for execution
@@ -733,7 +738,7 @@ txloop:
 		}
 
 		// Generate the next state snapshot fast without tracing
-		msg, _ := core.TransactionToMessage(tx, signer, block.BaseFee())
+		msg, _ := core.TransactionToMessage(tx, signer, block.BaseFee(), &rules)
 		statedb.SetTxContext(tx.Hash(), i)
 		vmenv := vm.NewEVM(blockCtx, core.NewEVMTxContext(msg), statedb, api.backend.ChainConfig(), vm.Config{})
 		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.GasLimit)); err != nil {
@@ -810,10 +815,11 @@ func (api *API) standardTraceBlockToFile(ctx context.Context, block *types.Block
 		// Note: This copies the config, to not screw up the main config
 		chainConfig, canon = overrideConfig(chainConfig, config.Overrides)
 	}
+	rules := chainConfig.Rules(block.Number(), false, block.Time())
 	for i, tx := range block.Transactions() {
 		// Prepare the transaction for un-traced execution
 		var (
-			msg, _    = core.TransactionToMessage(tx, signer, block.BaseFee())
+			msg, _    = core.TransactionToMessage(tx, signer, block.BaseFee(), &rules)
 			txContext = core.NewEVMTxContext(msg)
 			vmConf    vm.Config
 			dump      *os.File

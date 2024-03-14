@@ -26,7 +26,7 @@ var (
 	// The base fee portion of the transaction fee accumulates at this predeploy
 	OptimismBaseFeeRecipient = common.HexToAddress("0x4200000000000000000000000000000000000019")
 	// The L1 portion of the transaction fee accumulates at this predeploy
-	OptimismL1FeeRecipient = common.HexToAddress("0x420000000000000000000000000000000000001A")
+	// OptimismL1FeeRecipient = common.HexToAddress("0x420000000000000000000000000000000000001A")
 )
 
 const (
@@ -170,6 +170,9 @@ const (
 	// up to half the consumed gas could be refunded. Redefined as 1/5th in EIP-3529
 	RefundQuotient        uint64 = 2
 	RefundQuotientEIP3529 uint64 = 5
+
+	BlobTxBlobGasPerBlob = 1 << 17 // Gas consumption of a single data blob (== blob byte size)
+	BlobTxHashVersion    = 0x01    // Version byte of the commitment hash
 )
 
 // Gas discount table for BLS12-381 G1 and G2 multi exponentiation operations

@@ -294,7 +294,7 @@ func (b *EthAPIBackend) SendTx(ctx context.Context, tx *types.Transaction) error
 			return err
 		}
 		if err = b.eth.seqRPCService.CallContext(ctx, nil, "eth_sendRawTransaction", hexutil.Encode(data)); err != nil {
-			return fmt.Errorf("failed to forward tx to sequencer, please try again")
+			return fmt.Errorf("failed to forward tx to sequencer, please try again. Error message: '%w'", err)
 		}
 		if b.disableTxPool {
 			return nil
@@ -358,7 +358,7 @@ func (b *EthAPIBackend) SyncProgress() ethereum.SyncProgress {
 }
 
 func (b *EthAPIBackend) SuggestGasTipCap(ctx context.Context) (*big.Int, error) {
-	return b.gpo.SuggestTipCap(ctx)
+	return big.NewInt(0), nil
 }
 
 func (b *EthAPIBackend) FeeHistory(ctx context.Context, blockCount int, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (firstBlock *big.Int, reward [][]*big.Int, baseFee []*big.Int, gasUsedRatio []float64, err error) {

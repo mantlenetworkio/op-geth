@@ -280,6 +280,13 @@ func (args *TransactionArgs) ToMessage(globalGasCap uint64, baseFee *big.Int, ru
 			gasFeeCap = gasPriceForEstimate.ToInt()
 			gasTipCap = gasPriceForEstimate.ToInt()
 		}
+
+		if gasPrice.Cmp(gasPriceForEstimate.ToInt()) < 0 {
+			gasPrice = gasPriceForEstimate.ToInt()
+		}
+		if gasFeeCap.Cmp(gasPriceForEstimate.ToInt()) < 0 {
+			gasFeeCap = gasPriceForEstimate.ToInt()
+		}
 	}
 
 	value := new(big.Int)

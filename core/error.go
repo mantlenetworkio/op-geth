@@ -78,6 +78,10 @@ var (
 	// than required to start the invocation.
 	ErrIntrinsicGas = errors.New("intrinsic gas too low")
 
+	// ErrInsufficientGasForL1Cost is returned if the transaction is specified to use less gas
+	// than required for l1Cost.
+	ErrInsufficientGasForL1Cost = errors.New("insufficient gas for l1Cost. Please use estimateGas to get gasLimit")
+
 	// ErrTxTypeNotSupported is returned if a transaction is not supported in the
 	// current network configuration.
 	ErrTxTypeNotSupported = types.ErrTxTypeNotSupported
@@ -98,9 +102,16 @@ var (
 	// base fee of the block.
 	ErrFeeCapTooLow = errors.New("max fee per gas less than block base fee")
 
+	// ErrGasPriceTooLow is returned if the transaction gasPrice is less than the
+	// base fee of the block for legacy tx
+	ErrGasPriceTooLow = errors.New("legacy tx's gasPrice less than block base fee")
+
 	// ErrSenderNoEOA is returned if the sender of a transaction is a contract.
 	ErrSenderNoEOA = errors.New("sender not an eoa")
 
 	// ErrSystemTxNotSupported is returned for any deposit tx with IsSystemTx=true after the Regolith fork
 	ErrSystemTxNotSupported = errors.New("system tx not supported")
+
+	// ErrEthTxValueTooLarge is returned when EthTxValue is larger than the BVM balance of msg.from
+	ErrEthTxValueTooLarge = errors.New("eth tx value is too large")
 )
