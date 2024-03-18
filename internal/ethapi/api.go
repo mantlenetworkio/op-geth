@@ -1297,6 +1297,10 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		if err != nil {
 			return 0, fmt.Errorf("failed to calculate L1 cost: %w", err)
 		}
+
+		// Increase l1Cost by 50% to make sure the account has enough balance to pay for the gas.
+		l1CostBuffer := big.NewInt(150)
+		l1Cost.Mul(l1Cost, l1CostBuffer).Div(l1Cost, big.NewInt(100))
 		available.Sub(available, l1Cost)
 
 		// Calculate gas limit based on buffer.
