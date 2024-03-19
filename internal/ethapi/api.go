@@ -80,6 +80,7 @@ func (s *EthereumAPI) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 
 // MaxPriorityFeePerGas returns a suggestion for a gas tip cap for dynamic fee transactions.
 func (s *EthereumAPI) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.Big, error) {
+	fmt.Println("EthereumAPI.MaxPriorityFeePerGas")
 	tipcap, err := s.b.SuggestGasTipCap(ctx)
 	if err != nil {
 		return nil, err
@@ -1286,7 +1287,8 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		allowance := new(big.Int).Div(available, feeCap)
 
 		// If the allowance is larger than maximum uint64, skip checking
-		if allowance.IsUint64() && hi > allowance.Uint64() {
+		// If the runMode is core.GasEstimationWithSkipCheckBalanceMode, skip checking
+		if runMode != core.GasEstimationWithSkipCheckBalanceMode && allowance.IsUint64() && hi > allowance.Uint64() {
 			transfer := args.Value
 			if transfer == nil {
 				transfer = new(hexutil.Big)
