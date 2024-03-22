@@ -628,7 +628,6 @@ func (pool *TxPool) toJournal() map[common.Address]types.Transactions {
 // validateTx checks whether a transaction is valid according to the consensus
 // rules and adheres to some heuristic limits of the local node (price and size).
 func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
-	fmt.Println("pool.validateTx:")
 	// No unauthenticated deposits allowed in the transaction pool.
 	// This is for spam protection, not consensus,
 	// as the external engine-API user authenticates deposits.
@@ -679,7 +678,6 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	if err != nil {
 		return ErrInvalidSender
 	}
-	fmt.Println("tx.From(), tx.To(), tx.Nonce()", from, tx.To(), tx.Nonce())
 	// Drop non-local transactions under our own minimal accepted gas price or tip
 	if tx.GasTipCapIntCmp(pool.gasPrice) < 0 {
 		return ErrUnderpriced
@@ -781,7 +779,6 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 			return core.ErrInsufficientGasForL1Cost
 		}
 	} else if tx.Type() == types.DynamicFeeTxType {
-		fmt.Println("tx.GasTipCap():", tx.GasTipCap(), "tx.GasFeeCap()", tx.GasFeeCap())
 		// When feecap is smaller than basefee, submission is meaningless.
 		// Report an error quickly instead of getting stuck in txpool.
 		if tx.GasFeeCap().Cmp(baseFee) < 0 { // Consistent with legacy tx verification
@@ -792,7 +789,6 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 		// dynamicBaseFeeTxL1Cost gas used to cover L1 Cost for dynamic fee tx
 		effectiveGas := cmath.BigMin(new(big.Int).Add(tx.GasTipCap(), baseFee), tx.GasFeeCap())
 		dynamicFeeTxL1Cost := new(big.Int).Mul(effectiveGas, gasRemaining)
-		fmt.Println("effectiveGas:", effectiveGas, "gasRemaining:", gasRemaining, "dynamicFeeTxL1Cost:", dynamicFeeTxL1Cost, "l1Cost:", l1Cost)
 		if l1Cost != nil && dynamicFeeTxL1Cost.Cmp(l1Cost) <= 0 {
 			return core.ErrInsufficientGasForL1Cost
 		}
