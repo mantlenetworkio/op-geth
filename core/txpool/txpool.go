@@ -779,6 +779,13 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 			return core.ErrInsufficientGasForL1Cost
 		}
 	} else if tx.Type() == types.DynamicFeeTxType {
+		// When feecap is smaller than basefee, submission is meaningless.
+		// Report an error quickly instead of getting stuck in txpool.
+		if tx.GasFeeCap().Cmp(baseFee) < 0 { // Consistent with legacy tx verification
+			return fmt.Errorf("%w: address %v, maxFeePerGas: %s baseFee: %s", core.ErrFeeCapTooLow,
+				from.Hex(), tx.GasFeeCap(), baseFee)
+		}
+
 		// dynamicBaseFeeTxL1Cost gas used to cover L1 Cost for dynamic fee tx
 		effectiveGas := cmath.BigMin(new(big.Int).Add(tx.GasTipCap(), baseFee), tx.GasFeeCap())
 		dynamicFeeTxL1Cost := new(big.Int).Mul(effectiveGas, gasRemaining)

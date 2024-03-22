@@ -259,7 +259,7 @@ func (args *TransactionArgs) ToMessage(globalGasCap uint64, baseFee *big.Int, ru
 	// use suggested gasPrice for estimateGas to calculate gasUsed
 	if runMode == core.GasEstimationMode || runMode == core.GasEstimationWithSkipCheckBalanceMode {
 		// use default gasPrice if user does not set gasPrice or gasPrice is 0
-		if args.GasPrice == nil && gasPrice.Cmp(common.Big0) == 0 {
+		if args.GasPrice == nil || gasPrice.Cmp(common.Big0) == 0 {
 			gasPrice = gasPriceForEstimate.ToInt()
 		}
 		// use gasTipCap to set gasFeeCap
