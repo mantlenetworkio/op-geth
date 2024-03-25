@@ -1252,7 +1252,9 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 	}
 
 	runMode := core.GasEstimationMode
-	if args.GasPrice == nil && args.MaxFeePerGas == nil && args.MaxPriorityFeePerGas == nil {
+	if (args.GasPrice == nil || args.GasPrice.ToInt().Sign() == 0) && // GasPrice is nil or zero AND
+		(args.MaxFeePerGas == nil || args.MaxFeePerGas.ToInt().Sign() == 0) && // MaxFeePerGas is nil or zero AND
+		(args.MaxPriorityFeePerGas == nil || args.MaxPriorityFeePerGas.ToInt().Sign() == 0) { // MaxPriorityFeePerGas is nil or zero
 		runMode = core.GasEstimationWithSkipCheckBalanceMode
 	}
 
@@ -1290,7 +1292,8 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		allowance := new(big.Int).Div(available, feeCap)
 
 		// If the allowance is larger than maximum uint64, skip checking
-		if allowance.IsUint64() && hi > allowance.Uint64() {
+		// If the runMode is core.GasEstimationWithSkipCheckBalanceMode, skip checking
+		if runMode != core.GasEstimationWithSkipCheckBalanceMode && allowance.IsUint64() && hi > allowance.Uint64() {
 			transfer := args.Value
 			if transfer == nil {
 				transfer = new(hexutil.Big)
