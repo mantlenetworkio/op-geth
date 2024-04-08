@@ -175,7 +175,7 @@ func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.In
 	if rules == nil {
 		return nil, errors.New("param rules is nil pointer")
 	}
-	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx, rules.IsMetaTxV2)
+	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx, rules.IsMetaTxV2, rules.IsMetaTxV3)
 	if err != nil {
 		return nil, err
 	}
@@ -320,6 +320,11 @@ func (st *StateTransition) buyGas() (*big.Int, error) {
 			selfPayAmount = new(big.Int).Add(selfPayAmount, st.msg.Value)
 			if have, want := st.state.GetBalance(st.msg.From), selfPayAmount; have.Cmp(want) < 0 {
 				return nil, fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From.Hex(), have, want)
+			}
+			if st.msg.MetaTxParams.GasFeeSponsor == st.msg.From {
+				if have, want := st.state.GetBalance(st.msg.From), pureGasFeeValue; have.Cmp(want) < 0 {
+					return nil, fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From.Hex(), have, want)
+				}
 			}
 		} else {
 			if have, want := st.state.GetBalance(st.msg.From), balanceCheck; have.Cmp(want) < 0 {

@@ -19,11 +19,12 @@ var (
 	// ASCII code of "MantleMetaTxPrefix"
 	MetaTxPrefix, _ = hexutil.Decode("0x00000000000000000000000000004D616E746C654D6574615478507265666978")
 
-	ErrExpiredMetaTx           = errors.New("expired meta transaction")
-	ErrInvalidGasFeeSponsorSig = errors.New("invalid gas fee sponsor signature")
-	ErrGasFeeSponsorMismatch   = errors.New("gas fee sponsor address is mismatch with signature")
-	ErrInvalidSponsorPercent   = errors.New("invalid sponsor percent, expected range (0, 100]")
-	ErrSponsorBalanceNotEnough = errors.New("sponsor doesn't have enough balance")
+	ErrExpiredMetaTx               = errors.New("expired meta transaction")
+	ErrInvalidGasFeeSponsorSig     = errors.New("invalid gas fee sponsor signature")
+	ErrGasFeeSponsorMismatch       = errors.New("gas fee sponsor address is mismatch with signature")
+	ErrInvalidSponsorPercent       = errors.New("invalid sponsor percent, expected range (0, 100]")
+	ErrSponsorBalanceNotEnough     = errors.New("sponsor doesn't have enough balance")
+	ErrSponsorMustNotEqualToSender = errors.New("sponsor must not equal to tx sender")
 )
 
 type MetaTxParams struct {
@@ -104,7 +105,7 @@ func DecodeMetaTxParams(txData []byte) (*MetaTxParams, error) {
 	return &metaTxParams, nil
 }
 
-func DecodeAndVerifyMetaTxParams(tx *Transaction, isMetaTxUpgraded bool) (*MetaTxParams, error) {
+func DecodeAndVerifyMetaTxParams(tx *Transaction, isMetaTxV1Upgraded, isMetaTxV2Upgraded bool) (*MetaTxParams, error) {
 	if tx.Type() != DynamicFeeTxType {
 		return nil, nil
 	}
@@ -128,8 +129,18 @@ func DecodeAndVerifyMetaTxParams(tx *Transaction, isMetaTxUpgraded bool) (*MetaT
 		return nil, nil
 	}
 
-	if err = checkSponsorSignature(tx, metaTxParams, isMetaTxUpgraded); err != nil {
+	if err = checkSponsorSignature(tx, metaTxParams, isMetaTxV1Upgraded); err != nil {
 		return nil, err
+	}
+
+	if isMetaTxV2Upgraded {
+		txSender, err := Sender(LatestSignerForChainID(tx.ChainId()), tx)
+		if err != nil {
+			return nil, err
+		}
+		if txSender == metaTxParams.GasFeeSponsor {
+			return nil, ErrSponsorMustNotEqualToSender
+		}
 	}
 
 	tx.metaTxParams.Store(&MetaTxParamsCache{

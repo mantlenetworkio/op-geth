@@ -101,11 +101,10 @@ func generateMetaTxDataWithMockSig(dynamicTx *DynamicFeeTx, expireHeight uint64,
 	return append(MetaTxPrefix, metaTxDataBz...), nil
 }
 
-func generateMetaTxDataV2(dynamicTx *DynamicFeeTx, expireHeight uint64, sponsorPercent uint64,
+func generateMetaTxDataV2(dynamicTx *DynamicFeeTx, msgSender common.Address, expireHeight uint64, sponsorPercent uint64,
 	gasFeeSponsorAddr common.Address, privateKey *ecdsa.PrivateKey) ([]byte, error) {
-	from := crypto.PubkeyToAddress(userKey.PublicKey)
 	metaTxSignData := &MetaTxSignDataV2{
-		From:           from,
+		From:           msgSender,
 		ChainID:        dynamicTx.ChainID,
 		Nonce:          dynamicTx.Nonce,
 		GasTipCap:      dynamicTx.GasTipCap,
@@ -232,7 +231,7 @@ func TestDecodeAndVerifyMetaTxParams(t *testing.T) {
 	require.NoError(t, err)
 
 	// test normal metaTx
-	metaTxParams, err := DecodeAndVerifyMetaTxParams(signedTx, false)
+	metaTxParams, err := DecodeAndVerifyMetaTxParams(signedTx, false, false)
 	require.NoError(t, err)
 
 	require.Equal(t, gasFeeSponsorAddr.String(), metaTxParams.GasFeeSponsor.String())
@@ -250,7 +249,7 @@ func TestDecodeAndVerifyMetaTxParams(t *testing.T) {
 	signedTx, err = tx.WithSignature(signer, txSignature)
 	require.NoError(t, err)
 
-	_, err = DecodeAndVerifyMetaTxParams(signedTx, false)
+	_, err = DecodeAndVerifyMetaTxParams(signedTx, false, false)
 	require.Equal(t, err, ErrInvalidGasFeeSponsorSig)
 
 	// Test ErrGasFeeSponsorMismatch
@@ -265,7 +264,7 @@ func TestDecodeAndVerifyMetaTxParams(t *testing.T) {
 	signedTx, err = tx.WithSignature(signer, txSignature)
 	require.NoError(t, err)
 
-	_, err = DecodeAndVerifyMetaTxParams(signedTx, true)
+	_, err = DecodeAndVerifyMetaTxParams(signedTx, true, false)
 	require.Equal(t, err, ErrGasFeeSponsorMismatch)
 
 	// Test ErrGasFeeSponsorMismatch
@@ -280,7 +279,7 @@ func TestDecodeAndVerifyMetaTxParams(t *testing.T) {
 	signedTx, err = tx.WithSignature(signer, txSignature)
 	require.NoError(t, err)
 
-	_, err = DecodeAndVerifyMetaTxParams(signedTx, false)
+	_, err = DecodeAndVerifyMetaTxParams(signedTx, false, false)
 	require.Equal(t, err, ErrInvalidSponsorPercent)
 }
 
@@ -305,7 +304,7 @@ func TestDecodeAndVerifyMetaTxParamsV2(t *testing.T) {
 		AccessList: nil,
 	}
 
-	payload, err := generateMetaTxDataV2(dynamicTx, expireHeight, 50, gasFeeSponsorAddr, gasFeeSponsorKey1)
+	payload, err := generateMetaTxDataV2(dynamicTx, crypto.PubkeyToAddress(userKey.PublicKey), expireHeight, 50, gasFeeSponsorAddr, gasFeeSponsorKey1)
 	require.NoError(t, err)
 
 	dynamicTx.Data = payload
@@ -317,7 +316,7 @@ func TestDecodeAndVerifyMetaTxParamsV2(t *testing.T) {
 	require.NoError(t, err)
 
 	// test normal metaTx
-	metaTxParams, err := DecodeAndVerifyMetaTxParams(signedTx, true)
+	metaTxParams, err := DecodeAndVerifyMetaTxParams(signedTx, true, false)
 	require.NoError(t, err)
 
 	require.Equal(t, gasFeeSponsorAddr.String(), metaTxParams.GasFeeSponsor.String())
@@ -335,12 +334,12 @@ func TestDecodeAndVerifyMetaTxParamsV2(t *testing.T) {
 	signedTx, err = tx.WithSignature(signer, txSignature)
 	require.NoError(t, err)
 
-	_, err = DecodeAndVerifyMetaTxParams(signedTx, true)
+	_, err = DecodeAndVerifyMetaTxParams(signedTx, true, false)
 	require.Equal(t, err, ErrInvalidGasFeeSponsorSig)
 
 	// Test ErrGasFeeSponsorMismatch
 	dynamicTx.Data = depositABICalldata
-	payload, err = generateMetaTxDataV2(dynamicTx, expireHeight, 80, gasFeeSponsorAddr, gasFeeSponsorKey2)
+	payload, err = generateMetaTxDataV2(dynamicTx, crypto.PubkeyToAddress(userKey.PublicKey), expireHeight, 80, gasFeeSponsorAddr, gasFeeSponsorKey2)
 	require.NoError(t, err)
 
 	dynamicTx.Data = payload
@@ -350,7 +349,7 @@ func TestDecodeAndVerifyMetaTxParamsV2(t *testing.T) {
 	signedTx, err = tx.WithSignature(signer, txSignature)
 	require.NoError(t, err)
 
-	_, err = DecodeAndVerifyMetaTxParams(signedTx, true)
+	_, err = DecodeAndVerifyMetaTxParams(signedTx, true, false)
 	require.Equal(t, err, ErrGasFeeSponsorMismatch)
 
 	// Test ErrGasFeeSponsorMismatch
@@ -365,6 +364,63 @@ func TestDecodeAndVerifyMetaTxParamsV2(t *testing.T) {
 	signedTx, err = tx.WithSignature(signer, txSignature)
 	require.NoError(t, err)
 
-	_, err = DecodeAndVerifyMetaTxParams(signedTx, false)
+	_, err = DecodeAndVerifyMetaTxParams(signedTx, false, false)
 	require.Equal(t, err, ErrInvalidSponsorPercent)
+}
+
+func TestDecodeAndVerifyMetaTxParamsV3(t *testing.T) {
+	gasFeeSponsorPublicKey := gasFeeSponsorKey1.Public()
+	pubKeyECDSA, _ := gasFeeSponsorPublicKey.(*ecdsa.PublicKey)
+	gasFeeSponsorAddr := crypto.PubkeyToAddress(*pubKeyECDSA)
+
+	chainId := big.NewInt(1)
+	depositABICalldata, _ := hexutil.Decode("0xd0e30db0")
+	to := common.HexToAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+	expireHeight := uint64(20_000_010)
+	dynamicTx := &DynamicFeeTx{
+		ChainID:    chainId,
+		Nonce:      100,
+		GasTipCap:  big.NewInt(1e9),
+		GasFeeCap:  big.NewInt(1e15),
+		Gas:        4700000,
+		To:         &to,
+		Value:      big.NewInt(1e18),
+		Data:       depositABICalldata,
+		AccessList: nil,
+	}
+
+	userPrivateKey := gasFeeSponsorKey1
+	msgSender := crypto.PubkeyToAddress(userPrivateKey.PublicKey)
+	payload, err := generateMetaTxDataV2(dynamicTx, msgSender, expireHeight, 50, gasFeeSponsorAddr, gasFeeSponsorKey1)
+	require.NoError(t, err)
+
+	dynamicTx.Data = payload
+	tx := NewTx(dynamicTx)
+	signer := LatestSignerForChainID(chainId)
+	txSignature, err := crypto.Sign(signer.Hash(tx).Bytes(), userPrivateKey)
+	require.NoError(t, err)
+	signedTx, err := tx.WithSignature(signer, txSignature)
+	require.NoError(t, err)
+
+	// test normal metaTx
+	metaTxParams, err := DecodeAndVerifyMetaTxParams(signedTx, true, false)
+	require.NoError(t, err)
+
+	require.Equal(t, gasFeeSponsorAddr.String(), metaTxParams.GasFeeSponsor.String())
+	require.Equal(t, hexutil.Encode(depositABICalldata), hexutil.Encode(metaTxParams.Payload))
+
+	dynamicTx.Nonce = dynamicTx.Nonce + 1
+	payload, err = generateMetaTxDataV2(dynamicTx, msgSender, expireHeight, 50, gasFeeSponsorAddr, gasFeeSponsorKey1)
+	require.NoError(t, err)
+
+	dynamicTx.Data = payload
+	tx = NewTx(dynamicTx)
+	txSignature, err = crypto.Sign(signer.Hash(tx).Bytes(), userPrivateKey)
+	require.NoError(t, err)
+	signedTx, err = tx.WithSignature(signer, txSignature)
+	require.NoError(t, err)
+
+	// test normal metaTx
+	metaTxParams, err = DecodeAndVerifyMetaTxParams(signedTx, true, true)
+	require.Error(t, err, ErrSponsorMustNotEqualToSender)
 }

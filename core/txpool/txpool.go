@@ -694,7 +694,8 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 		cost = cost.Add(cost, l1Cost)
 	}
 
-	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx, pool.chainconfig.IsMetaTxV2(pool.chain.CurrentBlock().Time))
+	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx,
+		pool.chainconfig.IsMetaTxV2(pool.chain.CurrentBlock().Time), pool.chainconfig.IsMetaTxV3(pool.chain.CurrentBlock().Time))
 	if err != nil {
 		return err
 	}
@@ -737,7 +738,8 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 			if replL1Cost := pool.l1CostFn(repl.RollupDataGas(), repl.IsDepositTx(), repl.To()); replL1Cost != nil { // add rollup cost
 				replCost = replCost.Add(cost, replL1Cost)
 			}
-			replMetaTxParams, err := types.DecodeAndVerifyMetaTxParams(repl, pool.chainconfig.IsMetaTxV2(pool.chain.CurrentBlock().Time))
+			replMetaTxParams, err := types.DecodeAndVerifyMetaTxParams(repl,
+				pool.chainconfig.IsMetaTxV2(pool.chain.CurrentBlock().Time), pool.chainconfig.IsMetaTxV3(pool.chain.CurrentBlock().Time))
 			if err != nil {
 				return err
 			}
@@ -1525,7 +1527,8 @@ func (pool *TxPool) validateMetaTxList(list *list) ([]*types.Transaction, *big.I
 	sponsorCostSum := big.NewInt(0)
 	sponsorCostSumPerSponsor := make(map[common.Address]*big.Int)
 	for _, tx := range list.txs.Flatten() {
-		metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx, pool.chainconfig.IsMetaTxV2(pool.chain.CurrentBlock().Time))
+		metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx,
+			pool.chainconfig.IsMetaTxV2(pool.chain.CurrentBlock().Time), pool.chainconfig.IsMetaTxV3(pool.chain.CurrentBlock().Time))
 		if err != nil {
 			invalidMetaTxs = append(invalidMetaTxs, tx)
 			continue
