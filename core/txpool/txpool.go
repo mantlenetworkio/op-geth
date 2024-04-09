@@ -737,7 +737,7 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 			// Deduct the cost of a transaction replaced by this
 			replCost := repl.Cost()
 			if replL1Cost := pool.l1CostFn(repl.RollupDataGas(), repl.IsDepositTx(), repl.To()); replL1Cost != nil { // add rollup cost
-				replCost = replCost.Add(cost, replL1Cost)
+				replCost = replCost.Add(replCost, replL1Cost)
 			}
 			replMetaTxParams, err := types.DecodeAndVerifyMetaTxParams(repl,
 				pool.chainconfig.IsMetaTxV2(pool.chain.CurrentBlock().Time),
