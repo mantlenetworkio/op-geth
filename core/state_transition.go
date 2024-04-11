@@ -33,7 +33,8 @@ import (
 )
 
 var (
-	BVM_ETH_ADDR = common.HexToAddress("0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111")
+	BVM_ETH_ADDR     = common.HexToAddress("0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111")
+	LEGACY_ERC20_MNT = common.HexToAddress("0xdEAddEaDdeadDEadDEADDEAddEADDEAddead0000")
 )
 
 // ExecutionResult includes all output after executing given evm
@@ -265,15 +266,18 @@ type StateTransition struct {
 	initialGas   uint64
 	state        vm.StateDB
 	evm          *vm.EVM
+
+	initialSponsorValue *big.Int
 }
 
 // NewStateTransition initialises and returns a new state transition object.
 func NewStateTransition(evm *vm.EVM, msg *Message, gp *GasPool) *StateTransition {
 	return &StateTransition{
-		gp:    gp,
-		evm:   evm,
-		msg:   msg,
-		state: evm.StateDB,
+		gp:                  gp,
+		evm:                 evm,
+		msg:                 msg,
+		state:               evm.StateDB,
+		initialSponsorValue: big.NewInt(0),
 	}
 }
 
@@ -342,6 +346,7 @@ func (st *StateTransition) buyGas() (*big.Int, error) {
 	if st.msg.RunMode != GasEstimationWithSkipCheckBalanceMode && st.msg.RunMode != EthcallMode {
 		if st.msg.MetaTxParams != nil {
 			sponsorAmount, selfPayAmount := types.CalculateSponsorPercentAmount(st.msg.MetaTxParams, mgval)
+			st.initialSponsorValue = sponsorAmount
 			st.state.SubBalance(st.msg.MetaTxParams.GasFeeSponsor, sponsorAmount)
 			st.state.SubBalance(st.msg.From, selfPayAmount)
 			log.Debug("BuyGas for metaTx",
@@ -599,10 +604,10 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
 		if !rules.IsLondon {
 			// Before EIP-3529: refunds were capped to gasUsed / 2
-			st.refundGas(params.RefundQuotient, tokenRatio)
+			st.refundGas(params.RefundQuotient, tokenRatio, rules)
 		} else {
 			// After EIP-3529: refunds are capped to gasUsed / 5
-			st.refundGas(params.RefundQuotientEIP3529, tokenRatio)
+			st.refundGas(params.RefundQuotientEIP3529, tokenRatio, rules)
 		}
 	}
 
@@ -646,7 +651,7 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	}, nil
 }
 
-func (st *StateTransition) refundGas(refundQuotient, tokenRatio uint64) {
+func (st *StateTransition) refundGas(refundQuotient, tokenRatio uint64, rules params.Rules) {
 	if st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode || st.msg.RunMode == EthcallMode {
 		st.gasRemaining = st.gasRemaining * tokenRatio
 		st.gp.AddGas(st.gasRemaining)
@@ -666,6 +671,10 @@ func (st *StateTransition) refundGas(refundQuotient, tokenRatio uint64) {
 		sponsorRefundAmount, selfRefundAmount := types.CalculateSponsorPercentAmount(st.msg.MetaTxParams, remaining)
 		st.state.AddBalance(st.msg.MetaTxParams.GasFeeSponsor, sponsorRefundAmount)
 		st.state.AddBalance(st.msg.From, selfRefundAmount)
+		if rules.IsMetaTxV3 {
+			actualSponsorValue := new(big.Int).Sub(st.initialSponsorValue, sponsorRefundAmount)
+			st.generateMetaTxSponsorEvent(st.msg.MetaTxParams.GasFeeSponsor, st.msg.From, actualSponsorValue)
+		}
 		log.Debug("RefundGas for metaTx",
 			"sponsor", st.msg.MetaTxParams.GasFeeSponsor.String(), "refundAmount", sponsorRefundAmount.String(),
 			"user", st.msg.From.String(), "refundAmount", selfRefundAmount.String())
@@ -801,6 +810,25 @@ func (st *StateTransition) generateBVMETHTransferEvent(from, to common.Address, 
 		Address: BVM_ETH_ADDR,
 		Topics:  topics,
 		Data:    data,
+		// This is a non-consensus field, but assigned here because
+		// core/state doesn't know the current block number.
+		BlockNumber: st.evm.Context.BlockNumber.Uint64(),
+	})
+}
+
+func (st *StateTransition) generateMetaTxSponsorEvent(sponsor, txSender common.Address, actualSponsorAmount *big.Int) {
+	// keccak("MetaTxSponsor(address,address,uint256)") = "0xe57e5af44e0b977ac446043abcb6b8958c04a1004c91d7342e2870761b21af95"
+	methodHash := common.HexToHash("0xe57e5af44e0b977ac446043abcb6b8958c04a1004c91d7342e2870761b21af95")
+	topics := make([]common.Hash, 2)
+	topics[0] = methodHash
+	topics[1] = sponsor.Hash()
+	topics[1] = txSender.Hash()
+	//data means the sponsor amount in MetaTxSponsor EVENT.
+	d := common.HexToHash(common.Bytes2Hex(actualSponsorAmount.Bytes())).Bytes()
+	st.evm.StateDB.AddLog(&types.Log{
+		Address: LEGACY_ERC20_MNT,
+		Topics:  topics,
+		Data:    d,
 		// This is a non-consensus field, but assigned here because
 		// core/state doesn't know the current block number.
 		BlockNumber: st.evm.Context.BlockNumber.Uint64(),
