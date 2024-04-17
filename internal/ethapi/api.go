@@ -1335,7 +1335,13 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 			return 0, err
 		}
 
-		if result != nil && !errors.Is(result.Err, vm.ErrOutOfGas) {
+		// If this result.Failed() is not verified, the result will not be nil when
+		// returning normally, but the result.Err will be nil, which will cause the
+		// estimated gas to be 0(return 0, result.Err), thus causing txpool to
+		// report an error: intrinsic gas too low
+		if result != nil && result.Failed() &&
+			!errors.Is(result.Err, vm.ErrOutOfGas) &&
+			!errors.Is(result.Err, vm.ErrCodeStoreOutOfGas) {
 			if len(result.Revert()) > 0 {
 				return 0, newRevertError(result)
 			}
