@@ -1323,6 +1323,17 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		}
 		return result.Failed(), result, nil
 	}
+
+	// When calling across contracts, an opCall call error out of gas will occur. However, this error is not execution reverted,
+	// causing the error and cannot be captured by the call stack. Therefore, when subsequent opcode is executed, opRevert is
+	// triggered because the return value is not the expected value. But if this error is triggered during the bisection process,
+	// it can be tolerated because smaller gas is used in the estimation.
+	//
+	// Therefore, the function of this flag is that as long as estimateGas is successful once during the bisection process, it will
+	// not terminate. The process of bisection and throwing an evm error (drawing on the idea of ​​Ethereum, using the largest balance
+	// to estimate once, if successful, no subsequent judgment errors will be made, if failed, an exception will be thrown directly)
+	var success bool
+
 	// Execute the binary search and hone in on an executable gas limit
 	for lo+1 < hi {
 		mid := (hi + lo) / 2
@@ -1339,7 +1350,9 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		// returning normally, but the result.Err will be nil, which will cause the
 		// estimated gas to be 0(return 0, result.Err), thus causing txpool to
 		// report an error: intrinsic gas too low
-		if result != nil && result.Failed() &&
+		//
+		// It is only necessary to determine the evm error when the estimate is unsuccessful.
+		if !success && result != nil && result.Failed() &&
 			!errors.Is(result.Err, vm.ErrOutOfGas) &&
 			!errors.Is(result.Err, vm.ErrCodeStoreOutOfGas) {
 			if len(result.Revert()) > 0 {
@@ -1351,6 +1364,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		if failed {
 			lo = mid
 		} else {
+			success = true
 			hi = mid
 		}
 	}
