@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	cmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/common/prque"
 	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/core"
@@ -688,7 +689,8 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	// Transactor should have enough funds to cover the costs
 	// cost == V + GP * GL
 	cost := tx.Cost()
-	if l1Cost := pool.l1CostFn(tx.RollupDataGas(), tx.IsDepositTx(), tx.To()); l1Cost != nil { // add rollup cost
+	var l1Cost *big.Int
+	if l1Cost = pool.l1CostFn(tx.RollupDataGas(), tx.IsDepositTx(), tx.To()); l1Cost != nil { // add rollup cost
 		cost = cost.Add(cost, l1Cost)
 	}
 
@@ -731,11 +733,20 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 		sum := new(big.Int).Add(cost, list.totalcost)
 		if repl := list.txs.Get(tx.Nonce()); repl != nil {
 			// Deduct the cost of a transaction replaced by this
-			replL1Cost := repl.Cost()
-			if l1Cost := pool.l1CostFn(tx.RollupDataGas(), tx.IsDepositTx(), tx.To()); l1Cost != nil { // add rollup cost
-				replL1Cost = replL1Cost.Add(cost, l1Cost)
+			replCost := repl.Cost()
+			if replL1Cost := pool.l1CostFn(repl.RollupDataGas(), repl.IsDepositTx(), repl.To()); replL1Cost != nil { // add rollup cost
+				replCost = replCost.Add(cost, replL1Cost)
 			}
-			sum.Sub(sum, replL1Cost)
+			replMetaTxParams, err := types.DecodeAndVerifyMetaTxParams(repl, pool.chainconfig.IsMetaTxV2(pool.chain.CurrentBlock().Time))
+			if err != nil {
+				return err
+			}
+			if replMetaTxParams != nil {
+				replTxGasCost := new(big.Int).Sub(repl.Cost(), repl.Value())
+				sponsorAmount, _ := types.CalculateSponsorPercentAmount(replMetaTxParams, replTxGasCost)
+				replCost = new(big.Int).Sub(replCost, sponsorAmount)
+			}
+			sum.Sub(sum, replCost)
 		}
 		if userBalance.Cmp(sum) < 0 {
 			log.Trace("Replacing transactions would overdraft", "sender", from, "balance", userBalance, "required", sum)
@@ -753,6 +764,36 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	if tx.Gas() < intrGas*tokenRatio {
 		return core.ErrIntrinsicGas
 	}
+
+	gasRemaining := big.NewInt(int64(tx.Gas() - intrGas*tokenRatio))
+	baseFee := pool.chain.CurrentBlock().BaseFee
+
+	if tx.Type() == types.LegacyTxType {
+		if tx.GasPrice().Cmp(baseFee) < 0 {
+			return core.ErrGasPriceTooLow
+		}
+
+		// legacyTxL1Cost gas used to cover L1 Cost for legacy tx
+		legacyTxL1Cost := new(big.Int).Mul(tx.GasPrice(), gasRemaining)
+		if l1Cost != nil && legacyTxL1Cost.Cmp(l1Cost) <= 0 {
+			return core.ErrInsufficientGasForL1Cost
+		}
+	} else if tx.Type() == types.DynamicFeeTxType {
+		// When feecap is smaller than basefee, submission is meaningless.
+		// Report an error quickly instead of getting stuck in txpool.
+		if tx.GasFeeCap().Cmp(baseFee) < 0 { // Consistent with legacy tx verification
+			return fmt.Errorf("%w: address %v, maxFeePerGas: %s baseFee: %s", core.ErrFeeCapTooLow,
+				from.Hex(), tx.GasFeeCap(), baseFee)
+		}
+
+		// dynamicBaseFeeTxL1Cost gas used to cover L1 Cost for dynamic fee tx
+		effectiveGas := cmath.BigMin(new(big.Int).Add(tx.GasTipCap(), baseFee), tx.GasFeeCap())
+		dynamicFeeTxL1Cost := new(big.Int).Mul(effectiveGas, gasRemaining)
+		if l1Cost != nil && dynamicFeeTxL1Cost.Cmp(l1Cost) <= 0 {
+			return core.ErrInsufficientGasForL1Cost
+		}
+	}
+
 	return nil
 }
 
@@ -1508,9 +1549,9 @@ func (pool *TxPool) validateMetaTxList(list *list) ([]*types.Transaction, *big.I
 			sponsorAmountAccumulated = big.NewInt(0)
 		}
 		sponsorAmountAccumulated = big.NewInt(0).Add(sponsorAmountAccumulated, sponsorAmount)
-		sponsorCostSumPerSponsor[metaTxParams.GasFeeSponsor] = sponsorAmountAccumulated
 		if pool.currentState.GetBalance(metaTxParams.GasFeeSponsor).Cmp(sponsorAmountAccumulated) >= 0 {
 			sponsorCostSum = new(big.Int).Add(sponsorCostSum, sponsorAmount)
+			sponsorCostSumPerSponsor[metaTxParams.GasFeeSponsor] = sponsorAmountAccumulated
 		} else {
 			invalidMetaTxs = append(invalidMetaTxs, tx)
 			continue

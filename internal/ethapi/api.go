@@ -1247,8 +1247,14 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		feeCap = gasPriceForEstimateGas
 	}
 
+	if feeCap.Cmp(gasPriceForEstimateGas) < 0 {
+		feeCap = gasPriceForEstimateGas
+	}
+
 	runMode := core.GasEstimationMode
-	if args.GasPrice == nil && args.MaxFeePerGas == nil && args.MaxPriorityFeePerGas == nil {
+	if (args.GasPrice == nil || args.GasPrice.ToInt().Sign() == 0) && // GasPrice is nil or zero AND
+		(args.MaxFeePerGas == nil || args.MaxFeePerGas.ToInt().Sign() == 0) && // MaxFeePerGas is nil or zero AND
+		(args.MaxPriorityFeePerGas == nil || args.MaxPriorityFeePerGas.ToInt().Sign() == 0) { // MaxPriorityFeePerGas is nil or zero
 		runMode = core.GasEstimationWithSkipCheckBalanceMode
 	}
 
@@ -1266,7 +1272,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		}
 
 		available := new(big.Int).Set(balance)
-		if args.Value != nil {
+		if args.Value != nil && args.Value.ToInt().Int64() > 0 {
 			if args.Value.ToInt().Cmp(available) >= 0 {
 				return 0, core.ErrInsufficientFundsForTransfer
 			}
@@ -1286,7 +1292,8 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		allowance := new(big.Int).Div(available, feeCap)
 
 		// If the allowance is larger than maximum uint64, skip checking
-		if allowance.IsUint64() && hi > allowance.Uint64() {
+		// If the runMode is core.GasEstimationWithSkipCheckBalanceMode, skip checking
+		if runMode != core.GasEstimationWithSkipCheckBalanceMode && allowance.IsUint64() && hi > allowance.Uint64() {
 			transfer := args.Value
 			if transfer == nil {
 				transfer = new(hexutil.Big)
@@ -1309,17 +1316,28 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 
 		result, err := DoCall(ctx, b, args, blockNrOrHash, nil, 0, gasCap, runMode, (*hexutil.Big)(gasPriceForEstimateGas))
 		if err != nil {
-			if errors.Is(err, core.ErrIntrinsicGas) {
+			if errors.Is(err, core.ErrIntrinsicGas) || errors.Is(err, core.ErrInsufficientGasForL1Cost) {
 				return true, nil, nil // Special case, raise gas limit
 			}
 			return true, nil, err // Bail out
 		}
 		return result.Failed(), result, nil
 	}
+
+	// When calling across contracts, an opCall call error out of gas will occur. However, this error is not execution reverted,
+	// causing the error and cannot be captured by the call stack. Therefore, when subsequent opcode is executed, opRevert is
+	// triggered because the return value is not the expected value. But if this error is triggered during the bisection process,
+	// it can be tolerated because smaller gas is used in the estimation.
+	//
+	// Therefore, the function of this flag is that as long as estimateGas is successful once during the bisection process, it will
+	// not terminate. The process of bisection and throwing an evm error (drawing on the idea of ​​Ethereum, using the largest balance
+	// to estimate once, if successful, no subsequent judgment errors will be made, if failed, an exception will be thrown directly)
+	var success bool
+
 	// Execute the binary search and hone in on an executable gas limit
 	for lo+1 < hi {
 		mid := (hi + lo) / 2
-		failed, _, err := executable(mid)
+		failed, result, err := executable(mid)
 
 		// If the error is not nil(consensus error), it means the provided message
 		// call or transaction will never be accepted no matter how much gas it is
@@ -1327,9 +1345,26 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		if err != nil {
 			return 0, err
 		}
+
+		// If this result.Failed() is not verified, the result will not be nil when
+		// returning normally, but the result.Err will be nil, which will cause the
+		// estimated gas to be 0(return 0, result.Err), thus causing txpool to
+		// report an error: intrinsic gas too low
+		//
+		// It is only necessary to determine the evm error when the estimate is unsuccessful.
+		if !success && result != nil && result.Failed() &&
+			!errors.Is(result.Err, vm.ErrOutOfGas) &&
+			!errors.Is(result.Err, vm.ErrCodeStoreOutOfGas) {
+			if len(result.Revert()) > 0 {
+				return 0, newRevertError(result)
+			}
+			return 0, result.Err
+		}
+
 		if failed {
 			lo = mid
 		} else {
+			success = true
 			hi = mid
 		}
 	}
@@ -1340,7 +1375,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 			return 0, err
 		}
 		if failed {
-			if result != nil && result.Err != vm.ErrOutOfGas {
+			if result != nil && !errors.Is(result.Err, vm.ErrOutOfGas) {
 				if len(result.Revert()) > 0 {
 					return 0, newRevertError(result)
 				}
