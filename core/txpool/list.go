@@ -290,7 +290,7 @@ func (l *list) Overlaps(tx *types.Transaction) bool {
 //
 // If the new transaction is accepted into the list, the lists' cost and gas
 // thresholds are also potentially updated.
-func (l *list) Add(tx *types.Transaction, priceBump uint64) (bool, *types.Transaction) {
+func (l *list) Add(tx *types.Transaction, priceBump uint64, l1CostFn L1CostFunc, gasFeeUpgrade bool, tokenRatio *big.Int) (bool, *types.Transaction) {
 	// If there's an older better transaction, abort
 	old := l.txs.Get(tx.Nonce())
 	if old != nil {
@@ -316,13 +316,30 @@ func (l *list) Add(tx *types.Transaction, priceBump uint64) (bool, *types.Transa
 		// Old is being replaced, subtract old cost
 		l.subTotalCost([]*types.Transaction{old})
 	}
+
 	// Add new tx cost to totalcost
-	l.totalcost.Add(l.totalcost, tx.Cost())
-	// Otherwise overwrite the old transaction with the current one
-	l.txs.Put(tx)
-	if cost := tx.Cost(); l.costcap.Cmp(cost) < 0 {
-		l.costcap = cost
+	if gasFeeUpgrade {
+		l.totalcost.Add(l.totalcost, tx.L2RatioCost(tokenRatio))
+		if l1CostFn != nil {
+			if l1Cost := l1CostFn(tx.RollupDataGas(), tx.IsDepositTx(), tx.To()); l1Cost != nil { // add rollup cost
+				l.totalcost.Add(l.totalcost, l1Cost)
+			}
+		}
+
+		l.txs.Put(tx)
+		if cost := tx.L2RatioCost(tokenRatio); l.costcap.Cmp(cost) < 0 {
+			l.costcap = cost
+		}
+	} else {
+		l.totalcost.Add(l.totalcost, tx.Cost())
+
+		// Otherwise overwrite the old transaction with the current one
+		l.txs.Put(tx)
+		if cost := tx.Cost(); l.costcap.Cmp(cost) < 0 {
+			l.costcap = cost
+		}
 	}
+
 	if gas := tx.Gas(); l.gascap < gas {
 		l.gascap = gas
 	}

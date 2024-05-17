@@ -82,6 +82,8 @@ var (
 	// than required for l1Cost.
 	ErrInsufficientGasForL1Cost = errors.New("insufficient gas for l1Cost. Please use estimateGas to get gasLimit")
 
+	ErrInsufficientFundsForTxCost = errors.New("insufficient funds for tx cost")
+
 	// ErrTxTypeNotSupported is returned if a transaction is not supported in the
 	// current network configuration.
 	ErrTxTypeNotSupported = types.ErrTxTypeNotSupported

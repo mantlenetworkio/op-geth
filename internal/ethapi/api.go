@@ -1211,18 +1211,20 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 	if args.From == nil {
 		args.From = new(common.Address)
 	}
+
+	block, err := b.BlockByNumberOrHash(ctx, blockNrOrHash)
+	if err != nil {
+		return 0, err
+	}
+
+	if block == nil {
+		return 0, errors.New("block not found")
+	}
+
 	// Determine the highest gas limit can be used during the estimation.
 	if args.Gas != nil && uint64(*args.Gas) >= params.TxGas {
 		hi = uint64(*args.Gas)
 	} else {
-		// Retrieve the block to act as the gas ceiling
-		block, err := b.BlockByNumberOrHash(ctx, blockNrOrHash)
-		if err != nil {
-			return 0, err
-		}
-		if block == nil {
-			return 0, errors.New("block not found")
-		}
 		hi = block.GasLimit()
 	}
 
@@ -1265,6 +1267,8 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 			return 0, err
 		}
 
+		tokenRatio := state.GetState(types.GasOracleAddr, types.TokenRatioSlot).Big()
+
 		balance := state.GetBalance(*args.From) // from can't be nil
 		metaTxParams, err := types.DecodeMetaTxParams(args.data())
 		if err != nil {
@@ -1280,13 +1284,22 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		}
 
 		if metaTxParams != nil {
-			sponsorAmount, _ := types.CalculateSponsorPercentAmount(metaTxParams, new(big.Int).Mul(feeCap, new(big.Int).SetUint64(hi)))
+			gasFee := new(big.Int).Mul(feeCap, new(big.Int).SetUint64(hi))
+			if b.ChainConfig().IsGasFeeUpgrade(block.Time()) {
+				gasFee.Mul(gasFee, tokenRatio)
+			}
+
+			sponsorAmount, _ := types.CalculateSponsorPercentAmount(metaTxParams, gasFee)
 			sponsorBalance := state.GetBalance(metaTxParams.GasFeeSponsor)
 			if sponsorAmount.Cmp(sponsorBalance) < 0 {
 				available.Add(available, sponsorAmount)
 			} else {
 				available.Add(available, sponsorBalance)
 			}
+		}
+
+		if b.ChainConfig().IsGasFeeUpgrade(block.Time()) {
+			available.Div(available, tokenRatio)
 		}
 
 		allowance := new(big.Int).Div(available, feeCap)
@@ -1384,6 +1397,11 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 			// Otherwise, the specified gas cap is too low
 			return 0, fmt.Errorf("gas required exceeds allowance (%d)", cap)
 		}
+	}
+
+	if b.ChainConfig().IsGasFeeUpgrade(block.Time()) {
+		// don't need buffer
+		return hexutil.Uint64(hi), nil
 	}
 	return hexutil.Uint64(hi * gasBuffer / 100), nil
 }

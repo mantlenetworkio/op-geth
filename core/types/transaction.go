@@ -384,6 +384,34 @@ func (tx *Transaction) Cost() *big.Int {
 	return total
 }
 
+// L2RatioCost returns (gas * gasPrice + blobGas * blobGasPrice) * tokenRatio + value.
+func (tx *Transaction) L2RatioCost(tokenRatio *big.Int) *big.Int {
+	total := new(big.Int).Mul(tx.GasPrice(), new(big.Int).SetUint64(tx.Gas()))
+	if tx.Type() == BlobTxType {
+		total.Add(total, new(big.Int).Mul(tx.BlobGasFeeCap(), new(big.Int).SetUint64(tx.BlobGas())))
+	}
+
+	if tokenRatio != nil {
+		total.Mul(total, tokenRatio)
+	}
+
+	total.Add(total, tx.Value())
+	return total
+}
+
+// L2RatioGasCost returns (gas * gasPrice + blobGas * blobGasPrice) * tokenRatio.
+func (tx *Transaction) L2RatioGasCost(tokenRatio *big.Int) *big.Int {
+	total := new(big.Int).Mul(tx.GasPrice(), new(big.Int).SetUint64(tx.Gas()))
+	if tx.Type() == BlobTxType {
+		total.Add(total, new(big.Int).Mul(tx.BlobGasFeeCap(), new(big.Int).SetUint64(tx.BlobGas())))
+	}
+
+	if tokenRatio != nil {
+		total.Mul(total, tokenRatio)
+	}
+	return total
+}
+
 // RollupDataGas is the amount of gas it takes to confirm the tx on L1 as a rollup
 func (tx *Transaction) RollupDataGas() RollupGasData {
 	if tx.Type() == DepositTxType {

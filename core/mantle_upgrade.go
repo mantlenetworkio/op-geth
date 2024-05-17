@@ -12,6 +12,7 @@ var (
 		BaseFeeTime:           u64Ptr(0),
 		BVMETHMintUpgradeTime: u64Ptr(0),
 		MetaTxUpgradeTime:     u64Ptr(0),
+		GasFeeUpgradeTime:     nil, //TODO set upgrade timestamp
 	}
 
 	MantleSepoliaUpgradeConfig = MantleUpgradeChainConfig{
@@ -19,17 +20,20 @@ var (
 		BaseFeeTime:           u64Ptr(1_704_891_600),
 		BVMETHMintUpgradeTime: nil, //TODO set upgrade timestamp
 		MetaTxUpgradeTime:     nil, //TODO set upgrade timestamp
+		GasFeeUpgradeTime:     nil, //TODO set upgrade timestamp
 	}
 	MantleLocalUpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               params.MantleLocalChainId,
 		BaseFeeTime:           u64Ptr(0),
 		BVMETHMintUpgradeTime: u64Ptr(0),
 		MetaTxUpgradeTime:     u64Ptr(0),
+		GasFeeUpgradeTime:     u64Ptr(0), //TODO set upgrade timestamp
 	}
 	MantleDefaultUpgradeConfig = MantleUpgradeChainConfig{
 		BaseFeeTime:           u64Ptr(0),
 		BVMETHMintUpgradeTime: u64Ptr(0),
 		MetaTxUpgradeTime:     u64Ptr(0),
+		GasFeeUpgradeTime:     nil, //TODO set upgrade timestamp
 	}
 )
 
@@ -39,6 +43,7 @@ type MantleUpgradeChainConfig struct {
 	BaseFeeTime           *uint64 `json:"BaseFeeTime"`           // Mantle BaseFee switch time (nil = no fork, 0 = already on mantle baseFee)
 	BVMETHMintUpgradeTime *uint64 `json:"BVMETHMintUpgradeTime"` // BVM_ETH mint upgrade switch time (nil = no fork, 0 = already on)
 	MetaTxUpgradeTime     *uint64 `json:"metaTxUpgradeTime"`     // MetaTxUpgradeBlock identifies the current block height is using metaTx with MetaTxSignDataV2
+	GasFeeUpgradeTime     *uint64 `json:"gasFeeUpgradeTime"`     // Gas fee model restruct, optimize tokenRatio
 }
 
 func GetUpgradeConfigForMantle(chainID *big.Int) *MantleUpgradeChainConfig {

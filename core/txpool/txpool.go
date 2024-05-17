@@ -145,6 +145,8 @@ var (
 	reheapTimer = metrics.NewRegisteredTimer("txpool/reheap", nil)
 )
 
+type L1CostFunc func(dataGas types.RollupGasData, isDepositTx bool, to *common.Address) *big.Int
+
 // TxStatus is the current status of a transaction as seen by the pool.
 type TxStatus uint
 
@@ -269,7 +271,7 @@ type TxPool struct {
 	pendingNonces *noncer        // Pending state tracking virtual nonces
 	currentMaxGas uint64         // Current gas limit for transaction caps
 
-	l1CostFn func(dataGas types.RollupGasData, isDepositTx bool, to *common.Address) *big.Int // Current L1 fee cost function
+	l1CostFn L1CostFunc // Current L1 fee cost function
 
 	locals  *accountSet // Set of local transaction to exempt from eviction rules
 	journal *journal    // Journal of local transaction to back up to disk
@@ -627,7 +629,7 @@ func (pool *TxPool) toJournal() map[common.Address]types.Transactions {
 
 // validateTx checks whether a transaction is valid according to the consensus
 // rules and adheres to some heuristic limits of the local node (price and size).
-func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
+func (pool *TxPool) validateTx(tx *types.Transaction, local, gasFeeUpgrade bool, tokenRatio *big.Int) error {
 	// No unauthenticated deposits allowed in the transaction pool.
 	// This is for spam protection, not consensus,
 	// as the external engine-API user authenticates deposits.
@@ -686,6 +688,11 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	if pool.currentState.GetNonce(from) > tx.Nonce() {
 		return core.ErrNonceTooLow
 	}
+
+	if gasFeeUpgrade {
+		return pool.validateTxWithGasFeeUpgrade(tx, from, tokenRatio)
+	}
+
 	// Transactor should have enough funds to cover the costs
 	// cost == V + GP * GL
 	cost := tx.Cost()
@@ -759,13 +766,13 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	if err != nil {
 		return err
 	}
-	tokenRatio := pool.currentState.GetState(types.GasOracleAddr, types.TokenRatioSlot).Big().Uint64()
+	tokenRatioInt := tokenRatio.Uint64()
 
-	if tx.Gas() < intrGas*tokenRatio {
+	if tx.Gas() < intrGas*tokenRatioInt {
 		return core.ErrIntrinsicGas
 	}
 
-	gasRemaining := big.NewInt(int64(tx.Gas() - intrGas*tokenRatio))
+	gasRemaining := big.NewInt(int64(tx.Gas() - intrGas*tokenRatioInt))
 	baseFee := pool.chain.CurrentBlock().BaseFee
 
 	if tx.Type() == types.LegacyTxType {
@@ -797,6 +804,104 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	return nil
 }
 
+func (pool *TxPool) validateTxWithGasFeeUpgrade(tx *types.Transaction, from common.Address, tokenRatio *big.Int) error {
+	// Transactor should have enough funds to cover the costs
+	// cost == V + GP * GL
+	cost := tx.L2RatioCost(tokenRatio)
+	var l1Cost *big.Int
+	if l1Cost = pool.l1CostFn(tx.RollupDataGas(), tx.IsDepositTx(), tx.To()); l1Cost != nil { // add rollup cost
+		cost = cost.Add(cost, l1Cost)
+	}
+
+	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx, pool.chainconfig.IsMetaTxV2(pool.chain.CurrentBlock().Time))
+	if err != nil {
+		return err
+	}
+	var userBalance *big.Int
+	if metaTxParams != nil {
+		if metaTxParams.ExpireHeight < pool.chain.CurrentBlock().Number.Uint64() {
+			return types.ErrExpiredMetaTx
+		}
+		txGasCost := new(big.Int).Sub(cost, tx.Value())
+		sponsorAmount, selfPayAmount := types.CalculateSponsorPercentAmount(metaTxParams, txGasCost)
+		selfPayAmount = new(big.Int).Add(selfPayAmount, tx.Value())
+
+		sponsorBalance := pool.currentState.GetBalance(metaTxParams.GasFeeSponsor)
+		if sponsorBalance.Cmp(sponsorAmount) < 0 {
+			return types.ErrSponsorBalanceNotEnough
+		}
+		selfBalance := pool.currentState.GetBalance(from)
+		if selfBalance.Cmp(selfPayAmount) < 0 {
+			return core.ErrInsufficientFundsForTxCost
+		}
+		userBalance = new(big.Int).Add(selfBalance, sponsorAmount)
+	} else {
+		userBalance = pool.currentState.GetBalance(from)
+		// Transactor should have enough funds to cover the costs
+		// cost == V + GP * GL
+		if b := userBalance; b.Cmp(cost) < 0 {
+			return core.ErrInsufficientFundsForTxCost
+		}
+	}
+
+	// Verify that replacing transactions will not result in overdraft
+	list := pool.pending[from]
+	if list != nil { // Sender already has pending txs
+		_, sponsorCostSum := pool.validateMetaTxList(list)
+		userBalance = new(big.Int).Add(userBalance, sponsorCostSum)
+		sum := new(big.Int).Add(cost, list.totalcost)
+		if repl := list.txs.Get(tx.Nonce()); repl != nil {
+			// Deduct the cost of a transaction replaced by this
+			replCost := repl.L2RatioCost(tokenRatio)
+			if replL1Cost := pool.l1CostFn(repl.RollupDataGas(), repl.IsDepositTx(), repl.To()); replL1Cost != nil { // add rollup cost
+				replCost = replCost.Add(replCost, replL1Cost)
+			}
+			replMetaTxParams, err := types.DecodeAndVerifyMetaTxParams(repl, pool.chainconfig.IsMetaTxV2(pool.chain.CurrentBlock().Time))
+			if err != nil {
+				return err
+			}
+			if replMetaTxParams != nil {
+				replTxGasCost := new(big.Int).Sub(replCost, repl.Value())
+				sponsorAmount, _ := types.CalculateSponsorPercentAmount(replMetaTxParams, replTxGasCost)
+				replCost = new(big.Int).Sub(replCost, sponsorAmount)
+			}
+
+			sum.Sub(sum, replCost)
+		}
+		if userBalance.Cmp(sum) < 0 {
+			log.Trace("Replacing transactions would overdraft", "sender", from, "balance", userBalance, "required", sum)
+			return ErrOverdraft
+		}
+	}
+
+	// Ensure the transaction has more gas than the basic tx fee.
+	intrGas, err := core.IntrinsicGas(tx.Data(), tx.AccessList(), tx.To() == nil, true, pool.istanbul, pool.shanghai)
+	if err != nil {
+		return err
+	}
+
+	if tx.Gas() < intrGas {
+		return core.ErrIntrinsicGas
+	}
+
+	baseFee := pool.chain.CurrentBlock().BaseFee
+
+	if tx.Type() == types.LegacyTxType {
+		if tx.GasPrice().Cmp(baseFee) < 0 {
+			return core.ErrGasPriceTooLow
+		}
+	} else if tx.Type() == types.DynamicFeeTxType {
+		// When feecap is smaller than basefee, submission is meaningless.
+		// Report an error quickly instead of getting stuck in txpool.
+		if tx.GasFeeCap().Cmp(baseFee) < 0 { // Consistent with legacy tx verification
+			return fmt.Errorf("%w: address %v, maxFeePerGas: %s baseFee: %s", core.ErrFeeCapTooLow,
+				from.Hex(), tx.GasFeeCap(), baseFee)
+		}
+	}
+
+	return nil
+}
+
 // add validates a transaction and inserts it into the non-executable queue for later
 // pending promotion and execution. If the transaction is a replacement for an already
 // pending or queued one, it overwrites the previous transaction if its price is higher.
@@ -816,8 +921,12 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (replaced bool, err e
 	// the sender is marked as local previously, treat it as the local transaction.
 	isLocal := local || pool.locals.containsTx(tx)
 
+	// new gas fee model
+	isGasFeeUpgrade := pool.chainconfig.IsGasFeeUpgrade(pool.chain.CurrentBlock().Time)
+	tokenRatio := pool.currentState.GetState(types.GasOracleAddr, types.TokenRatioSlot).Big()
+
 	// If the transaction fails basic validation, discard it
-	if err := pool.validateTx(tx, isLocal); err != nil {
+	if err := pool.validateTx(tx, isLocal, isGasFeeUpgrade, tokenRatio); err != nil {
 		log.Trace("Discarding invalid transaction", "hash", hash, "err", err)
 		invalidTxMeter.Mark(1)
 		return false, err
@@ -888,7 +997,7 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (replaced bool, err e
 	// Try to replace an existing transaction in the pending pool
 	if list := pool.pending[from]; list != nil && list.Overlaps(tx) {
 		// Nonce already pending, check if required price bump is met
-		inserted, old := list.Add(tx, pool.config.PriceBump)
+		inserted, old := list.Add(tx, pool.config.PriceBump, pool.l1CostFn, isGasFeeUpgrade, tokenRatio)
 		if !inserted {
 			pendingDiscardMeter.Mark(1)
 			return false, ErrReplaceUnderpriced
@@ -952,7 +1061,11 @@ func (pool *TxPool) enqueueTx(hash common.Hash, tx *types.Transaction, local boo
 	if pool.queue[from] == nil {
 		pool.queue[from] = newList(false)
 	}
-	inserted, old := pool.queue[from].Add(tx, pool.config.PriceBump)
+
+	isGasFeeUpgrade := pool.chainconfig.IsGasFeeUpgrade(pool.chain.CurrentBlock().Time)
+	tokenRatio := pool.currentState.GetState(types.GasOracleAddr, types.TokenRatioSlot).Big()
+
+	inserted, old := pool.queue[from].Add(tx, pool.config.PriceBump, pool.l1CostFn, isGasFeeUpgrade, tokenRatio)
 	if !inserted {
 		// An older transaction was better, discard this
 		queuedDiscardMeter.Mark(1)
@@ -1006,7 +1119,10 @@ func (pool *TxPool) promoteTx(addr common.Address, hash common.Hash, tx *types.T
 	}
 	list := pool.pending[addr]
 
-	inserted, old := list.Add(tx, pool.config.PriceBump)
+	isGasFeeUpgrade := pool.chainconfig.IsGasFeeUpgrade(pool.chain.CurrentBlock().Time)
+	tokenRatio := pool.currentState.GetState(types.GasOracleAddr, types.TokenRatioSlot).Big()
+
+	inserted, old := list.Add(tx, pool.config.PriceBump, pool.l1CostFn, isGasFeeUpgrade, tokenRatio)
 	if !inserted {
 		// An older transaction was better, discard this
 		pool.all.Remove(hash)
@@ -1537,11 +1653,23 @@ func (pool *TxPool) validateMetaTxList(list *list) ([]*types.Transaction, *big.I
 			invalidMetaTxs = append(invalidMetaTxs, tx)
 			continue
 		}
-		txGasCost := new(big.Int).Mul(tx.GasPrice(), new(big.Int).SetUint64(tx.Gas()))
-		l1Cost := pool.l1CostFn(tx.RollupDataGas(), tx.IsDepositTx(), tx.To())
-		if l1Cost != nil {
-			txGasCost = new(big.Int).Add(txGasCost, l1Cost) // gas fee sponsor must sponsor additional l1Cost fee
+
+		var txGasCost *big.Int
+		if pool.chainconfig.IsGasFeeUpgrade(pool.chain.CurrentBlock().Time) {
+			tokenRatio := pool.currentState.GetState(types.GasOracleAddr, types.TokenRatioSlot).Big()
+			txGasCost = tx.L2RatioGasCost(tokenRatio)
+			l1Cost := pool.l1CostFn(tx.RollupDataGas(), tx.IsDepositTx(), tx.To())
+			if l1Cost != nil {
+				txGasCost = new(big.Int).Add(txGasCost, l1Cost) // gas fee sponsor must sponsor additional l1Cost fee
+			}
+		} else {
+			txGasCost = new(big.Int).Mul(tx.GasPrice(), new(big.Int).SetUint64(tx.Gas())) // todo: don't need add l1cost
+			l1Cost := pool.l1CostFn(tx.RollupDataGas(), tx.IsDepositTx(), tx.To())
+			if l1Cost != nil {
+				txGasCost = new(big.Int).Add(txGasCost, l1Cost) // gas fee sponsor must sponsor additional l1Cost fee
+			}
 		}
+
 		sponsorAmount, _ := types.CalculateSponsorPercentAmount(metaTxParams, txGasCost)
 		var sponsorAmountAccumulated *big.Int
 		sponsorAmountAccumulated, ok := sponsorCostSumPerSponsor[metaTxParams.GasFeeSponsor]

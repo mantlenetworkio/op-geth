@@ -285,7 +285,7 @@ func (st *StateTransition) to() common.Address {
 	return *st.msg.To
 }
 
-func (st *StateTransition) buyGas() (*big.Int, error) {
+func (st *StateTransition) buyGas(gasFeeUpgrade bool, tokenRatio *big.Int) (*big.Int, error) {
 	if err := st.applyMetaTransaction(); err != nil {
 		return nil, err
 	}
@@ -298,18 +298,36 @@ func (st *StateTransition) buyGas() (*big.Int, error) {
 	if st.evm.Context.L1CostFunc != nil && st.msg.RunMode != EthcallMode {
 		l1Cost = st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupDataGas, st.msg.IsDepositTx, st.msg.To)
 	}
-	if l1Cost != nil && (st.msg.RunMode == GasEstimationMode || st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode) {
-		mgval = mgval.Add(mgval, l1Cost)
+
+	if gasFeeUpgrade {
+		mgval = mgval.Mul(mgval, tokenRatio)
+		if st.msg.RunMode == CommitMode {
+			mgval = mgval.Add(mgval, l1Cost)
+		}
+	} else {
+		if l1Cost != nil && (st.msg.RunMode == GasEstimationMode || st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode) {
+			mgval = mgval.Add(mgval, l1Cost)
+		}
 	}
+
 	balanceCheck := new(big.Int).Set(mgval)
 	if st.msg.GasFeeCap != nil {
 		balanceCheck.SetUint64(st.msg.GasLimit)
-		balanceCheck = balanceCheck.Mul(balanceCheck, st.msg.GasFeeCap)
-		balanceCheck.Add(balanceCheck, st.msg.Value)
-		if l1Cost != nil && st.msg.RunMode == GasEstimationMode {
-			balanceCheck.Add(balanceCheck, l1Cost)
+		balanceCheck.Mul(balanceCheck, st.msg.GasFeeCap)
+		if gasFeeUpgrade {
+			balanceCheck.Mul(balanceCheck, tokenRatio)
+			balanceCheck.Add(balanceCheck, st.msg.Value)
+			if l1Cost != nil {
+				balanceCheck.Add(balanceCheck, l1Cost)
+			}
+		} else {
+			balanceCheck.Add(balanceCheck, st.msg.Value)
+			if l1Cost != nil && st.msg.RunMode == GasEstimationMode {
+				balanceCheck.Add(balanceCheck, l1Cost)
+			}
 		}
 	}
+
 	if st.msg.RunMode != GasEstimationWithSkipCheckBalanceMode && st.msg.RunMode != EthcallMode {
 		if st.msg.MetaTxParams != nil {
 			pureGasFeeValue := new(big.Int).Sub(balanceCheck, st.msg.Value)
@@ -361,7 +379,7 @@ func (st *StateTransition) applyMetaTransaction() error {
 	return nil
 }
 
-func (st *StateTransition) preCheck() (*big.Int, error) {
+func (st *StateTransition) preCheck(gasFeeUpgrade bool, tokenRatio *big.Int) (*big.Int, error) {
 	if st.msg.IsDepositTx {
 		// No fee fields to check, no nonce to check, and no need to check if EOA (L1 already verified it for us)
 		// Gas is free, but no refunds!
@@ -427,7 +445,7 @@ func (st *StateTransition) preCheck() (*big.Int, error) {
 			}
 		}
 	}
-	return st.buyGas()
+	return st.buyGas(gasFeeUpgrade, tokenRatio)
 }
 
 // TransitionDb will transition the state by applying the current message and
@@ -499,8 +517,8 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	// 6. caller has enough balance to cover asset transfer for **topmost** call
 
 	// Check clauses 1-3, buy gas if everything is correct
-	tokenRatio := st.state.GetState(types.GasOracleAddr, types.TokenRatioSlot).Big().Uint64()
-	l1Cost, err := st.preCheck()
+	tokenRatio := st.state.GetState(types.GasOracleAddr, types.TokenRatioSlot).Big()
+	l1Cost, err := st.preCheck(rules.IsGasFeeUpgrade, tokenRatio)
 	if err != nil {
 		return nil, err
 	}
@@ -524,8 +542,9 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 		return nil, err
 	}
 
-	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
-		gas = gas * tokenRatio
+	tokenRatioInt := tokenRatio.Uint64()
+	if !rules.IsGasFeeUpgrade && !st.msg.IsDepositTx && !st.msg.IsSystemTx {
+		gas = gas * tokenRatioInt
 	}
 	if st.gasRemaining < gas {
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, gas)
@@ -533,7 +552,7 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	st.gasRemaining -= gas
 
 	var l1Gas uint64
-	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
+	if !rules.IsGasFeeUpgrade && !st.msg.IsDepositTx && !st.msg.IsSystemTx {
 		if st.msg.GasPrice.Cmp(common.Big0) > 0 && l1Cost != nil {
 			l1Gas = new(big.Int).Div(l1Cost, st.msg.GasPrice).Uint64()
 		}
@@ -541,8 +560,8 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 			return nil, fmt.Errorf("%w: have %d, want %d", ErrInsufficientGasForL1Cost, st.gasRemaining, l1Gas)
 		}
 		st.gasRemaining -= l1Gas
-		if tokenRatio > 0 {
-			st.gasRemaining = st.gasRemaining / tokenRatio
+		if tokenRatioInt > 0 {
+			st.gasRemaining = st.gasRemaining / tokenRatioInt
 		}
 	}
 
@@ -594,10 +613,10 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
 		if !rules.IsLondon {
 			// Before EIP-3529: refunds were capped to gasUsed / 2
-			st.refundGas(params.RefundQuotient, tokenRatio)
+			st.refundGas(params.RefundQuotient, tokenRatioInt, rules.IsGasFeeUpgrade)
 		} else {
 			// After EIP-3529: refunds are capped to gasUsed / 5
-			st.refundGas(params.RefundQuotientEIP3529, tokenRatio)
+			st.refundGas(params.RefundQuotientEIP3529, tokenRatioInt, rules.IsGasFeeUpgrade)
 		}
 	}
 
@@ -621,13 +640,20 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	} else {
 		fee := new(big.Int).SetUint64(st.gasUsed())
 		fee.Mul(fee, effectiveTip)
+		if rules.IsGasFeeUpgrade {
+			fee.Mul(fee, tokenRatio)
+		}
 		st.state.AddBalance(st.evm.Context.Coinbase, fee)
 	}
 
 	// Check that we are post bedrock to enable op-geth to be able to create pseudo pre-bedrock blocks (these are pre-bedrock, but don't follow l2 geth rules)
 	// Note optimismConfig will not be nil if rules.IsOptimismBedrock is true
 	if optimismConfig := st.evm.ChainConfig().Optimism; optimismConfig != nil && rules.IsOptimismBedrock {
-		st.state.AddBalance(params.OptimismBaseFeeRecipient, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.evm.Context.BaseFee))
+		gasFee := new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.evm.Context.BaseFee)
+		if rules.IsGasFeeUpgrade {
+			gasFee.Mul(gasFee, tokenRatio)
+		}
+		st.state.AddBalance(params.OptimismBaseFeeRecipient, gasFee)
 		// Can not collect l1 fee here again, all l1 fee has been collected by CoinBase & OptimismBaseFeeRecipient
 		//if cost := st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupDataGas, st.msg.IsDepositTx); cost != nil {
 		//	st.state.AddBalance(params.OptimismL1FeeRecipient, cost)
@@ -641,9 +667,11 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	}, nil
 }
 
-func (st *StateTransition) refundGas(refundQuotient, tokenRatio uint64) {
+func (st *StateTransition) refundGas(refundQuotient, tokenRatio uint64, gasFeeUpgrade bool) {
 	if st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode || st.msg.RunMode == EthcallMode {
-		st.gasRemaining = st.gasRemaining * tokenRatio
+		if !gasFeeUpgrade {
+			st.gasRemaining = st.gasRemaining * tokenRatio
+		}
 		st.gp.AddGas(st.gasRemaining)
 		return
 	}
@@ -655,8 +683,15 @@ func (st *StateTransition) refundGas(refundQuotient, tokenRatio uint64) {
 	st.gasRemaining += refund
 
 	// Return MNT for remaining gas, exchanged at the original rate.
-	st.gasRemaining = st.gasRemaining * tokenRatio
-	remaining := new(big.Int).Mul(new(big.Int).SetUint64(st.gasRemaining), st.msg.GasPrice)
+	var remaining *big.Int
+	if !gasFeeUpgrade {
+		st.gasRemaining = st.gasRemaining * tokenRatio
+		remaining = new(big.Int).Mul(new(big.Int).SetUint64(st.gasRemaining), st.msg.GasPrice)
+	} else {
+		remaining = new(big.Int).Mul(new(big.Int).SetUint64(st.gasRemaining), st.msg.GasPrice)
+		remaining.Mul(remaining, new(big.Int).SetUint64(tokenRatio))
+	}
+
 	if st.msg.MetaTxParams != nil {
 		sponsorRefundAmount, selfRefundAmount := types.CalculateSponsorPercentAmount(st.msg.MetaTxParams, remaining)
 		st.state.AddBalance(st.msg.MetaTxParams.GasFeeSponsor, sponsorRefundAmount)
