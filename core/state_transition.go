@@ -224,6 +224,11 @@ func (st *StateTransition) CalculateRollupGasDataFromMessage() {
 	// add a constant to cover sigs(V,R,S) and other data to make sure that the gasLimit from eth_estimateGas can cover L1 cost
 	// just used for estimateGas and the actual L1 cost depends on users' tx when executing
 	st.msg.RollupDataGas.Ones += 80
+
+	// add a constant to cover meta tx sigs(V,R,S)
+	if st.msg.MetaTxParams != nil {
+		st.msg.RollupDataGas.Ones += 80
+	}
 }
 
 // ApplyMessage computes the new state by applying the given message
@@ -289,10 +294,13 @@ func (st *StateTransition) to() common.Address {
 	return *st.msg.To
 }
 
-func (st *StateTransition) buyGas() (*big.Int, error) {
-	if err := st.applyMetaTransaction(); err != nil {
-		return nil, err
+func (st *StateTransition) buyGas(metaTxV3 bool) (*big.Int, error) {
+	if !metaTxV3 {
+		if err := st.applyMetaTransaction(); err != nil {
+			return nil, err
+		}
 	}
+
 	mgval := new(big.Int).SetUint64(st.msg.GasLimit)
 	mgval = mgval.Mul(mgval, st.msg.GasPrice)
 	var l1Cost *big.Int
@@ -371,7 +379,7 @@ func (st *StateTransition) applyMetaTransaction() error {
 	return nil
 }
 
-func (st *StateTransition) preCheck() (*big.Int, error) {
+func (st *StateTransition) preCheck(metaTxV3 bool) (*big.Int, error) {
 	if st.msg.IsDepositTx {
 		// No fee fields to check, no nonce to check, and no need to check if EOA (L1 already verified it for us)
 		// Gas is free, but no refunds!
@@ -437,7 +445,7 @@ func (st *StateTransition) preCheck() (*big.Int, error) {
 			}
 		}
 	}
-	return st.buyGas()
+	return st.buyGas(metaTxV3)
 }
 
 // TransitionDb will transition the state by applying the current message and
@@ -510,7 +518,7 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 
 	// Check clauses 1-3, buy gas if everything is correct
 	tokenRatio := st.state.GetState(types.GasOracleAddr, types.TokenRatioSlot).Big().Uint64()
-	l1Cost, err := st.preCheck()
+	l1Cost, err := st.preCheck(rules.IsMetaTxV3)
 	if err != nil {
 		return nil, err
 	}
@@ -532,6 +540,13 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	gas, err := IntrinsicGas(msg.Data, msg.AccessList, contractCreation, rules.IsHomestead, rules.IsIstanbul, rules.IsShanghai)
 	if err != nil {
 		return nil, err
+	}
+
+	// after calculate intrinsic gas, apply meta tx data
+	if rules.IsMetaTxV3 {
+		if err := st.applyMetaTransaction(); err != nil {
+			return nil, err
+		}
 	}
 
 	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
