@@ -44,9 +44,10 @@ var (
 	BaseGoerliRegolithTime = uint64(1682614800)
 
 	// Mantle chain_id
-	MantleMainnetChainId = big.NewInt(5000)
-	MantleSepoliaChainId = big.NewInt(5003)
-	MantleLocalChainId   = big.NewInt(17)
+	MantleMainnetChainId    = big.NewInt(5000)
+	MantleSepoliaChainId    = big.NewInt(5003)
+	MantleSepoliaQA9ChainId = big.NewInt(5003009)
+	MantleLocalChainId      = big.NewInt(17)
 )
 
 // TrustedCheckpoints associates each known checkpoint with the genesis hash of

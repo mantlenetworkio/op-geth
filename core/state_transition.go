@@ -357,7 +357,7 @@ func (st *StateTransition) buyGas(metaTxV3 bool) (*big.Int, error) {
 			st.initialSponsorValue = sponsorAmount
 			st.state.SubBalance(st.msg.MetaTxParams.GasFeeSponsor, sponsorAmount)
 			st.state.SubBalance(st.msg.From, selfPayAmount)
-			log.Debug("BuyGas for metaTx",
+			log.Debug("BuyGas for metaTx", "v3", metaTxV3,
 				"sponsor", st.msg.MetaTxParams.GasFeeSponsor.String(), "amount", sponsorAmount.String(),
 				"user", st.msg.From.String(), "amount", selfPayAmount.String())
 		} else {
