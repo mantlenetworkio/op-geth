@@ -834,10 +834,10 @@ func (st *StateTransition) generateBVMETHTransferEvent(from, to common.Address, 
 func (st *StateTransition) generateMetaTxSponsorEvent(sponsor, txSender common.Address, actualSponsorAmount *big.Int) {
 	// keccak("MetaTxSponsor(address,address,uint256)") = "0xe57e5af44e0b977ac446043abcb6b8958c04a1004c91d7342e2870761b21af95"
 	methodHash := common.HexToHash("0xe57e5af44e0b977ac446043abcb6b8958c04a1004c91d7342e2870761b21af95")
-	topics := make([]common.Hash, 2)
+	topics := make([]common.Hash, 3)
 	topics[0] = methodHash
 	topics[1] = sponsor.Hash()
-	topics[1] = txSender.Hash()
+	topics[2] = txSender.Hash()
 	//data means the sponsor amount in MetaTxSponsor EVENT.
 	d := common.HexToHash(common.Bytes2Hex(actualSponsorAmount.Bytes())).Bytes()
 	st.evm.StateDB.AddLog(&types.Log{
