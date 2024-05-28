@@ -105,7 +105,7 @@ func DecodeMetaTxParams(txData []byte) (*MetaTxParams, error) {
 	return &metaTxParams, nil
 }
 
-func DecodeAndVerifyMetaTxParams(tx *Transaction, isMetaTxV1Upgraded, isMetaTxV2Upgraded bool) (*MetaTxParams, error) {
+func DecodeAndVerifyMetaTxParams(tx *Transaction, isMetaTxV2, isMetaTxV3 bool) (*MetaTxParams, error) {
 	if tx.Type() != DynamicFeeTxType {
 		return nil, nil
 	}
@@ -129,11 +129,11 @@ func DecodeAndVerifyMetaTxParams(tx *Transaction, isMetaTxV1Upgraded, isMetaTxV2
 		return nil, nil
 	}
 
-	if err = checkSponsorSignature(tx, metaTxParams, isMetaTxV1Upgraded); err != nil {
+	if err = checkSponsorSignature(tx, metaTxParams, isMetaTxV2); err != nil {
 		return nil, err
 	}
 
-	if isMetaTxV2Upgraded {
+	if isMetaTxV3 {
 		txSender, err := Sender(LatestSignerForChainID(tx.ChainId()), tx)
 		if err != nil {
 			return nil, err
@@ -150,7 +150,7 @@ func DecodeAndVerifyMetaTxParams(tx *Transaction, isMetaTxV1Upgraded, isMetaTxV2
 	return metaTxParams, nil
 }
 
-func checkSponsorSignature(tx *Transaction, metaTxParams *MetaTxParams, isMetaTxUpgraded bool) error {
+func checkSponsorSignature(tx *Transaction, metaTxParams *MetaTxParams, isMetaTxV2 bool) error {
 	var (
 		txSender, gasFeeSponsorSigner common.Address
 		err                           error
@@ -161,7 +161,7 @@ func checkSponsorSignature(tx *Transaction, metaTxParams *MetaTxParams, isMetaTx
 		return err
 	}
 
-	if isMetaTxUpgraded {
+	if isMetaTxV2 {
 		metaTxSignData := &MetaTxSignDataV2{
 			From:           txSender,
 			ChainID:        tx.ChainId(),
