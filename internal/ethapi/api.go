@@ -1279,17 +1279,24 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 			available.Sub(available, args.Value.ToInt())
 		}
 
+		allowance := new(big.Int).Div(available, feeCap)
+
 		if metaTxParams != nil {
-			sponsorAmount, _ := types.CalculateSponsorPercentAmount(metaTxParams, new(big.Int).Mul(feeCap, new(big.Int).SetUint64(hi)))
 			sponsorBalance := state.GetBalance(metaTxParams.GasFeeSponsor)
-			if sponsorAmount.Cmp(sponsorBalance) < 0 {
-				available.Add(available, sponsorAmount)
+			sponsorAllowance := new(big.Int).Div(sponsorBalance, feeCap)
+			if metaTxParams.SponsorPercent == types.OneHundredPercent {
+				allowance = sponsorAllowance
 			} else {
-				available.Add(available, sponsorBalance)
+				// calculate sponsor & from allowance with sponsorPercent, use min value as allowance
+				fromAllowanceWithSponsorPercent := calculateGasAllowanceWithSponsorPercent(allowance, types.OneHundredPercent-metaTxParams.SponsorPercent)
+				sponsorAllowanceWithSponsorPercent := calculateGasAllowanceWithSponsorPercent(sponsorAllowance, metaTxParams.SponsorPercent)
+				if sponsorAllowanceWithSponsorPercent.Cmp(fromAllowanceWithSponsorPercent) < 0 {
+					allowance = sponsorAllowanceWithSponsorPercent
+				} else {
+					allowance = fromAllowanceWithSponsorPercent
+				}
 			}
 		}
-
-		allowance := new(big.Int).Div(available, feeCap)
 
 		// If the allowance is larger than maximum uint64, skip checking
 		// If the runMode is core.GasEstimationWithSkipCheckBalanceMode, skip checking
@@ -1386,6 +1393,12 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		}
 	}
 	return hexutil.Uint64(hi * gasBuffer / 100), nil
+}
+
+func calculateGasAllowanceWithSponsorPercent(allowance *big.Int, sponsorPercent uint64) *big.Int {
+	allowance.Div(allowance, big.NewInt(0).SetUint64(sponsorPercent))
+	allowance.Mul(allowance, big.NewInt(0).SetUint64(types.OneHundredPercent))
+	return allowance
 }
 
 func calculateGasWithAllowance(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, gasPriceForEstimate *big.Int, gasCap uint64) (uint64, error) {
