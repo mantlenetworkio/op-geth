@@ -1290,11 +1290,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 				// calculate sponsor & from allowance with sponsorPercent, use min value as allowance
 				fromAllowanceWithSponsorPercent := calculateGasAllowanceWithSponsorPercent(allowance, types.OneHundredPercent-metaTxParams.SponsorPercent)
 				sponsorAllowanceWithSponsorPercent := calculateGasAllowanceWithSponsorPercent(sponsorAllowance, metaTxParams.SponsorPercent)
-				if sponsorAllowanceWithSponsorPercent.Cmp(fromAllowanceWithSponsorPercent) < 0 {
-					allowance = sponsorAllowanceWithSponsorPercent
-				} else {
-					allowance = fromAllowanceWithSponsorPercent
-				}
+				allowance = math.BigMin(sponsorAllowanceWithSponsorPercent, fromAllowanceWithSponsorPercent)
 			}
 		}
 
