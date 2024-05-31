@@ -258,8 +258,12 @@ func (args *TransactionArgs) ToMessage(globalGasCap uint64, baseFee *big.Int, ru
 
 	// use suggested gasPrice for estimateGas to calculate gasUsed
 	if runMode == core.GasEstimationMode || runMode == core.GasEstimationWithSkipCheckBalanceMode {
+		// user don't set price, set all price to min value
 		if gasPrice.BitLen() == 0 && gasFeeCap.BitLen() == 0 && gasTipCap.BitLen() == 0 {
 			gasPrice, gasFeeCap, gasTipCap = gasPriceForEstimate.ToInt(), gasPriceForEstimate.ToInt(), gasPriceForEstimate.ToInt()
+		} else if args.GasPrice == nil {
+			// eip1559 tx, use min value as gas price
+			gasPrice = gasPriceForEstimate.ToInt()
 		}
 	}
 

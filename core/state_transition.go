@@ -310,17 +310,12 @@ func (st *StateTransition) buyGas(metaTxV3 bool) (*big.Int, error) {
 	if st.evm.Context.L1CostFunc != nil && st.msg.RunMode != EthcallMode {
 		l1Cost = st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupDataGas, st.msg.IsDepositTx, st.msg.To)
 	}
-	if l1Cost != nil && (st.msg.RunMode == GasEstimationMode || st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode) {
-		mgval = mgval.Add(mgval, l1Cost)
-	}
+
 	balanceCheck := new(big.Int).Set(mgval)
 	if st.msg.GasFeeCap != nil {
 		balanceCheck.SetUint64(st.msg.GasLimit)
 		balanceCheck = balanceCheck.Mul(balanceCheck, st.msg.GasFeeCap)
 		balanceCheck.Add(balanceCheck, st.msg.Value)
-		if l1Cost != nil && st.msg.RunMode == GasEstimationMode {
-			balanceCheck.Add(balanceCheck, l1Cost)
-		}
 	}
 	if st.msg.RunMode != GasEstimationWithSkipCheckBalanceMode && st.msg.RunMode != EthcallMode {
 		if st.msg.MetaTxParams != nil {
