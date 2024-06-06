@@ -22,6 +22,13 @@ var (
 		MetaTxV2UpgradeTime:   nil, //TODO set upgrade timestamp
 		MetaTxV3UpgradeTime:   nil, //TODO set upgrade timestamp
 	}
+	MantleSepoliaQA3UpgradeConfig = MantleUpgradeChainConfig{
+		ChainID:               params.MantleSepoliaQA3ChainId,
+		BaseFeeTime:           u64Ptr(0),
+		BVMETHMintUpgradeTime: u64Ptr(0),
+		MetaTxV2UpgradeTime:   u64Ptr(0),
+		MetaTxV3UpgradeTime:   u64Ptr(1717689600),
+	}
 	MantleSepoliaQA9UpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               params.MantleSepoliaQA9ChainId,
 		BaseFeeTime:           u64Ptr(0),
@@ -62,6 +69,8 @@ func GetUpgradeConfigForMantle(chainID *big.Int) *MantleUpgradeChainConfig {
 		return &MantleMainnetUpgradeConfig
 	case params.MantleSepoliaChainId.Int64():
 		return &MantleSepoliaUpgradeConfig
+	case params.MantleSepoliaQA3ChainId.Int64():
+		return &MantleSepoliaQA3UpgradeConfig
 	case params.MantleSepoliaQA9ChainId.Int64():
 		return &MantleSepoliaQA9UpgradeConfig
 	case params.MantleLocalChainId.Int64():
