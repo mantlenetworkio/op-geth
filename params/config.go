@@ -44,9 +44,11 @@ var (
 	BaseGoerliRegolithTime = uint64(1682614800)
 
 	// Mantle chain_id
-	MantleMainnetChainId = big.NewInt(5000)
-	MantleSepoliaChainId = big.NewInt(5003)
-	MantleLocalChainId   = big.NewInt(17)
+	MantleMainnetChainId    = big.NewInt(5000)
+	MantleSepoliaChainId    = big.NewInt(5003)
+	MantleSepoliaQA3ChainId = big.NewInt(5003003)
+	MantleSepoliaQA9ChainId = big.NewInt(5003009)
+	MantleLocalChainId      = big.NewInt(17)
 )
 
 // TrustedCheckpoints associates each known checkpoint with the genesis hash of
@@ -462,7 +464,8 @@ type ChainConfig struct {
 	BVMETHMintUpgradeTime *uint64 `json:"bvmETHMintUpgradeTime,omitempty"` // BVM_ETH mint upgrade switch time (nil = no fork, 0 = already on)
 
 	// MetaTx upgrade config
-	MetaTxUpgradeTime *uint64 `json:"metaTxUpgradeTime,omitempty"` // MetaTxUpgradeTime switch time ( nil = no fork, 0 = already forked)
+	MetaTxV2UpgradeTime *uint64 `json:"metaTxV2UpgradeTime,omitempty"` // MetaTxV2UpgradeTime switch time ( nil = no fork, 0 = already forked)
+	MetaTxV3UpgradeTime *uint64 `json:"metaTxV3UpgradeTime,omitempty"` // MetaTxV3UpgradeTime switch time ( nil = no fork, 0 = already forked)
 
 	// Fork scheduling was switched from blocks to timestamps here
 
@@ -688,7 +691,12 @@ func (c *ChainConfig) IsMantleBVMETHMintUpgrade(time uint64) bool {
 
 // IsMetaTxV2 returns whether time is either equal to the MetaTx fork time or greater.
 func (c *ChainConfig) IsMetaTxV2(time uint64) bool {
-	return isTimestampForked(c.MetaTxUpgradeTime, time)
+	return isTimestampForked(c.MetaTxV2UpgradeTime, time)
+}
+
+// IsMetaTxV3 returns whether time is either equal to the MetaTx fork time or greater.
+func (c *ChainConfig) IsMetaTxV3(time uint64) bool {
+	return isTimestampForked(c.MetaTxV3UpgradeTime, time)
 }
 
 // IsArrowGlacier returns whether num is either equal to the Arrow Glacier (EIP-4345) fork block or greater.
@@ -1062,7 +1070,7 @@ type Rules struct {
 	IsMerge, IsShanghai, isCancun, isPrague                 bool
 	IsMantleBaseFee, IsMantleBVMETHMintUpgrade              bool
 	IsOptimismBedrock, IsOptimismRegolith                   bool
-	IsMetaTxV2                                              bool
+	IsMetaTxV2, IsMetaTxV3                                  bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -1090,6 +1098,7 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		isCancun:                  c.IsCancun(timestamp),
 		isPrague:                  c.IsPrague(timestamp),
 		IsMetaTxV2:                c.IsMetaTxV2(timestamp),
+		IsMetaTxV3:                c.IsMetaTxV3(timestamp),
 		// Optimism
 		IsOptimismBedrock:  c.IsOptimismBedrock(num),
 		IsOptimismRegolith: c.IsOptimismRegolith(timestamp),

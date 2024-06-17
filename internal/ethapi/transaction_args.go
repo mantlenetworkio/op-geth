@@ -258,27 +258,12 @@ func (args *TransactionArgs) ToMessage(globalGasCap uint64, baseFee *big.Int, ru
 
 	// use suggested gasPrice for estimateGas to calculate gasUsed
 	if runMode == core.GasEstimationMode || runMode == core.GasEstimationWithSkipCheckBalanceMode {
-		// use default gasPrice if user does not set gasPrice or gasPrice is 0
-		if args.GasPrice == nil || gasPrice.Cmp(common.Big0) == 0 {
+		// user don't set price, set all price to min value
+		if gasPrice.BitLen() == 0 && gasFeeCap.BitLen() == 0 && gasTipCap.BitLen() == 0 {
+			gasPrice, gasFeeCap, gasTipCap = gasPriceForEstimate.ToInt(), gasPriceForEstimate.ToInt(), gasPriceForEstimate.ToInt()
+		} else if args.GasPrice == nil {
+			// eip1559 tx, use min value as gas price
 			gasPrice = gasPriceForEstimate.ToInt()
-		}
-		// use gasTipCap to set gasFeeCap
-		if args.MaxFeePerGas == nil && args.MaxPriorityFeePerGas != nil {
-			gasFeeCap = args.MaxPriorityFeePerGas.ToInt()
-		}
-		// use gasFeeCap to set gasTipCap
-		if args.MaxPriorityFeePerGas == nil && args.MaxFeePerGas != nil {
-			gasTipCap = args.MaxFeePerGas.ToInt()
-		}
-		// use default gasPrice to set gasFeeCap & gasTipCap if user set gasPrice
-		if args.GasPrice != nil {
-			gasFeeCap = gasPrice
-			gasTipCap = gasPrice
-		}
-		// use default gasPrice to set gasFeeCap & gasTipCap if user does not set any value
-		if args.MaxFeePerGas == nil && args.MaxPriorityFeePerGas == nil && args.GasPrice == nil {
-			gasFeeCap = gasPriceForEstimate.ToInt()
-			gasTipCap = gasPriceForEstimate.ToInt()
 		}
 	}
 
