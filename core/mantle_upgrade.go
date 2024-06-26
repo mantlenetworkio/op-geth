@@ -32,9 +32,9 @@ var (
 	MantleSepoliaQA6UpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               params.MantleSepoliaQA6ChainId,
 		BaseFeeTime:           u64Ptr(0),
-		BVMETHMintUpgradeTime: u64Ptr(1719475200),
-		MetaTxV2UpgradeTime:   u64Ptr(1719475200),
-		MetaTxV3UpgradeTime:   u64Ptr(1719475200),
+		BVMETHMintUpgradeTime: u64Ptr(1719558000),
+		MetaTxV2UpgradeTime:   u64Ptr(1719558000),
+		MetaTxV3UpgradeTime:   u64Ptr(1719558000),
 	}
 	MantleSepoliaQA9UpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               params.MantleSepoliaQA9ChainId,
