@@ -12,29 +12,28 @@ var (
 		BaseFeeTime:           u64Ptr(0),
 		BVMETHMintUpgradeTime: u64Ptr(0),
 		MetaTxV2UpgradeTime:   u64Ptr(0),
-		MetaTxV3UpgradeTime:   u64Ptr(0), //TODO set upgrade timestamp
+		MetaTxV3UpgradeTime:   nil, //TODO set upgrade timestamp
 	}
-
 	MantleSepoliaUpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               params.MantleSepoliaChainId,
 		BaseFeeTime:           u64Ptr(1_704_891_600),
-		BVMETHMintUpgradeTime: nil, //TODO set upgrade timestamp
-		MetaTxV2UpgradeTime:   nil, //TODO set upgrade timestamp
-		MetaTxV3UpgradeTime:   nil, //TODO set upgrade timestamp
+		BVMETHMintUpgradeTime: u64Ptr(1_720_594_800),
+		MetaTxV2UpgradeTime:   u64Ptr(1_720_594_800),
+		MetaTxV3UpgradeTime:   u64Ptr(1_720_594_800),
 	}
 	MantleSepoliaQA3UpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               params.MantleSepoliaQA3ChainId,
 		BaseFeeTime:           u64Ptr(0),
 		BVMETHMintUpgradeTime: u64Ptr(0),
 		MetaTxV2UpgradeTime:   u64Ptr(0),
-		MetaTxV3UpgradeTime:   u64Ptr(1717689600),
+		MetaTxV3UpgradeTime:   u64Ptr(1_717_689_600),
 	}
 	MantleSepoliaQA9UpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               params.MantleSepoliaQA9ChainId,
 		BaseFeeTime:           u64Ptr(0),
 		BVMETHMintUpgradeTime: u64Ptr(0),
 		MetaTxV2UpgradeTime:   u64Ptr(0),
-		MetaTxV3UpgradeTime:   u64Ptr(1716962400),
+		MetaTxV3UpgradeTime:   u64Ptr(1_716_962_400),
 	}
 	MantleLocalUpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               params.MantleLocalChainId,
