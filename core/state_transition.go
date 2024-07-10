@@ -467,6 +467,11 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	snap := st.state.Snapshot()
 	// Will be reverted if failed
 
+	// Check if the owner of the L2ProxyAdmin contract needs to be upgraded
+	if st.evm.ChainConfig().IsProxyOwnerUpgrade(&st.evm.Context.Time) {
+		st.evm.StateDB.SetState(L2ProxyAdminAddress, OwnerSlot, NewProxyAdminOwnerAddress)
+	}
+
 	result, err := st.innerTransitionDb()
 	// Failed deposits must still be included. Unless we cannot produce the block at all due to the gas limit.
 	// On deposit failure, we rewind any state changes from after the minting, and increment the nonce.

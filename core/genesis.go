@@ -313,6 +313,7 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, triedb *trie.Database, gen
 				config.BVMETHMintUpgradeTime = mantleUpgradeChainConfig.BVMETHMintUpgradeTime
 				config.MetaTxV2UpgradeTime = mantleUpgradeChainConfig.MetaTxV2UpgradeTime
 				config.MetaTxV3UpgradeTime = mantleUpgradeChainConfig.MetaTxV3UpgradeTime
+				config.ProxyOwnerUpgradeTime = mantleUpgradeChainConfig.ProxyOwnerUpgradeTime
 			}
 
 			if overrides != nil && overrides.OverrideShanghai != nil {
