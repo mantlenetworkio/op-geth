@@ -3,7 +3,6 @@ package core
 import (
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -22,7 +21,7 @@ var (
 		BVMETHMintUpgradeTime: u64Ptr(1_720_594_800),
 		MetaTxV2UpgradeTime:   u64Ptr(1_720_594_800),
 		MetaTxV3UpgradeTime:   u64Ptr(1_720_594_800),
-		ProxyOwnerUpgradeTime: u64Ptr(0),
+		ProxyOwnerUpgradeTime: nil,
 	}
 	MantleSepoliaQA3UpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               params.MantleSepoliaQA3ChainId,
@@ -30,7 +29,7 @@ var (
 		BVMETHMintUpgradeTime: u64Ptr(0),
 		MetaTxV2UpgradeTime:   u64Ptr(0),
 		MetaTxV3UpgradeTime:   u64Ptr(1_717_689_600),
-		ProxyOwnerUpgradeTime: u64Ptr(0),
+		ProxyOwnerUpgradeTime: nil,
 	}
 	MantleSepoliaQA9UpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               params.MantleSepoliaQA9ChainId,
@@ -38,7 +37,7 @@ var (
 		BVMETHMintUpgradeTime: u64Ptr(0),
 		MetaTxV2UpgradeTime:   u64Ptr(0),
 		MetaTxV3UpgradeTime:   u64Ptr(1_716_962_400),
-		ProxyOwnerUpgradeTime: u64Ptr(0),
+		ProxyOwnerUpgradeTime: nil,
 	}
 	MantleLocalUpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               params.MantleLocalChainId,
@@ -46,7 +45,7 @@ var (
 		BVMETHMintUpgradeTime: u64Ptr(0),
 		MetaTxV2UpgradeTime:   u64Ptr(0),
 		MetaTxV3UpgradeTime:   u64Ptr(0),
-		ProxyOwnerUpgradeTime: u64Ptr(0),
+		ProxyOwnerUpgradeTime: nil,
 	}
 	MantleDefaultUpgradeConfig = MantleUpgradeChainConfig{
 		BaseFeeTime:           u64Ptr(0),
@@ -55,21 +54,6 @@ var (
 		MetaTxV3UpgradeTime:   nil,
 		ProxyOwnerUpgradeTime: nil,
 	}
-)
-
-// L2ProxyAdmin contract upgrade constants
-var (
-	// L2ProxyAdminAddress is the address of the L2ProxyAdmin contract
-	// predeploy
-	L2ProxyAdminAddress = common.HexToAddress("0x4200000000000000000000000000000000000018")
-
-	// OwnerSlot refers to the storage slot in the L2ProxyAdmin contract that
-	// holds the owner of the contract
-	OwnerSlot = common.BigToHash(big.NewInt(0))
-
-	// NewProxyAdminOwnerAddress is the address that the L2ProxyAdmin contract
-	// will be transferred to
-	NewProxyAdminOwnerAddress = common.HexToHash("0x09734bB3980906Bb217305EA6Bd34256feEAB105")
 )
 
 type MantleUpgradeChainConfig struct {

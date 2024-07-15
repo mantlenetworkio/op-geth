@@ -703,8 +703,8 @@ func (c *ChainConfig) IsMetaTxV3(time uint64) bool {
 }
 
 // IsProxyOwnerUpgrade returns whether time is either equal to the ProxyOwnerUpgrade fork time
-func (c *ChainConfig) IsProxyOwnerUpgrade(time *uint64) bool {
-	return configTimestampEqual(c.ProxyOwnerUpgradeTime, time)
+func (c *ChainConfig) IsProxyOwnerUpgrade(time uint64) bool {
+	return isTimestampEqual(c.ProxyOwnerUpgradeTime, time)
 }
 
 // IsArrowGlacier returns whether num is either equal to the Arrow Glacier (EIP-4345) fork block or greater.
@@ -984,6 +984,14 @@ func isTimestampForked(s *uint64, head uint64) bool {
 		return false
 	}
 	return *s <= head
+}
+
+// isTimestampEqual returns whether it is time to fork.
+func isTimestampEqual(s *uint64, head uint64) bool {
+	if s == nil {
+		return false
+	}
+	return *s == head
 }
 
 func configTimestampEqual(x, y *uint64) bool {
