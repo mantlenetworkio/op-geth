@@ -466,6 +466,7 @@ type ChainConfig struct {
 	// MetaTx upgrade config
 	MetaTxV2UpgradeTime *uint64 `json:"metaTxV2UpgradeTime,omitempty"` // MetaTxV2UpgradeTime switch time ( nil = no fork, 0 = already forked)
 	MetaTxV3UpgradeTime *uint64 `json:"metaTxV3UpgradeTime,omitempty"` // MetaTxV3UpgradeTime switch time ( nil = no fork, 0 = already forked)
+	MantleEd25519Time   *uint64 `json:"mantleEd25519Time,omitempty"`   // MantleEd25519Time switch time ( nil = no fork, 0 = already forked)
 
 	// Fork scheduling was switched from blocks to timestamps here
 
@@ -697,6 +698,10 @@ func (c *ChainConfig) IsMetaTxV2(time uint64) bool {
 // IsMetaTxV3 returns whether time is either equal to the MetaTx fork time or greater.
 func (c *ChainConfig) IsMetaTxV3(time uint64) bool {
 	return isTimestampForked(c.MetaTxV3UpgradeTime, time)
+}
+
+func (c *ChainConfig) IsMantleEd25519(time uint64) bool {
+	return isTimestampForked(c.MantleEd25519Time, time)
 }
 
 // IsArrowGlacier returns whether num is either equal to the Arrow Glacier (EIP-4345) fork block or greater.
@@ -1070,7 +1075,7 @@ type Rules struct {
 	IsMerge, IsShanghai, isCancun, isPrague                 bool
 	IsMantleBaseFee, IsMantleBVMETHMintUpgrade              bool
 	IsOptimismBedrock, IsOptimismRegolith                   bool
-	IsMetaTxV2, IsMetaTxV3                                  bool
+	IsMetaTxV2, IsMetaTxV3, IsMantleEd25519                 bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -1099,6 +1104,7 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		isPrague:                  c.IsPrague(timestamp),
 		IsMetaTxV2:                c.IsMetaTxV2(timestamp),
 		IsMetaTxV3:                c.IsMetaTxV3(timestamp),
+		IsMantleEd25519:           c.IsMantleEd25519(timestamp),
 		// Optimism
 		IsOptimismBedrock:  c.IsOptimismBedrock(num),
 		IsOptimismRegolith: c.IsOptimismRegolith(timestamp),

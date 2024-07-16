@@ -56,6 +56,7 @@ var allPrecompiles = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{7}):    &bn256ScalarMulIstanbul{},
 	common.BytesToAddress([]byte{8}):    &bn256PairingIstanbul{},
 	common.BytesToAddress([]byte{9}):    &blake2F{},
+	common.BytesToAddress([]byte{255}):  &ed25519Verify{},
 	common.BytesToAddress([]byte{10}):   &bls12381G1Add{},
 	common.BytesToAddress([]byte{11}):   &bls12381G1Mul{},
 	common.BytesToAddress([]byte{12}):   &bls12381G1MultiExp{},
@@ -390,4 +391,13 @@ func BenchmarkPrecompiledBLS12381G2MultiExpWorstCase(b *testing.B) {
 		NoBenchmark: false,
 	}
 	benchmarkPrecompiled("0f", testcase, b)
+}
+
+func BenchmarkPrecompiledEd25519Verify(bench *testing.B) {
+	t := precompiledTest{
+		Input:    "a4ee00edc9b11838b19def51822a11c5aee9b10f1e7f59419eee1cf30ce5e81cb82cefef46e4d4205b3ba21ad9fc9a4341bb20d7238bebfb4f9f09ec8a965c0732474b52a4465dc000fae8c00fe118aed572121280673600e9562247cd4ce86cd5937001151a76858782dbb713d5b4586b73607c13cfca5d4a2c6a0abf902f0e",
+		Expected: "0000000000000000000000000000000000000000000000000000000000000001",
+		Name:     "",
+	}
+	benchmarkPrecompiled("ff", t, bench)
 }
