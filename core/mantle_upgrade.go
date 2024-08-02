@@ -13,6 +13,7 @@ var (
 		BVMETHMintUpgradeTime: u64Ptr(0),
 		MetaTxV2UpgradeTime:   u64Ptr(0),
 		MetaTxV3UpgradeTime:   nil, //TODO set upgrade timestamp
+		ProxyOwnerUpgradeTime: nil, //TODO set upgrade timestamp
 	}
 	MantleSepoliaUpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               params.MantleSepoliaChainId,
@@ -20,6 +21,7 @@ var (
 		BVMETHMintUpgradeTime: u64Ptr(1_720_594_800),
 		MetaTxV2UpgradeTime:   u64Ptr(1_720_594_800),
 		MetaTxV3UpgradeTime:   u64Ptr(1_720_594_800),
+		ProxyOwnerUpgradeTime: nil,
 	}
 	MantleSepoliaQA3UpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               params.MantleSepoliaQA3ChainId,
@@ -27,6 +29,7 @@ var (
 		BVMETHMintUpgradeTime: u64Ptr(0),
 		MetaTxV2UpgradeTime:   u64Ptr(0),
 		MetaTxV3UpgradeTime:   u64Ptr(1_717_689_600),
+		ProxyOwnerUpgradeTime: nil,
 	}
 	MantleSepoliaQA9UpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               params.MantleSepoliaQA9ChainId,
@@ -34,6 +37,7 @@ var (
 		BVMETHMintUpgradeTime: u64Ptr(0),
 		MetaTxV2UpgradeTime:   u64Ptr(0),
 		MetaTxV3UpgradeTime:   u64Ptr(1_716_962_400),
+		ProxyOwnerUpgradeTime: nil,
 	}
 	MantleLocalUpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               params.MantleLocalChainId,
@@ -41,12 +45,14 @@ var (
 		BVMETHMintUpgradeTime: u64Ptr(0),
 		MetaTxV2UpgradeTime:   u64Ptr(0),
 		MetaTxV3UpgradeTime:   u64Ptr(0),
+		ProxyOwnerUpgradeTime: nil,
 	}
 	MantleDefaultUpgradeConfig = MantleUpgradeChainConfig{
 		BaseFeeTime:           u64Ptr(0),
 		BVMETHMintUpgradeTime: u64Ptr(0),
 		MetaTxV2UpgradeTime:   u64Ptr(0),
 		MetaTxV3UpgradeTime:   nil,
+		ProxyOwnerUpgradeTime: nil,
 	}
 )
 
@@ -57,6 +63,7 @@ type MantleUpgradeChainConfig struct {
 	BVMETHMintUpgradeTime *uint64 `json:"bvmETHMintUpgradeTime"` // BVM_ETH mint upgrade switch time (nil = no fork, 0 = already on)
 	MetaTxV2UpgradeTime   *uint64 `json:"metaTxV2UpgradeTime"`   // MetaTxV1UpgradeBlock identifies the current block height is using metaTx with MetaTxSignDataV2
 	MetaTxV3UpgradeTime   *uint64 `json:"metaTxV3UpgradeTime"`   // MetaTxV3UpgradeBlock identifies the current block height is ensuring sponsor and sender are not the same
+	ProxyOwnerUpgradeTime *uint64 `json:"proxyOwnerUpgradeTime"` // ProxyOwnerUpgradeBlock identifies the current block time is ensuring the L2ProxyAdmin contract owner is set to NewProxyAdminOwnerAddress
 }
 
 func GetUpgradeConfigForMantle(chainID *big.Int) *MantleUpgradeChainConfig {

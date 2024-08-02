@@ -37,6 +37,21 @@ var (
 	LEGACY_ERC20_MNT = common.HexToAddress("0xdEAddEaDdeadDEadDEADDEAddEADDEAddead0000")
 )
 
+// L2ProxyAdmin contract upgrade constants
+var (
+	// L2ProxyAdminAddress is the address of the L2ProxyAdmin contract
+	// predeploy
+	L2ProxyAdminAddress = common.HexToAddress("0x4200000000000000000000000000000000000018")
+
+	// OwnerSlot refers to the storage slot in the L2ProxyAdmin contract that
+	// holds the owner of the contract
+	OwnerSlot = common.BigToHash(big.NewInt(0))
+
+	// NewProxyAdminOwnerAddress is the address that the L2ProxyAdmin contract
+	// will be transferred to
+	NewProxyAdminOwnerAddress = common.HexToHash("0x09734bB3980906Bb217305EA6Bd34256feEAB105")
+)
+
 // ExecutionResult includes all output after executing given evm
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
@@ -466,6 +481,11 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	}
 	snap := st.state.Snapshot()
 	// Will be reverted if failed
+
+	// Check if the owner of the L2ProxyAdmin contract needs to be upgraded
+	if st.evm.ChainConfig().IsProxyOwnerUpgrade(st.evm.Context.Time) {
+		st.evm.StateDB.SetState(L2ProxyAdminAddress, OwnerSlot, NewProxyAdminOwnerAddress)
+	}
 
 	result, err := st.innerTransitionDb()
 	// Failed deposits must still be included. Unless we cannot produce the block at all due to the gas limit.

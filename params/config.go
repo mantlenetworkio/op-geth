@@ -467,6 +467,9 @@ type ChainConfig struct {
 	MetaTxV2UpgradeTime *uint64 `json:"metaTxV2UpgradeTime,omitempty"` // MetaTxV2UpgradeTime switch time ( nil = no fork, 0 = already forked)
 	MetaTxV3UpgradeTime *uint64 `json:"metaTxV3UpgradeTime,omitempty"` // MetaTxV3UpgradeTime switch time ( nil = no fork, 0 = already forked)
 
+	// ProxyOwner upgrade config
+	ProxyOwnerUpgradeTime *uint64 `json:"proxyOwnerUpgradeTime,omitempty"` // ProxyOwnerUpgradeTime switch time ( nil = no fork, 0 = already forked)
+
 	// Fork scheduling was switched from blocks to timestamps here
 
 	ShanghaiTime *uint64 `json:"shanghaiTime,omitempty"` // Shanghai switch time (nil = no fork, 0 = already on shanghai)
@@ -697,6 +700,11 @@ func (c *ChainConfig) IsMetaTxV2(time uint64) bool {
 // IsMetaTxV3 returns whether time is either equal to the MetaTx fork time or greater.
 func (c *ChainConfig) IsMetaTxV3(time uint64) bool {
 	return isTimestampForked(c.MetaTxV3UpgradeTime, time)
+}
+
+// IsProxyOwnerUpgrade returns whether time is either equal to the ProxyOwnerUpgrade fork time
+func (c *ChainConfig) IsProxyOwnerUpgrade(time uint64) bool {
+	return isTimestampEqual(c.ProxyOwnerUpgradeTime, time)
 }
 
 // IsArrowGlacier returns whether num is either equal to the Arrow Glacier (EIP-4345) fork block or greater.
@@ -976,6 +984,14 @@ func isTimestampForked(s *uint64, head uint64) bool {
 		return false
 	}
 	return *s <= head
+}
+
+// isTimestampEqual returns whether it is time to fork.
+func isTimestampEqual(s *uint64, head uint64) bool {
+	if s == nil {
+		return false
+	}
+	return *s == head
 }
 
 func configTimestampEqual(x, y *uint64) bool {
