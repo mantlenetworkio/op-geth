@@ -678,7 +678,7 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	if err != nil {
 		return ErrInvalidSender
 	}
-	// Drop non-local transactions under our own minimal accepted gas price or tip
+
 	if tx.GasTipCapIntCmp(pool.gasPrice) < 0 {
 		return ErrUnderpriced
 	}
@@ -689,10 +689,6 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	// Transactor should have enough funds to cover the costs
 	// cost == V + GP * GL
 	cost := tx.Cost()
-	var l1Cost *big.Int
-	if l1Cost = pool.l1CostFn(tx.RollupDataGas(), tx.IsDepositTx(), tx.To()); l1Cost != nil { // add rollup cost
-		cost = cost.Add(cost, l1Cost)
-	}
 
 	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx,
 		pool.chainconfig.IsMetaTxV2(pool.chain.CurrentBlock().Time),
@@ -734,17 +730,13 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 		userBalance = new(big.Int).Add(userBalance, sponsorCostSum)
 		sum := new(big.Int).Add(cost, list.totalcost)
 		if repl := list.txs.Get(tx.Nonce()); repl != nil {
-			// Deduct the cost of a transaction replaced by this
-			replCost := repl.Cost()
-			if replL1Cost := pool.l1CostFn(repl.RollupDataGas(), repl.IsDepositTx(), repl.To()); replL1Cost != nil { // add rollup cost
-				replCost = replCost.Add(replCost, replL1Cost)
-			}
 			replMetaTxParams, err := types.DecodeAndVerifyMetaTxParams(repl,
 				pool.chainconfig.IsMetaTxV2(pool.chain.CurrentBlock().Time),
 				pool.chainconfig.IsMetaTxV3(pool.chain.CurrentBlock().Time))
 			if err != nil {
 				return err
 			}
+			replCost := repl.Cost()
 			if replMetaTxParams != nil {
 				replTxGasCost := new(big.Int).Sub(repl.Cost(), repl.Value())
 				sponsorAmount, _ := types.CalculateSponsorPercentAmount(replMetaTxParams, replTxGasCost)
@@ -771,6 +763,7 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 
 	gasRemaining := big.NewInt(int64(tx.Gas() - intrGas*tokenRatio))
 	baseFee := pool.chain.CurrentBlock().BaseFee
+	l1Cost := pool.l1CostFn(tx.RollupDataGas(), tx.IsDepositTx(), tx.To())
 
 	if tx.Type() == types.LegacyTxType {
 		if tx.GasPrice().Cmp(baseFee) < 0 {
@@ -1544,10 +1537,6 @@ func (pool *TxPool) validateMetaTxList(list *list) ([]*types.Transaction, *big.I
 			continue
 		}
 		txGasCost := new(big.Int).Mul(tx.GasPrice(), new(big.Int).SetUint64(tx.Gas()))
-		l1Cost := pool.l1CostFn(tx.RollupDataGas(), tx.IsDepositTx(), tx.To())
-		if l1Cost != nil {
-			txGasCost = new(big.Int).Add(txGasCost, l1Cost) // gas fee sponsor must sponsor additional l1Cost fee
-		}
 		sponsorAmount, _ := types.CalculateSponsorPercentAmount(metaTxParams, txGasCost)
 		var sponsorAmountAccumulated *big.Int
 		sponsorAmountAccumulated, ok := sponsorCostSumPerSponsor[metaTxParams.GasFeeSponsor]
@@ -1595,13 +1584,7 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) []*types.Trans
 		log.Trace("Removed invalid queued meta transaction", "count", len(invalidMetaTxs))
 		balance := pool.currentState.GetBalance(addr)
 		balance = new(big.Int).Add(balance, sponsorCostSum)
-		if !list.Empty() {
-			// Reduce the cost-cap by L1 rollup cost of the first tx if necessary. Other txs will get filtered out afterwards.
-			el := list.txs.FirstElement()
-			if l1Cost := pool.l1CostFn(el.RollupDataGas(), el.IsDepositTx(), el.To()); l1Cost != nil {
-				balance = new(big.Int).Sub(balance, l1Cost) // negative big int is fine
-			}
-		}
+
 		// Drop all transactions that are too costly (low balance or out of gas)
 		drops, _ := list.Filter(balance, pool.currentMaxGas)
 		for _, tx := range drops {
@@ -1808,13 +1791,7 @@ func (pool *TxPool) demoteUnexecutables() {
 		}
 		balance := pool.currentState.GetBalance(addr)
 		balance = new(big.Int).Add(balance, sponsorCostSum)
-		if !list.Empty() {
-			// Reduce the cost-cap by L1 rollup cost of the first tx if necessary. Other txs will get filtered out afterwards.
-			el := list.txs.FirstElement()
-			if l1Cost := pool.l1CostFn(el.RollupDataGas(), el.IsDepositTx(), el.To()); l1Cost != nil {
-				balance = new(big.Int).Sub(balance, l1Cost) // negative big int is fine
-			}
-		}
+
 		// Drop all transactions that are too costly (low balance or out of gas), and queue any invalids back for later
 		drops, invalids := list.Filter(balance, pool.currentMaxGas)
 		for _, tx := range drops {
