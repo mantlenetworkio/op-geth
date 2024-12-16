@@ -104,7 +104,7 @@ var (
 	// L1 Info Gas Overhead is the amount of gas the the L1 info deposit consumes.
 	// It is removed from the tx pool max gas to better indicate that L2 transactions
 	// are not able to consume all of the gas in a L2 block as the L1 info deposit is always present.
-	l1InfoGasOverhead = uint64(70_000)
+	l1InfoGasOverhead = uint64(1_000_000)
 )
 
 var (
