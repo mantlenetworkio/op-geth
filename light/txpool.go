@@ -380,7 +380,7 @@ func (pool *TxPool) validateTx(ctx context.Context, tx *types.Transaction) error
 	}
 
 	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx,
-		pool.config.IsMetaTxV2(header.Time), pool.config.IsMetaTxV3(header.Time))
+		pool.config.IsMetaTxV2(header.Time), pool.config.IsMetaTxV3(header.Time), pool.config.IsMantleEverest(header.Time))
 	if err != nil {
 		return err
 	}

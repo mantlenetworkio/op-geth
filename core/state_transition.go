@@ -191,7 +191,7 @@ func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.In
 	if rules == nil {
 		return nil, errors.New("param rules is nil pointer")
 	}
-	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx, rules.IsMetaTxV2, rules.IsMetaTxV3)
+	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx, rules.IsMetaTxV2, rules.IsMetaTxV3, rules.IsMantleEverest)
 	if err != nil {
 		return nil, err
 	}
@@ -519,6 +519,10 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	if st.msg.MetaTxParams != nil && rules.IsMantleEverest {
+		return nil, types.ErrMetaTxDisable
 	}
 
 	// First check this message satisfies all consensus rules before
