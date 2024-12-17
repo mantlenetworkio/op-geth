@@ -46,8 +46,7 @@ var (
 	// Mantle chain_id
 	MantleMainnetChainId    = big.NewInt(5000)
 	MantleSepoliaChainId    = big.NewInt(5003)
-	MantleSepoliaQA3ChainId = big.NewInt(5003003)
-	MantleSepoliaQA9ChainId = big.NewInt(5003009)
+	MantleSepoliaQA6ChainId = big.NewInt(5003006)
 	MantleLocalChainId      = big.NewInt(17)
 )
 
@@ -467,6 +466,8 @@ type ChainConfig struct {
 	MetaTxV2UpgradeTime *uint64 `json:"metaTxV2UpgradeTime,omitempty"` // MetaTxV2UpgradeTime switch time ( nil = no fork, 0 = already forked)
 	MetaTxV3UpgradeTime *uint64 `json:"metaTxV3UpgradeTime,omitempty"` // MetaTxV3UpgradeTime switch time ( nil = no fork, 0 = already forked)
 
+	MantleEverestTime *uint64 `json:"mantleEverestTime,omitempty"` // MantleEverestTime switch time ( nil = no fork, 0 = already forked)
+
 	// ProxyOwner upgrade config
 	ProxyOwnerUpgradeTime *uint64 `json:"proxyOwnerUpgradeTime,omitempty"` // ProxyOwnerUpgradeTime switch time ( nil = no fork, 0 = already forked)
 
@@ -700,6 +701,11 @@ func (c *ChainConfig) IsMetaTxV2(time uint64) bool {
 // IsMetaTxV3 returns whether time is either equal to the MetaTx fork time or greater.
 func (c *ChainConfig) IsMetaTxV3(time uint64) bool {
 	return isTimestampForked(c.MetaTxV3UpgradeTime, time)
+}
+
+// IsMantleEverest returns whether time is either equal to the Mantle Everest fork time or greater.
+func (c *ChainConfig) IsMantleEverest(time uint64) bool {
+	return isTimestampForked(c.MantleEverestTime, time)
 }
 
 // IsProxyOwnerUpgrade returns whether time is either equal to the ProxyOwnerUpgrade fork time
@@ -1087,6 +1093,7 @@ type Rules struct {
 	IsMantleBaseFee, IsMantleBVMETHMintUpgrade              bool
 	IsOptimismBedrock, IsOptimismRegolith                   bool
 	IsMetaTxV2, IsMetaTxV3                                  bool
+	IsMantleEverest                                         bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -1115,6 +1122,7 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		isPrague:                  c.IsPrague(timestamp),
 		IsMetaTxV2:                c.IsMetaTxV2(timestamp),
 		IsMetaTxV3:                c.IsMetaTxV3(timestamp),
+		IsMantleEverest:           c.IsMantleEverest(timestamp),
 		// Optimism
 		IsOptimismBedrock:  c.IsOptimismBedrock(num),
 		IsOptimismRegolith: c.IsOptimismRegolith(timestamp),
