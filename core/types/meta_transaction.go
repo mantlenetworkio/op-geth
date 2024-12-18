@@ -25,7 +25,7 @@ var (
 	ErrInvalidSponsorPercent       = errors.New("invalid sponsor percent, expected range (0, 100]")
 	ErrSponsorBalanceNotEnough     = errors.New("sponsor doesn't have enough balance")
 	ErrSponsorMustNotEqualToSender = errors.New("sponsor must not equal to tx sender")
-	ErrMetaTxDisable               = errors.New("meta tx is disable")
+	ErrMetaTxDisabled              = errors.New("meta tx is disabled")
 )
 
 type MetaTxParams struct {
@@ -116,7 +116,7 @@ func DecodeAndVerifyMetaTxParams(tx *Transaction, isMetaTxV2, isMetaTxV3, isMant
 	}
 
 	if isMantleEverest && bytes.Equal(tx.Data()[:MetaTxPrefixLength], MetaTxPrefix) {
-		return nil, ErrMetaTxDisable
+		return nil, ErrMetaTxDisabled
 	}
 
 	if mtp := tx.metaTxParams.Load(); mtp != nil {

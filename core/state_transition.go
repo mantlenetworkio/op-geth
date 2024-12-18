@@ -522,7 +522,7 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	}
 
 	if st.msg.MetaTxParams != nil && rules.IsMantleEverest {
-		return nil, types.ErrMetaTxDisable
+		return nil, types.ErrMetaTxDisabled
 	}
 
 	// First check this message satisfies all consensus rules before
