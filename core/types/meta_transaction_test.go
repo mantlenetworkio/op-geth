@@ -231,7 +231,7 @@ func TestDecodeAndVerifyMetaTxParams(t *testing.T) {
 	require.NoError(t, err)
 
 	// test normal metaTx
-	metaTxParams, err := DecodeAndVerifyMetaTxParams(signedTx, false, false)
+	metaTxParams, err := DecodeAndVerifyMetaTxParams(signedTx, false, false, false)
 	require.NoError(t, err)
 
 	require.Equal(t, gasFeeSponsorAddr.String(), metaTxParams.GasFeeSponsor.String())
@@ -249,7 +249,7 @@ func TestDecodeAndVerifyMetaTxParams(t *testing.T) {
 	signedTx, err = tx.WithSignature(signer, txSignature)
 	require.NoError(t, err)
 
-	_, err = DecodeAndVerifyMetaTxParams(signedTx, false, false)
+	_, err = DecodeAndVerifyMetaTxParams(signedTx, false, false, false)
 	require.Equal(t, err, ErrInvalidGasFeeSponsorSig)
 
 	// Test ErrGasFeeSponsorMismatch
@@ -264,7 +264,7 @@ func TestDecodeAndVerifyMetaTxParams(t *testing.T) {
 	signedTx, err = tx.WithSignature(signer, txSignature)
 	require.NoError(t, err)
 
-	_, err = DecodeAndVerifyMetaTxParams(signedTx, true, false)
+	_, err = DecodeAndVerifyMetaTxParams(signedTx, true, false, false)
 	require.Equal(t, err, ErrGasFeeSponsorMismatch)
 
 	// Test ErrGasFeeSponsorMismatch
@@ -279,7 +279,7 @@ func TestDecodeAndVerifyMetaTxParams(t *testing.T) {
 	signedTx, err = tx.WithSignature(signer, txSignature)
 	require.NoError(t, err)
 
-	_, err = DecodeAndVerifyMetaTxParams(signedTx, false, false)
+	_, err = DecodeAndVerifyMetaTxParams(signedTx, false, false, false)
 	require.Equal(t, err, ErrInvalidSponsorPercent)
 }
 
@@ -316,7 +316,7 @@ func TestDecodeAndVerifyMetaTxParamsV2(t *testing.T) {
 	require.NoError(t, err)
 
 	// test normal metaTx
-	metaTxParams, err := DecodeAndVerifyMetaTxParams(signedTx, true, false)
+	metaTxParams, err := DecodeAndVerifyMetaTxParams(signedTx, true, false, false)
 	require.NoError(t, err)
 
 	require.Equal(t, gasFeeSponsorAddr.String(), metaTxParams.GasFeeSponsor.String())
@@ -334,7 +334,7 @@ func TestDecodeAndVerifyMetaTxParamsV2(t *testing.T) {
 	signedTx, err = tx.WithSignature(signer, txSignature)
 	require.NoError(t, err)
 
-	_, err = DecodeAndVerifyMetaTxParams(signedTx, true, false)
+	_, err = DecodeAndVerifyMetaTxParams(signedTx, true, false, false)
 	require.Equal(t, err, ErrInvalidGasFeeSponsorSig)
 
 	// Test ErrGasFeeSponsorMismatch
@@ -349,7 +349,7 @@ func TestDecodeAndVerifyMetaTxParamsV2(t *testing.T) {
 	signedTx, err = tx.WithSignature(signer, txSignature)
 	require.NoError(t, err)
 
-	_, err = DecodeAndVerifyMetaTxParams(signedTx, true, false)
+	_, err = DecodeAndVerifyMetaTxParams(signedTx, true, false, false)
 	require.Equal(t, err, ErrGasFeeSponsorMismatch)
 
 	// Test ErrGasFeeSponsorMismatch
@@ -364,7 +364,7 @@ func TestDecodeAndVerifyMetaTxParamsV2(t *testing.T) {
 	signedTx, err = tx.WithSignature(signer, txSignature)
 	require.NoError(t, err)
 
-	_, err = DecodeAndVerifyMetaTxParams(signedTx, false, false)
+	_, err = DecodeAndVerifyMetaTxParams(signedTx, false, false, false)
 	require.Equal(t, err, ErrInvalidSponsorPercent)
 }
 
@@ -403,7 +403,7 @@ func TestDecodeAndVerifyMetaTxParamsV3(t *testing.T) {
 	require.NoError(t, err)
 
 	// test normal metaTx
-	metaTxParams, err := DecodeAndVerifyMetaTxParams(signedTx, true, false)
+	metaTxParams, err := DecodeAndVerifyMetaTxParams(signedTx, true, false, false)
 	require.NoError(t, err)
 
 	require.Equal(t, gasFeeSponsorAddr.String(), metaTxParams.GasFeeSponsor.String())
@@ -421,6 +421,6 @@ func TestDecodeAndVerifyMetaTxParamsV3(t *testing.T) {
 	require.NoError(t, err)
 
 	// test normal metaTx
-	metaTxParams, err = DecodeAndVerifyMetaTxParams(signedTx, true, true)
+	metaTxParams, err = DecodeAndVerifyMetaTxParams(signedTx, true, true, false)
 	require.Error(t, err, ErrSponsorMustNotEqualToSender)
 }
