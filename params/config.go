@@ -47,6 +47,7 @@ var (
 	MantleMainnetChainId    = big.NewInt(5000)
 	MantleSepoliaChainId    = big.NewInt(5003)
 	MantleSepoliaQA6ChainId = big.NewInt(5003006)
+	MantleSepoliaQA7ChainId = big.NewInt(5003007)
 	MantleLocalChainId      = big.NewInt(17)
 )
 
