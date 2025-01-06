@@ -23,7 +23,7 @@ var (
 		MetaTxV2UpgradeTime:   u64Ptr(1_720_594_800),
 		MetaTxV3UpgradeTime:   u64Ptr(1_720_594_800),
 		ProxyOwnerUpgradeTime: nil,
-		MantleEverestTime:     nil,
+		MantleEverestTime:     u64Ptr(1_737_010_800),
 	}
 	MantleSepoliaQA6UpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               params.MantleSepoliaQA6ChainId,
