@@ -690,6 +690,10 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	// cost == V + GP * GL
 	cost := tx.Cost()
 
+	if err = types.MetaTxCheck(tx.Data()); err != nil {
+		return err
+	}
+
 	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx,
 		pool.chainconfig.IsMetaTxV2(pool.chain.CurrentBlock().Time),
 		pool.chainconfig.IsMetaTxV3(pool.chain.CurrentBlock().Time),

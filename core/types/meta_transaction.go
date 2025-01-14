@@ -74,6 +74,18 @@ type MetaTxSignDataV2 struct {
 	SponsorPercent uint64
 }
 
+func MetaTxCheck(txData []byte) error {
+	if len(txData) <= MetaTxPrefixLength {
+		return nil
+	}
+
+	if bytes.Equal(txData[:MetaTxPrefixLength], MetaTxPrefix) {
+		return ErrMetaTxDisabled
+	}
+
+	return nil
+}
+
 func CalculateSponsorPercentAmount(mxParams *MetaTxParams, amount *big.Int) (*big.Int, *big.Int) {
 	if mxParams == nil {
 		return nil, nil
