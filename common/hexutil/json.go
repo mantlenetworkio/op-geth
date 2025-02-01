@@ -20,10 +20,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/holiman/uint256"
 	"math/big"
 	"reflect"
 	"strconv"
+
+	"github.com/holiman/uint256"
 )
 
 var (
