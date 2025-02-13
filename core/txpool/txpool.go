@@ -637,6 +637,9 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	if tx.Type() == types.BlobTxType {
 		return errors.New("BlobTxType of transaction is currently not supported.")
 	}
+	if tx.Type() == types.SetCodeTxType {
+		return errors.New("SetCodeTxType of transaction is currently not supported.")
+	}
 	// Accept only legacy transactions until EIP-2718/2930 activates.
 	if !pool.eip2718 && tx.Type() != types.LegacyTxType {
 		return core.ErrTxTypeNotSupported
