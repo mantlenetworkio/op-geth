@@ -34,6 +34,15 @@ var (
 		ProxyOwnerUpgradeTime: nil,
 		MantleEverestTime:     u64Ptr(1_735_023_600),
 	}
+	MantleHoleskyQA1UpgradeConfig = MantleUpgradeChainConfig{
+		ChainID:               params.MantleHoleskyQA1ChainId,
+		BaseFeeTime:           u64Ptr(0),
+		BVMETHMintUpgradeTime: u64Ptr(0),
+		MetaTxV2UpgradeTime:   u64Ptr(0),
+		MetaTxV3UpgradeTime:   u64Ptr(1_739_862_000),
+		ProxyOwnerUpgradeTime: u64Ptr(1_739_862_000),
+		MantleEverestTime:     u64Ptr(1_739_862_000),
+	}
 	MantleLocalUpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               params.MantleLocalChainId,
 		BaseFeeTime:           u64Ptr(0),
@@ -75,6 +84,8 @@ func GetUpgradeConfigForMantle(chainID *big.Int) *MantleUpgradeChainConfig {
 		return &MantleSepoliaUpgradeConfig
 	case params.MantleSepoliaQA6ChainId.Int64():
 		return &MantleSepoliaQA6UpgradeConfig
+	case params.MantleHoleskyQA1ChainId.Int64():
+		return &MantleHoleskyQA1UpgradeConfig
 	case params.MantleLocalChainId.Int64():
 		return &MantleLocalUpgradeConfig
 	default:
