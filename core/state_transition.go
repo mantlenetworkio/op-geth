@@ -49,7 +49,7 @@ var (
 
 	// NewProxyAdminOwnerAddress is the address that the L2ProxyAdmin contract
 	// will be transferred to
-	NewProxyAdminOwnerAddress = common.HexToHash("0x09734bB3980906Bb217305EA6Bd34256feEAB105")
+	NewProxyAdminOwnerAddress = common.HexToHash("0xb242Cbf24edDf37785efC07f127C4Cbc0C9e3374")
 )
 
 // ExecutionResult includes all output after executing given evm
