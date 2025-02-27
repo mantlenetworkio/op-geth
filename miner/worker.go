@@ -210,6 +210,9 @@ type worker struct {
 	chainHeadSub event.Subscription
 	chainSideCh  chan core.ChainSideEvent
 	chainSideSub event.Subscription
+	// Preconf Subscriptions
+	preconfTxRequestCh  chan core.NewPreconfTxRequest
+	preconfTxRequestSub event.Subscription
 
 	// Channels
 	newWorkCh          chan *newWorkReq
@@ -288,6 +291,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		extra:              config.ExtraData,
 		pendingTasks:       make(map[common.Hash]*task),
 		txsCh:              make(chan core.NewTxsEvent, txChanSize),
+		preconfTxRequestCh: make(chan core.NewPreconfTxRequest, txChanSize),
 		chainHeadCh:        make(chan core.ChainHeadEvent, chainHeadChanSize),
 		chainSideCh:        make(chan core.ChainSideEvent, chainSideChanSize),
 		newWorkCh:          make(chan *newWorkReq),
@@ -300,6 +304,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		resubmitAdjustCh:   make(chan *intervalAdjust, resubmitAdjustChanSize),
 	}
 	// Subscribe NewTxsEvent for tx pool
+	worker.preconfTxRequestSub = eth.TxPool().SubscribeNewPreconfTxRequestEvent(worker.preconfTxRequestCh)
 	worker.txsSub = eth.TxPool().SubscribeNewTxsEvent(worker.txsCh)
 	// Subscribe events for blockchain
 	worker.chainHeadSub = eth.BlockChain().SubscribeChainHeadEvent(worker.chainHeadCh)
@@ -584,6 +589,7 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 func (w *worker) mainLoop() {
 	defer w.wg.Done()
 	defer w.txsSub.Unsubscribe()
+	defer w.preconfTxRequestSub.Unsubscribe()
 	defer w.chainHeadSub.Unsubscribe()
 	defer w.chainSideSub.Unsubscribe()
 	defer func() {
@@ -643,7 +649,8 @@ func (w *worker) mainLoop() {
 					delete(w.remoteUncles, hash)
 				}
 			}
-
+		case ev := <-w.preconfTxRequestCh:
+			w.handlePreconfTxRequest(ev)
 		case ev := <-w.txsCh:
 			if w.chainConfig.Optimism != nil && !w.config.RollupComputePendingBlock {
 				continue // don't update the pending-block snapshot if we are not computing the pending block
@@ -687,12 +694,58 @@ func (w *worker) mainLoop() {
 			return
 		case <-w.txsSub.Err():
 			return
+		case <-w.preconfTxRequestSub.Err():
+			return
 		case <-w.chainHeadSub.Err():
 			return
 		case <-w.chainSideSub.Err():
 			return
 		}
 	}
+}
+
+func (w *worker) handlePreconfTxRequest(ev core.NewPreconfTxRequest) {
+	var coinbase common.Address
+	if w.isRunning() {
+		coinbase = w.etherbase()
+		if coinbase == (common.Address{}) {
+			log.Error("Refusing to mine without etherbase")
+			return
+		}
+	}
+	work, err := w.prepareWork(&generateParams{
+		timestamp: uint64(time.Now().Unix()),
+		coinbase:  coinbase,
+	})
+	if err != nil {
+		return
+	}
+
+	// Attempt to execute the transaction
+	executeTx := func(env *environment, tx *types.Transaction) (*types.Receipt, error) {
+		gasLimit := env.header.GasLimit
+		if env.gasPool == nil {
+			env.gasPool = new(core.GasPool).AddGas(gasLimit)
+		}
+		var (
+			snap = env.state.Snapshot()
+			gp   = env.gasPool.Gas()
+		)
+		receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &env.coinbase, env.gasPool, env.state, env.header, tx, &env.header.GasUsed, *w.chain.GetVMConfig())
+		if err != nil {
+			env.state.RevertToSnapshot(snap)
+			env.gasPool.SetGas(gp)
+			return nil, err
+		}
+		return receipt, nil
+	}
+
+	receipt, err := executeTx(work, ev.Tx)
+	ev.PreconfResult <- &core.PreconfResponse{
+		Receipt: receipt,
+		Err:     err,
+	}
+
 }
 
 // taskLoop is a standalone goroutine to fetch sealing task from the generator and

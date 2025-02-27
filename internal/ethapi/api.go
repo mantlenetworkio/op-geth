@@ -2158,6 +2158,51 @@ func (s *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil.B
 	return SubmitTransaction(ctx, s.b, tx)
 }
 
+// PreconfTransactionResult represents a preconf transaction.
+type PreconfTransactionResult struct {
+	TxHash      common.Hash    `json:"txHash"`
+	Status      string         `json:"status"`
+	Reason      string         `json:"reason"`
+	BlockHeight hexutil.Uint64 `json:"blockHeight"`
+}
+
+// SendRawTransaction will add the signed transaction to the transaction pool.
+// The sender is responsible for signing the transaction and using the correct nonce.
+func (s *TransactionAPI) SendRawTransactionWithPreconf(ctx context.Context, input hexutil.Bytes) (*PreconfTransactionResult, error) {
+	preconfTxCh := make(chan core.NewPreconfTxEvent, 100)
+	defer close(preconfTxCh)
+	sub := s.b.SubscribeNewPreconfTxEvent(preconfTxCh)
+	defer sub.Unsubscribe()
+
+	txHash, err := s.SendRawTransaction(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+
+	timeout := time.NewTimer(1 * time.Second)
+	defer timeout.Stop()
+	for {
+		select {
+		case preconfTx := <-preconfTxCh:
+			if preconfTx.TxHash == txHash {
+				status, reason := "success", ""
+				if !preconfTx.Status {
+					status = "failed"
+					reason = preconfTx.Reason.Error()
+				}
+				return &PreconfTransactionResult{
+					TxHash:      preconfTx.TxHash,
+					Status:      status,
+					Reason:      reason,
+					BlockHeight: hexutil.Uint64(preconfTx.PredictedL2BlockNumber.Uint64()),
+				}, nil
+			}
+		case <-timeout.C:
+			return nil, errors.New("preconf timeout")
+		}
+	}
+}
+
 // Sign calculates an ECDSA signature for:
 // keccak256("\x19Ethereum Signed Message:\n" + len(message) + message).
 //

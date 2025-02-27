@@ -390,6 +390,22 @@ var (
 	}
 
 	// Transaction pool settings
+	TxPoolPreconfsFlag = &cli.StringFlag{
+		Name:     "txpool.preconfs",
+		Usage:    "Comma separated accounts to treat as preconfs (no flush, priority inclusion)",
+		Category: flags.TxPoolCategory,
+	}
+	TxPoolNoPreconfsFlag = &cli.BoolFlag{
+		Name:     "txpool.nopreconfs",
+		Usage:    "Disables price exemptions for preconfs",
+		Category: flags.TxPoolCategory,
+	}
+	TxPoolPreconfTimeoutFlag = &cli.DurationFlag{
+		Name:     "txpool.preconftimeout",
+		Usage:    "Timeout for preconfs",
+		Value:    1 * time.Second,
+		Category: flags.TxPoolCategory,
+	}
 	TxPoolLocalsFlag = &cli.StringFlag{
 		Name:     "txpool.locals",
 		Usage:    "Comma separated accounts to treat as locals (no flush, priority inclusion)",
@@ -925,6 +941,11 @@ var (
 	RollupSequencerHTTPFlag = &cli.StringFlag{
 		Name:     "rollup.sequencerhttp",
 		Usage:    "HTTP endpoint for the sequencer mempool",
+		Category: flags.RollupCategory,
+	}
+	RollupSequencerWebsocketFlag = &cli.StringFlag{
+		Name:     "rollup.sequencerwebsocket",
+		Usage:    "Websocket endpoint for the sequencer mempool",
 		Category: flags.RollupCategory,
 	}
 
@@ -1619,6 +1640,22 @@ func setGPO(ctx *cli.Context, cfg *gasprice.Config, light bool) {
 }
 
 func setTxPool(ctx *cli.Context, cfg *txpool.Config) {
+	if ctx.IsSet(TxPoolPreconfsFlag.Name) {
+		preconfs := strings.Split(ctx.String(TxPoolPreconfsFlag.Name), ",")
+		for _, account := range preconfs {
+			if trimmed := strings.TrimSpace(account); !common.IsHexAddress(trimmed) {
+				Fatalf("Invalid account in --txpool.preconfs: %s", trimmed)
+			} else {
+				cfg.Preconf.Preconfs = append(cfg.Preconf.Preconfs, common.HexToAddress(account))
+			}
+		}
+	}
+	if ctx.IsSet(TxPoolNoPreconfsFlag.Name) {
+		cfg.Preconf.NoPreconfs = ctx.Bool(TxPoolNoPreconfsFlag.Name)
+	}
+	if ctx.IsSet(TxPoolPreconfTimeoutFlag.Name) {
+		cfg.Preconf.PreconfTimeout = ctx.Duration(TxPoolPreconfTimeoutFlag.Name)
+	}
 	if ctx.IsSet(TxPoolLocalsFlag.Name) {
 		locals := strings.Split(ctx.String(TxPoolLocalsFlag.Name), ",")
 		for _, account := range locals {
@@ -1923,6 +1960,10 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	// Only configure sequencer http flag if we're running in verifier mode i.e. --mine is disabled.
 	if ctx.IsSet(RollupSequencerHTTPFlag.Name) && !ctx.IsSet(MiningEnabledFlag.Name) {
 		cfg.RollupSequencerHTTP = ctx.String(RollupSequencerHTTPFlag.Name)
+	}
+	// Only configure sequencer websocket flag if we're running in verifier mode i.e. --mine is disabled.
+	if ctx.IsSet(RollupSequencerWebsocketFlag.Name) && !ctx.IsSet(MiningEnabledFlag.Name) {
+		cfg.RollupSequencerWebsocket = ctx.String(RollupSequencerWebsocketFlag.Name)
 	}
 	if ctx.IsSet(RollupHistoricalRPCFlag.Name) {
 		cfg.RollupHistoricalRPC = ctx.String(RollupHistoricalRPCFlag.Name)

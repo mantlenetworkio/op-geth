@@ -229,6 +229,10 @@ func (b *LesApiBackend) TxPoolContentFrom(addr common.Address) (types.Transactio
 	return b.eth.txPool.ContentFrom(addr)
 }
 
+func (b *LesApiBackend) SubscribeNewPreconfTxEvent(ch chan<- core.NewPreconfTxEvent) event.Subscription {
+	return b.eth.txPool.SubscribeNewPreconfTxEvent(ch)
+}
+
 func (b *LesApiBackend) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription {
 	return b.eth.txPool.SubscribeNewTxsEvent(ch)
 }

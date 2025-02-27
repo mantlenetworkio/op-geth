@@ -104,6 +104,11 @@ type Ethereum struct {
 	lock sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
 
 	shutdownTracker *shutdowncheck.ShutdownTracker // Tracks if and when the node has shutdown ungracefully
+
+	// preconfs
+	seqWebsocketService *rpc.Client
+	preconfTxFeed       event.Feed
+	scope               event.SubscriptionScope
 }
 
 // New creates a new Ethereum object (including the
@@ -295,6 +300,36 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			return nil, err
 		}
 		eth.seqRPCService = client
+	}
+
+	if config.RollupSequencerWebsocket != "" {
+		// setup sequencer websocket client
+		ctx := context.Background()
+		client, err := rpc.DialContext(ctx, config.RollupSequencerWebsocket)
+		if err != nil {
+			return nil, err
+		}
+		eth.seqWebsocketService = client
+
+		// setup preconf subscription
+		go func() {
+			preconfCh := make(chan core.NewPreconfTxEvent, 100)
+			defer close(preconfCh)
+
+			sub, err := eth.seqWebsocketService.Subscribe(ctx, "eth", preconfCh, "newPreconfTransaction")
+			if err != nil {
+				log.Error("Failed to subscribe to new preconf transactions:", err)
+			}
+			defer sub.Unsubscribe()
+			for {
+				select {
+				case err := <-sub.Err():
+					log.Error("Preconf subscription error:", err)
+				case tx := <-preconfCh:
+					eth.preconfTxFeed.Send(tx)
+				}
+			}
+		}()
 	}
 
 	if config.RollupHistoricalRPC != "" {
@@ -588,6 +623,9 @@ func (s *Ethereum) Stop() error {
 	s.engine.Close()
 	if s.seqRPCService != nil {
 		s.seqRPCService.Close()
+	}
+	if s.seqWebsocketService != nil {
+		s.seqWebsocketService.Close()
 	}
 	if s.historicalRPCService != nil {
 		s.historicalRPCService.Close()

@@ -36,6 +36,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/preconf"
 )
 
 const (
@@ -167,6 +168,7 @@ type blockChain interface {
 
 // Config are the configuration parameters of the transaction pool.
 type Config struct {
+	Preconf   *preconf.Config  // Preconf transactions handling configuration
 	Locals    []common.Address // Addresses that should be treated by default as local
 	NoLocals  bool             // Whether local transaction handling should be disabled
 	Journal   string           // Journal of local transactions to survive node restarts
@@ -202,6 +204,8 @@ var DefaultConfig = Config{
 	GlobalQueue:  1024,
 
 	Lifetime: 3 * time.Hour,
+
+	Preconf: &preconf.DefaultConfig,
 }
 
 // sanitize checks the provided user configurations and changes anything that's
@@ -240,6 +244,9 @@ func (config *Config) sanitize() Config {
 		log.Warn("Sanitizing invalid txpool lifetime", "provided", conf.Lifetime, "updated", DefaultConfig.Lifetime)
 		conf.Lifetime = DefaultConfig.Lifetime
 	}
+	if conf.Preconf == nil {
+		conf.Preconf = &preconf.DefaultConfig
+	}
 	return conf
 }
 
@@ -259,6 +266,10 @@ type TxPool struct {
 	scope       event.SubscriptionScope
 	signer      types.Signer
 	mu          sync.RWMutex
+
+	// Preconf Feeds
+	preconfTxRequestFeed event.Feed
+	preconfTxFeed        event.Feed
 
 	istanbul bool // Fork indicator whether we are in the istanbul stage.
 	eip2718  bool // Fork indicator whether we are using EIP-2718 type transactions.
@@ -456,6 +467,18 @@ func (pool *TxPool) Stop() {
 // starts sending event to the given channel.
 func (pool *TxPool) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription {
 	return pool.scope.Track(pool.txFeed.Subscribe(ch))
+}
+
+// SubscribeNewPreconfTxEvent registers a subscription of NewPreconfTxEvent and
+// starts sending event to the given channel.
+func (pool *TxPool) SubscribeNewPreconfTxEvent(ch chan<- core.NewPreconfTxEvent) event.Subscription {
+	return pool.scope.Track(pool.preconfTxFeed.Subscribe(ch))
+}
+
+// SubscribeNewPreconfTxRequest registers a subscription of NewPreconfTxRequest and
+// starts sending event to the given channel.
+func (pool *TxPool) SubscribeNewPreconfTxRequestEvent(ch chan<- core.NewPreconfTxRequest) event.Subscription {
+	return pool.scope.Track(pool.preconfTxRequestFeed.Subscribe(ch))
 }
 
 // GasPrice returns the current gas price enforced by the transaction pool.
@@ -1130,7 +1153,66 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 	if sync {
 		<-done
 	}
+
+	// preconf request
+	pool.handlePreconfTx(news)
+
 	return errs
+}
+
+func (pool *TxPool) handlePreconfTx(news []*types.Transaction) {
+	for _, tx := range news {
+		// check tx is pending
+		pool.mu.RLock()
+		from, _ := types.Sender(pool.signer, tx)
+		isPending := pool.pending[from] != nil && pool.pending[from].txs.Get(tx.Nonce()) != nil
+		pool.mu.RUnlock()
+		if !isPending {
+			log.Debug("tx is not pending", "tx", tx.Hash())
+			continue
+		}
+
+		// check tx.To is preconf.Address
+		if tx.To() == nil {
+			log.Debug("preconf address is nil", "tx", tx.Hash())
+			continue
+		}
+		if !pool.config.Preconf.IsPreconf(tx.To()) {
+			log.Debug("preconf address is not match", "tx", tx.Hash())
+			continue
+		}
+
+		// send preconf request event
+		result := make(chan *core.PreconfResponse)
+		defer close(result)
+		pool.preconfTxRequestFeed.Send(core.NewPreconfTxRequest{
+			Tx:            tx,
+			PreconfResult: result,
+		})
+
+		// default preconf event
+		event := core.NewPreconfTxEvent{
+			TxHash: tx.Hash(),
+			Status: false, // default failed
+			Reason: errors.New("preconf timeout"),
+		}
+		// timeout
+		timeout := time.NewTimer(pool.config.Preconf.PreconfTimeout)
+		defer timeout.Stop()
+		// wait for miner.worker preconf response
+		select {
+		case response := <-result:
+			event.Status = response.Err == nil
+			event.Reason = response.Err
+			if response.Receipt != nil {
+				event.PredictedL2BlockNumber = response.Receipt.BlockNumber.Add(response.Receipt.BlockNumber, big.NewInt(1)) // new tx can only be sealed in the next block
+			}
+		case <-timeout.C:
+		}
+
+		// send preconf event
+		pool.preconfTxFeed.Send(event)
+	}
 }
 
 // addTxsLocked attempts to queue a batch of transactions if they are valid.

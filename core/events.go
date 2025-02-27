@@ -17,9 +17,30 @@
 package core
 
 import (
+	"math/big"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 )
+
+// NewPreconfTxsEvent is posted when a preconf transaction enters the transaction pool.
+type NewPreconfTxEvent struct {
+	TxHash                 common.Hash
+	Status                 bool     // "success" | "fail"
+	Reason                 error    // "optional failure message"
+	PredictedL2BlockNumber *big.Int // "predicted L2 block number"
+}
+
+// NewPreconfTxRequestEvent is posted when a preconf transaction request enters the transaction pool.
+type NewPreconfTxRequest struct {
+	Tx            *types.Transaction
+	PreconfResult chan<- *PreconfResponse
+}
+
+type PreconfResponse struct {
+	Receipt *types.Receipt
+	Err     error
+}
 
 // NewTxsEvent is posted when a batch of transactions enter the transaction pool.
 type NewTxsEvent struct{ Txs []*types.Transaction }

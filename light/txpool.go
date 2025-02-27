@@ -67,6 +67,8 @@ type TxPool struct {
 	pending      map[common.Hash]*types.Transaction   // pending transactions by tx hash
 	mined        map[common.Hash][]*types.Transaction // mined transactions by block hash
 	clearIdx     uint64                               // earliest block nr that can contain mined tx info
+	// preconfs
+	preconfTxFeed event.Feed
 
 	istanbul bool // Fork indicator whether we are in the istanbul stage.
 	eip2718  bool // Fork indicator whether we are in the eip2718 stage.
@@ -329,6 +331,12 @@ func (pool *TxPool) Stop() {
 	pool.chainHeadSub.Unsubscribe()
 	close(pool.quit)
 	log.Info("Transaction pool stopped")
+}
+
+// SubscribeNewPreconfTxEvent registers a subscription of core.NewPreconfTxEvent and
+// starts sending event to the given channel.
+func (pool *TxPool) SubscribeNewPreconfTxEvent(ch chan<- core.NewPreconfTxEvent) event.Subscription {
+	return pool.scope.Track(pool.preconfTxFeed.Subscribe(ch))
 }
 
 // SubscribeNewTxsEvent registers a subscription of core.NewTxsEvent and

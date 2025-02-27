@@ -46,6 +46,7 @@ type testBackend struct {
 	db              ethdb.Database
 	sections        uint64
 	txFeed          event.Feed
+	preconfTxFeed   event.Feed
 	logsFeed        event.Feed
 	rmLogsFeed      event.Feed
 	pendingLogsFeed event.Feed
@@ -127,6 +128,10 @@ func (b *testBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
 
 func (b *testBackend) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription {
 	return b.txFeed.Subscribe(ch)
+}
+
+func (b *testBackend) SubscribeNewPreconfTxEvent(ch chan<- core.NewPreconfTxEvent) event.Subscription {
+	return b.preconfTxFeed.Subscribe(ch)
 }
 
 func (b *testBackend) SubscribeRemovedLogsEvent(ch chan<- core.RemovedLogsEvent) event.Subscription {

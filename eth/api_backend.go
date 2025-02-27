@@ -349,6 +349,14 @@ func (b *EthAPIBackend) TxPool() *txpool.TxPool {
 	return b.eth.TxPool()
 }
 
+func (b *EthAPIBackend) SubscribeNewPreconfTxEvent(ch chan<- core.NewPreconfTxEvent) event.Subscription {
+	if b.eth.seqWebsocketService != nil {
+		return b.eth.scope.Track(b.eth.preconfTxFeed.Subscribe(ch))
+	}
+
+	return b.eth.TxPool().SubscribeNewPreconfTxEvent(ch)
+}
+
 func (b *EthAPIBackend) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription {
 	return b.eth.TxPool().SubscribeNewTxsEvent(ch)
 }
