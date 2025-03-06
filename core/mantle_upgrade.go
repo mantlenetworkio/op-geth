@@ -12,9 +12,9 @@ var (
 		BaseFeeTime:           u64Ptr(0),
 		BVMETHMintUpgradeTime: u64Ptr(0),
 		MetaTxV2UpgradeTime:   u64Ptr(0),
-		MetaTxV3UpgradeTime:   nil, //TODO set upgrade timestamp
-		ProxyOwnerUpgradeTime: nil, //TODO set upgrade timestamp
-		MantleEverestTime:     nil,
+		MetaTxV3UpgradeTime:   u64Ptr(1_742_367_600),
+		ProxyOwnerUpgradeTime: u64Ptr(1_742_367_600),
+		MantleEverestTime:     u64Ptr(1_742_367_600),
 	}
 	MantleSepoliaUpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               params.MantleSepoliaChainId,
@@ -48,7 +48,7 @@ var (
 		BVMETHMintUpgradeTime: u64Ptr(0),
 		MetaTxV2UpgradeTime:   u64Ptr(0),
 		MetaTxV3UpgradeTime:   u64Ptr(0),
-		ProxyOwnerUpgradeTime: nil, // don't set to 0
+		ProxyOwnerUpgradeTime: nil,
 		MantleEverestTime:     u64Ptr(0),
 	}
 )
