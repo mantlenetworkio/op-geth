@@ -312,24 +312,34 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		eth.seqWebsocketService = client
 
 		// setup preconf subscription
-		go func() {
+		event.ResubscribeErr(time.Minute, func(_ context.Context, lastErr error) (event.Subscription, error) {
 			preconfCh := make(chan core.NewPreconfTxEvent, 100)
-			defer close(preconfCh)
-
 			sub, err := eth.seqWebsocketService.Subscribe(ctx, "eth", preconfCh, "newPreconfTransaction")
 			if err != nil {
-				log.Error("Failed to subscribe to new preconf transactions:", err)
+				log.Error("Subscribe newPreconfTransaction failed: %v", err)
+				return nil, err
 			}
-			defer sub.Unsubscribe()
-			for {
-				select {
-				case err := <-sub.Err():
-					log.Error("Preconf subscription error:", err)
-				case tx := <-preconfCh:
-					eth.preconfTxFeed.Send(tx)
+
+			// Handle received messages
+			go func() {
+				defer sub.Unsubscribe()
+				defer close(preconfCh)
+				for {
+					select {
+					case <-ctx.Done():
+						log.Error("Preconf resubscribe context error:", err)
+						return
+					case err := <-sub.Err():
+						log.Error("Preconf resubscribe subscription error:", err)
+						return
+					case tx := <-preconfCh:
+						eth.preconfTxFeed.Send(tx)
+					}
 				}
-			}
-		}()
+			}()
+
+			return sub, nil
+		})
 	}
 
 	if config.RollupHistoricalRPC != "" {

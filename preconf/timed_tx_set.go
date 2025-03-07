@@ -1,4 +1,3 @@
-
 package preconf
 
 import (
@@ -56,6 +55,9 @@ func (s *TimedTxSet) Add(tx *types.Transaction) {
 	// Add the new entry
 	s.txMap[hash] = entry
 	s.txQueue = append(s.txQueue, entry)
+
+	// Metrics
+	MetricsPendingPreconfInc(1)
 }
 
 // Contains checks if the transaction is in the set
@@ -93,6 +95,9 @@ func (s *TimedTxSet) Remove(hash common.Hash) {
 		}
 		// Remove from the map
 		delete(s.txMap, hash)
+
+		// Metrics
+		MetricsPendingPreconfDec(1)
 	}
 }
 

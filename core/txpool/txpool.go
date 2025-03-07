@@ -345,6 +345,7 @@ func NewTxPool(config Config, chainconfig *params.ChainConfig, chain blockChain)
 
 	// Initialize preconfs
 	pool.preconfTxs = preconf.NewTimedTxSet()
+	log.Info("preconf", "txpool.config", pool.config.Preconf.String())
 
 	// Start the reorg loop early so it can handle requests generated during journal loading.
 	pool.wg.Add(1)
@@ -1203,6 +1204,8 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 }
 
 func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) []*types.Transaction {
+	defer preconf.MetricsPreconfTxPoolHandleCost(time.Now())
+
 	preconfTxs := make([]*types.Transaction, 0)
 	for _, tx := range news {
 		// check tx is pending
@@ -1236,8 +1239,6 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) []*types.Transac
 		// default preconf event
 		event := core.NewPreconfTxEvent{
 			TxHash:                 tx.Hash(),
-			Status:                 false, // default failed
-			Reason:                 errors.New("preconf timeout"),
 			PredictedL2BlockNumber: big.NewInt(0),
 		}
 		// timeout
@@ -1257,6 +1258,8 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) []*types.Transac
 			}
 			preconfTxs = append(preconfTxs, tx)
 		case <-timeout.C:
+			event.Status = false
+			event.Reason = errors.New("preconf timeout")
 		}
 
 		// send preconf event
@@ -1265,6 +1268,9 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) []*types.Transac
 		// add preconf success tx to preconfTxs
 		if event.Status {
 			pool.preconfTxs.Add(tx)
+			preconf.PreconfTxSuccessMeter.Mark(1)
+		} else {
+			preconf.PreconfTxFailureMeter.Mark(1)
 		}
 	}
 

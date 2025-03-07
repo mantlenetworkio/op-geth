@@ -57,11 +57,7 @@ func NewPreconfChecker(chainConfig *params.ChainConfig, chain *core.BlockChain, 
 		chain:       chain,
 		minerConfig: minerConfig,
 	}
-	l1ethclient, err := ethclient.Dial(checker.minerConfig.L1RPCHTTP)
-	if err != nil {
-		log.Error("failed to dial l1 rpc", "err", err)
-	}
-	checker.l1ethclient = l1ethclient
+	log.Info("preconf checker", "minner.config", checker.minerConfig.String())
 	go checker.loop()
 	return checker
 }
@@ -74,28 +70,7 @@ func (c *preconfChecker) loop() {
 			log.Error("Failed to sync optimism status", "err", err)
 		}
 
-		// TODO - Metrics Record
-		// record := struct {
-		// 	CurrentL1Number        uint64
-		// 	HeadL1Number           uint64
-		// 	UnsafeL2Number         uint64
-		// 	EngineSyncTargetNumber uint64
-		// 	EnvBlockNumber         uint64
-		// 	optimismSyncStatusOk   bool
-		// 	DepositTxs             []*types.Transaction
-		// }{
-		// 	CurrentL1Number:        c.optimismSyncStatus.CurrentL1.Number,
-		// 	HeadL1Number:           c.optimismSyncStatus.HeadL1.Number,
-		// 	UnsafeL2Number:         c.optimismSyncStatus.UnsafeL2.Number,
-		// 	EngineSyncTargetNumber: c.optimismSyncStatus.EngineSyncTarget.Number,
-		// 	EnvBlockNumber:         0,
-		// 	optimismSyncStatusOk:   c.optimismSyncStatusOk,
-		// 	DepositTxs:             c.depositTxs,
-		// }
-		// if c.env != nil {
-		// 	record.EnvBlockNumber = c.env.header.Number.Uint64()
-		// }
-
+		preconf.MetricsOpNodeSyncStatus(c.optimismSyncStatus, c.optimismSyncStatusOk)
 	}
 }
 
@@ -124,6 +99,14 @@ func (c *preconfChecker) syncOptimismStatus() error {
 }
 
 func (c *preconfChecker) GetDepositTxs(start, end uint64) ([]*types.Transaction, error) {
+	if c.l1ethclient == nil {
+		l1ethclient, err := ethclient.Dial(c.minerConfig.L1RPCHTTP)
+		if err != nil {
+			return nil, fmt.Errorf("failed to dial l1 rpc: %w", err)
+		}
+		c.l1ethclient = l1ethclient
+	}
+
 	logs, err := c.l1ethclient.FilterLogs(context.Background(), ethereum.FilterQuery{
 		FromBlock: big.NewInt(int64(start)),
 		ToBlock:   big.NewInt(int64(end)),
@@ -155,6 +138,10 @@ func (c *preconfChecker) UpdateOptimismSyncStatus(newOptimismSyncStatus *preconf
 		c.optimismSyncStatus = newOptimismSyncStatus
 	}
 
+	log.Debug("update optimism sync status", "current_l1.number", c.optimismSyncStatus.CurrentL1.Number, "head_l1.number", c.optimismSyncStatus.HeadL1.Number,
+		"unsafe_l2.number", c.optimismSyncStatus.UnsafeL2.Number, "engine_sync_target.number", c.optimismSyncStatus.EngineSyncTarget.Number,
+		"new_current_l1.number", newOptimismSyncStatus.CurrentL1.Number, "new_head_l1.number", newOptimismSyncStatus.HeadL1.Number,
+		"new_unsafe_l2.number", newOptimismSyncStatus.UnsafeL2.Number, "new_engine_sync_target.number", newOptimismSyncStatus.EngineSyncTarget.Number)
 	// current_l1.number normal growth
 	// head_l1.number normal growth
 	// unsafe_l2.number normal growth
@@ -169,16 +156,21 @@ func (c *preconfChecker) UpdateOptimismSyncStatus(newOptimismSyncStatus *preconf
 		log.Error("optimism sync status is not ok", "old", c.optimismSyncStatus, "new", newOptimismSyncStatus)
 	}
 
-	// update deposit txs
-	if c.optimismSyncStatus.CurrentL1.Number != newOptimismSyncStatus.CurrentL1.Number &&
+	// update deposit txs if current_l1.number or head_l1.number is changed
+	if c.optimismSyncStatus.CurrentL1.Number != newOptimismSyncStatus.CurrentL1.Number ||
 		c.optimismSyncStatus.HeadL1.Number != newOptimismSyncStatus.HeadL1.Number {
 		depositTxs, err := c.GetDepositTxs(c.optimismSyncStatus.CurrentL1.Number, c.optimismSyncStatus.HeadL1.Number-2)
 		if err != nil {
 			log.Error("failed to get deposit txs", "err", err)
-		}
-		if len(depositTxs) > 0 {
+			preconf.MetricsL1Deposit(false, 0)
+		} else {
 			c.depositTxs = depositTxs
+			preconf.MetricsL1Deposit(true, len(depositTxs))
 		}
+
+		log.Debug("update deposit txs", "current_l1.number", c.optimismSyncStatus.CurrentL1.Number, "head_l1.number", c.optimismSyncStatus.HeadL1.Number,
+			"new_current_l1.number", newOptimismSyncStatus.CurrentL1.Number, "new_head_l1.number", newOptimismSyncStatus.HeadL1.Number,
+			"deposit_txs", len(depositTxs))
 	}
 
 	// update optimism sync status
@@ -186,6 +178,8 @@ func (c *preconfChecker) UpdateOptimismSyncStatus(newOptimismSyncStatus *preconf
 }
 
 func (c *preconfChecker) Preconf(tx *types.Transaction) (*types.Receipt, error) {
+	defer preconf.MetricsPreconfExecuteCost(time.Now())
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -266,4 +260,7 @@ func (c *preconfChecker) UnpausePreconf(env *environment) {
 
 	// LoadDepositTxs
 	c.env.txs = append(c.env.txs, c.depositTxs...)
+
+	// Metrics
+	preconf.MetricsOpGethEnvBlockNumber(env.header.Number.Int64())
 }

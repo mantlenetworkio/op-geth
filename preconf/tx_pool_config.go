@@ -1,6 +1,7 @@
 package preconf
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -18,6 +19,10 @@ type TxPoolConfig struct {
 	ToPreconfs     []common.Address // Addresses that should be treated by default as preconfs
 	AllPreconfs    bool             // Whether pre transaction handling should be always enabled
 	PreconfTimeout time.Duration    // Timeout for preconf requests
+}
+
+func (c *TxPoolConfig) String() string {
+	return fmt.Sprintf("FromPreconfs: %v, ToPreconfs: %v, AllPreconfs: %v, PreconfTimeout: %v", c.FromPreconfs, c.ToPreconfs, c.AllPreconfs, c.PreconfTimeout)
 }
 
 func (c *TxPoolConfig) IsPreconfTx(from, to *common.Address) bool {

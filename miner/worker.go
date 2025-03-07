@@ -654,6 +654,10 @@ func (w *worker) mainLoop() {
 			}
 		case ev := <-w.preconfTxRequestCh:
 			receipt, err := w.preconfChecker.Preconf(ev.Tx)
+			if err != nil {
+				// Not fatal, just warn to the log
+				log.Warn("preconf failed", "tx", ev.Tx.Hash(), "err", err)
+			}
 			ev.PreconfResult <- &core.PreconfResponse{
 				Receipt: receipt,
 				Err:     err,

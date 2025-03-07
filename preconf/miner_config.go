@@ -1,5 +1,9 @@
 package preconf
 
+import (
+	"fmt"
+)
+
 var (
 	DefaultMinerConfig = MinerConfig{
 		OptimismNodeHTTP: "http://localhost:7545",
@@ -12,4 +16,8 @@ type MinerConfig struct {
 	OptimismNodeHTTP string
 	L1RPCHTTP        string
 	L1DepositAddress string
+}
+
+func (c *MinerConfig) String() string {
+	return fmt.Sprintf("OptimismNodeHTTP: %s, L1RPCHTTP: %s, L1DepositAddress: %s", c.OptimismNodeHTTP, c.L1RPCHTTP, c.L1DepositAddress)
 }
