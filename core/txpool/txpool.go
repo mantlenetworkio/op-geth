@@ -32,6 +32,7 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
@@ -168,11 +169,11 @@ type blockChain interface {
 
 // Config are the configuration parameters of the transaction pool.
 type Config struct {
-	Preconf   *preconf.Config  // Preconf transactions handling configuration
-	Locals    []common.Address // Addresses that should be treated by default as local
-	NoLocals  bool             // Whether local transaction handling should be disabled
-	Journal   string           // Journal of local transactions to survive node restarts
-	Rejournal time.Duration    // Time interval to regenerate the local transaction journal
+	Preconf   *preconf.TxPoolConfig // Preconf transactions handling configuration
+	Locals    []common.Address      // Addresses that should be treated by default as local
+	NoLocals  bool                  // Whether local transaction handling should be disabled
+	Journal   string                // Journal of local transactions to survive node restarts
+	Rejournal time.Duration         // Time interval to regenerate the local transaction journal
 
 	// JournalRemote controls whether journaling includes remote transactions or not.
 	// When true, all transactions loaded from the journal are treated as remote.
@@ -205,7 +206,7 @@ var DefaultConfig = Config{
 
 	Lifetime: 3 * time.Hour,
 
-	Preconf: &preconf.DefaultConfig,
+	Preconf: &preconf.DefaultTxPoolConfig,
 }
 
 // sanitize checks the provided user configurations and changes anything that's
@@ -245,7 +246,7 @@ func (config *Config) sanitize() Config {
 		conf.Lifetime = DefaultConfig.Lifetime
 	}
 	if conf.Preconf == nil {
-		conf.Preconf = &preconf.DefaultConfig
+		conf.Preconf = &preconf.DefaultTxPoolConfig
 	}
 	return conf
 }
@@ -270,6 +271,7 @@ type TxPool struct {
 	// Preconf Feeds
 	preconfTxRequestFeed event.Feed
 	preconfTxFeed        event.Feed
+	preconfTxs           *preconf.TimedTxSet // Set of preconf transactions
 
 	istanbul bool // Fork indicator whether we are in the istanbul stage.
 	eip2718  bool // Fork indicator whether we are using EIP-2718 type transactions.
@@ -340,6 +342,9 @@ func NewTxPool(config Config, chainconfig *params.ChainConfig, chain blockChain)
 	}
 	pool.priced = newPricedList(pool.all)
 	pool.reset(nil, chain.CurrentBlock())
+
+	// Initialize preconfs
+	pool.preconfTxs = preconf.NewTimedTxSet()
 
 	// Start the reorg loop early so it can handle requests generated during journal loading.
 	pool.wg.Add(1)
@@ -613,6 +618,43 @@ func (pool *TxPool) Locals() []common.Address {
 	defer pool.mu.Unlock()
 
 	return pool.locals.flatten()
+}
+
+// PendingPreconfTxs retrieves the preconf transactions and the pending transactions.
+func (pool *TxPool) PendingPreconfTxs(enforceTips bool) ([]*types.Transaction, map[common.Address]types.Transactions) {
+	pending := pool.Pending(enforceTips)
+
+	// removes the preconf transaction from the pending map, maintaining the order.
+	preconfTxs := pool.preconfTxs.Transactions()
+	for _, preconfTx := range preconfTxs {
+		from, _ := types.Sender(pool.signer, preconfTx)
+
+		// Get the slice of transactions for the target address
+		txs, exists := pending[from]
+
+		// If the transaction isn't in pending map but it's expected to be there,
+		// show the error log.
+		if !exists || len(txs) == 0 {
+			log.Error("Missing transaction in pending map, please report the issue", "hash", preconfTx.Hash())
+			continue
+		}
+
+		// Create a new slice to hold the transactions that are not deleted
+		var newTxs []*types.Transaction
+		for _, tx := range txs {
+			if tx.Hash() != preconfTx.Hash() {
+				newTxs = append(newTxs, tx) // Only keep the transactions that are not to be deleted
+			}
+		}
+
+		// Update the slice in the map
+		if len(newTxs) == 0 {
+			delete(pending, from) // If the slice is empty, delete the entry for that address
+		} else {
+			pending[from] = newTxs // Replace with the new slice
+		}
+	}
+	return preconfTxs, pending
 }
 
 // local retrieves all currently known local transactions, grouped by origin
@@ -1154,13 +1196,14 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 		<-done
 	}
 
-	// preconf request
-	pool.handlePreconfTx(news)
+	// preconf requests
+	pool.handlePreconfTxs(news)
 
 	return errs
 }
 
-func (pool *TxPool) handlePreconfTx(news []*types.Transaction) {
+func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) []*types.Transaction {
+	preconfTxs := make([]*types.Transaction, 0)
 	for _, tx := range news {
 		// check tx is pending
 		pool.mu.RLock()
@@ -1172,13 +1215,13 @@ func (pool *TxPool) handlePreconfTx(news []*types.Transaction) {
 			continue
 		}
 
-		// check tx.To is preconf.Address
+		// check tx is preconf tx
 		if tx.To() == nil {
 			log.Debug("preconf address is nil", "tx", tx.Hash())
 			continue
 		}
-		if !pool.config.Preconf.IsPreconf(tx.To()) {
-			log.Debug("preconf address is not match", "tx", tx.Hash())
+		if !pool.config.Preconf.IsPreconfTx(&from, tx.To()) {
+			log.Debug("preconf from and to is not match", "tx", tx.Hash())
 			continue
 		}
 
@@ -1192,9 +1235,10 @@ func (pool *TxPool) handlePreconfTx(news []*types.Transaction) {
 
 		// default preconf event
 		event := core.NewPreconfTxEvent{
-			TxHash: tx.Hash(),
-			Status: false, // default failed
-			Reason: errors.New("preconf timeout"),
+			TxHash:                 tx.Hash(),
+			Status:                 false, // default failed
+			Reason:                 errors.New("preconf timeout"),
+			PredictedL2BlockNumber: big.NewInt(0),
 		}
 		// timeout
 		timeout := time.NewTimer(pool.config.Preconf.PreconfTimeout)
@@ -1205,14 +1249,26 @@ func (pool *TxPool) handlePreconfTx(news []*types.Transaction) {
 			event.Status = response.Err == nil
 			event.Reason = response.Err
 			if response.Receipt != nil {
-				event.PredictedL2BlockNumber = response.Receipt.BlockNumber.Add(response.Receipt.BlockNumber, big.NewInt(1)) // new tx can only be sealed in the next block
+				event.Status = response.Receipt.Status == types.ReceiptStatusSuccessful
+				if !event.Status {
+					event.Reason = vm.ErrExecutionReverted
+				}
+				event.PredictedL2BlockNumber.Add(response.Receipt.BlockNumber, big.NewInt(1)) // new tx can only be sealed in the next block
 			}
+			preconfTxs = append(preconfTxs, tx)
 		case <-timeout.C:
 		}
 
 		// send preconf event
 		pool.preconfTxFeed.Send(event)
+
+		// add preconf success tx to preconfTxs
+		if event.Status {
+			pool.preconfTxs.Add(tx)
+		}
 	}
+
+	return preconfTxs
 }
 
 // addTxsLocked attempts to queue a batch of transactions if they are valid.
@@ -1872,6 +1928,7 @@ func (pool *TxPool) demoteUnexecutables() {
 		for _, tx := range olds {
 			hash := tx.Hash()
 			pool.all.Remove(hash)
+			pool.preconfTxs.Remove(hash)
 			log.Trace("Removed old pending transaction", "hash", hash)
 		}
 		invalidMetaTxs, sponsorCostSum := pool.validateMetaTxList(list)

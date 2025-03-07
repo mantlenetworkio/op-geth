@@ -2198,7 +2198,12 @@ func (s *TransactionAPI) SendRawTransactionWithPreconf(ctx context.Context, inpu
 				}, nil
 			}
 		case <-timeout.C:
-			return nil, errors.New("preconf timeout")
+			return &PreconfTransactionResult{
+				TxHash:      txHash,
+				Status:      "failed",
+				Reason:      "preconf timeout",
+				BlockHeight: hexutil.Uint64(0),
+			}, nil
 		}
 	}
 }

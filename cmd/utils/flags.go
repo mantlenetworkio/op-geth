@@ -76,6 +76,7 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/nat"
 	"github.com/ethereum/go-ethereum/p2p/netutil"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/preconf"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
 )
@@ -390,20 +391,26 @@ var (
 	}
 
 	// Transaction pool settings
-	TxPoolPreconfsFlag = &cli.StringFlag{
-		Name:     "txpool.preconfs",
-		Usage:    "Comma separated accounts to treat as preconfs (no flush, priority inclusion)",
+	TxPoolFromPreconfsFlag = &cli.StringFlag{
+		Name:     "txpool.frompreconfs",
+		Usage:    "Comma separated accounts to treat as from preconfs (no flush, priority inclusion)",
 		Category: flags.TxPoolCategory,
 	}
-	TxPoolNoPreconfsFlag = &cli.BoolFlag{
-		Name:     "txpool.nopreconfs",
-		Usage:    "Disables price exemptions for preconfs",
+	TxPoolToPreconfsFlag = &cli.StringFlag{
+		Name:     "txpool.topreconfs",
+		Usage:    "Comma separated accounts to treat as to preconfs (no flush, priority inclusion)",
+		Category: flags.TxPoolCategory,
+	}
+	TxPoolAllPreconfsFlag = &cli.BoolFlag{
+		Name:     "txpool.allpreconfs",
+		Usage:    "Enable all transactions to be preconf tx",
+		Value:    preconf.DefaultTxPoolConfig.AllPreconfs,
 		Category: flags.TxPoolCategory,
 	}
 	TxPoolPreconfTimeoutFlag = &cli.DurationFlag{
 		Name:     "txpool.preconftimeout",
 		Usage:    "Timeout for preconfs",
-		Value:    1 * time.Second,
+		Value:    preconf.DefaultTxPoolConfig.PreconfTimeout,
 		Category: flags.TxPoolCategory,
 	}
 	TxPoolLocalsFlag = &cli.StringFlag{
@@ -600,6 +607,24 @@ var (
 		Name:     "miner.newpayload-timeout",
 		Usage:    "Specify the maximum time allowance for creating a new payload",
 		Value:    ethconfig.Defaults.Miner.NewPayloadTimeout,
+		Category: flags.MinerCategory,
+	}
+	MinerPreconfOpNodeHTTP = &cli.StringFlag{
+		Name:     "miner.optimismnodehttp",
+		Usage:    "Optimism node http",
+		Value:    preconf.DefaultMinerConfig.OptimismNodeHTTP,
+		Category: flags.MinerCategory,
+	}
+	MinerPreconfL1RPCHTTP = &cli.StringFlag{
+		Name:     "miner.l1rpchttp",
+		Usage:    "L1 rpc http",
+		Value:    preconf.DefaultMinerConfig.L1RPCHTTP,
+		Category: flags.MinerCategory,
+	}
+	MinerPreconfL1DepositAddress = &cli.StringFlag{
+		Name:     "miner.l1depositaddress",
+		Usage:    "L1 deposit address",
+		Value:    preconf.DefaultMinerConfig.L1DepositAddress,
 		Category: flags.MinerCategory,
 	}
 
@@ -1640,22 +1665,8 @@ func setGPO(ctx *cli.Context, cfg *gasprice.Config, light bool) {
 }
 
 func setTxPool(ctx *cli.Context, cfg *txpool.Config) {
-	if ctx.IsSet(TxPoolPreconfsFlag.Name) {
-		preconfs := strings.Split(ctx.String(TxPoolPreconfsFlag.Name), ",")
-		for _, account := range preconfs {
-			if trimmed := strings.TrimSpace(account); !common.IsHexAddress(trimmed) {
-				Fatalf("Invalid account in --txpool.preconfs: %s", trimmed)
-			} else {
-				cfg.Preconf.Preconfs = append(cfg.Preconf.Preconfs, common.HexToAddress(account))
-			}
-		}
-	}
-	if ctx.IsSet(TxPoolNoPreconfsFlag.Name) {
-		cfg.Preconf.NoPreconfs = ctx.Bool(TxPoolNoPreconfsFlag.Name)
-	}
-	if ctx.IsSet(TxPoolPreconfTimeoutFlag.Name) {
-		cfg.Preconf.PreconfTimeout = ctx.Duration(TxPoolPreconfTimeoutFlag.Name)
-	}
+	setPreconfCfg(ctx, cfg)
+
 	if ctx.IsSet(TxPoolLocalsFlag.Name) {
 		locals := strings.Split(ctx.String(TxPoolLocalsFlag.Name), ",")
 		for _, account := range locals {
@@ -1698,6 +1709,35 @@ func setTxPool(ctx *cli.Context, cfg *txpool.Config) {
 	}
 	if ctx.IsSet(TxPoolLifetimeFlag.Name) {
 		cfg.Lifetime = ctx.Duration(TxPoolLifetimeFlag.Name)
+	}
+}
+
+func setPreconfCfg(ctx *cli.Context, cfg *txpool.Config) {
+	if ctx.IsSet(TxPoolFromPreconfsFlag.Name) {
+		preconfs := strings.Split(ctx.String(TxPoolFromPreconfsFlag.Name), ",")
+		for _, account := range preconfs {
+			if trimmed := strings.TrimSpace(account); !common.IsHexAddress(trimmed) {
+				Fatalf("Invalid account in --txpool.frompreconfs: %s", trimmed)
+			} else {
+				cfg.Preconf.FromPreconfs = append(cfg.Preconf.FromPreconfs, common.HexToAddress(trimmed))
+			}
+		}
+	}
+	if ctx.IsSet(TxPoolToPreconfsFlag.Name) {
+		preconfs := strings.Split(ctx.String(TxPoolToPreconfsFlag.Name), ",")
+		for _, account := range preconfs {
+			if trimmed := strings.TrimSpace(account); !common.IsHexAddress(trimmed) {
+				Fatalf("Invalid account in --txpool.topreconfs: %s", trimmed)
+			} else {
+				cfg.Preconf.ToPreconfs = append(cfg.Preconf.ToPreconfs, common.HexToAddress(trimmed))
+			}
+		}
+	}
+	if ctx.IsSet(TxPoolAllPreconfsFlag.Name) {
+		cfg.Preconf.AllPreconfs = ctx.Bool(TxPoolAllPreconfsFlag.Name)
+	}
+	if ctx.IsSet(TxPoolPreconfTimeoutFlag.Name) {
+		cfg.Preconf.PreconfTimeout = ctx.Duration(TxPoolPreconfTimeoutFlag.Name)
 	}
 }
 
@@ -1753,6 +1793,15 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	}
 	if ctx.IsSet(RollupComputePendingBlock.Name) {
 		cfg.RollupComputePendingBlock = ctx.Bool(RollupComputePendingBlock.Name)
+	}
+	if ctx.IsSet(MinerPreconfOpNodeHTTP.Name) {
+		cfg.PreconfConfig.OptimismNodeHTTP = ctx.String(MinerPreconfOpNodeHTTP.Name)
+	}
+	if ctx.IsSet(MinerPreconfL1RPCHTTP.Name) {
+		cfg.PreconfConfig.L1RPCHTTP = ctx.String(MinerPreconfL1RPCHTTP.Name)
+	}
+	if ctx.IsSet(MinerPreconfL1DepositAddress.Name) {
+		cfg.PreconfConfig.L1DepositAddress = ctx.String(MinerPreconfL1DepositAddress.Name)
 	}
 }
 

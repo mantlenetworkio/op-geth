@@ -36,6 +36,7 @@ import (
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/preconf"
 )
 
 // Backend wraps all methods required for mining. Only full node is capable
@@ -64,6 +65,8 @@ type Config struct {
 	NewPayloadTimeout time.Duration // The maximum time allowance for creating a new payload
 
 	RollupComputePendingBlock bool // Compute the pending block from tx-pool, instead of copying the latest-block
+
+	PreconfConfig *preconf.MinerConfig
 }
 
 // DefaultConfig contains default settings for miner.
@@ -77,6 +80,8 @@ var DefaultConfig = Config{
 	// run 3 rounds.
 	Recommit:          2 * time.Second,
 	NewPayloadTimeout: 2 * time.Second,
+
+	PreconfConfig: &preconf.DefaultMinerConfig,
 }
 
 // Miner creates blocks and searches for proof-of-work values.
