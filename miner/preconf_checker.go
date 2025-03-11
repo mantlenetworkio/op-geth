@@ -150,18 +150,22 @@ func (c *preconfChecker) UpdateOptimismSyncStatus(newOptimismSyncStatus *preconf
 		c.optimismSyncStatus.HeadL1.Number <= newOptimismSyncStatus.HeadL1.Number &&
 		c.optimismSyncStatus.UnsafeL2.Number <= newOptimismSyncStatus.UnsafeL2.Number &&
 		c.optimismSyncStatus.EngineSyncTarget.Number <= newOptimismSyncStatus.EngineSyncTarget.Number {
+		// update optimism sync status
+		c.optimismSyncStatus = newOptimismSyncStatus
+
 		// update optimism sync status ok
 		c.optimismSyncStatusOk = true
 	} else {
-		log.Error("optimism sync status is not ok", "old", c.optimismSyncStatus, "new", newOptimismSyncStatus)
+		log.Error("optimism sync status is not ok, l1 reorg?", "old", c.optimismSyncStatus, "new", newOptimismSyncStatus)
 	}
 
-	// update deposit txs if current_l1.number or head_l1.number is changed
-	if c.optimismSyncStatus.CurrentL1.Number != newOptimismSyncStatus.CurrentL1.Number ||
-		c.optimismSyncStatus.HeadL1.Number != newOptimismSyncStatus.HeadL1.Number {
+	// update deposit txs if current_l1.number or head_l1.number is changed and optimism sync status is ok
+	if c.optimismSyncStatusOk &&
+		(c.optimismSyncStatus.CurrentL1.Number != newOptimismSyncStatus.CurrentL1.Number ||
+			c.optimismSyncStatus.HeadL1.Number != newOptimismSyncStatus.HeadL1.Number) {
 		depositTxs, err := c.GetDepositTxs(c.optimismSyncStatus.CurrentL1.Number, c.optimismSyncStatus.HeadL1.Number-2)
 		if err != nil {
-			log.Error("failed to get deposit txs", "err", err)
+			log.Error("failed to get deposit txs", "err", err, "start", c.optimismSyncStatus.CurrentL1.Number, "end", c.optimismSyncStatus.HeadL1.Number-2)
 			preconf.MetricsL1Deposit(false, 0)
 		} else {
 			c.depositTxs = depositTxs
@@ -172,9 +176,6 @@ func (c *preconfChecker) UpdateOptimismSyncStatus(newOptimismSyncStatus *preconf
 			"new_current_l1.number", newOptimismSyncStatus.CurrentL1.Number, "new_head_l1.number", newOptimismSyncStatus.HeadL1.Number,
 			"deposit_txs", len(depositTxs))
 	}
-
-	// update optimism sync status
-	c.optimismSyncStatus = newOptimismSyncStatus
 }
 
 func (c *preconfChecker) Preconf(tx *types.Transaction) (*types.Receipt, error) {

@@ -34,10 +34,12 @@ var (
 
 // OpNode status update
 func MetricsOpNodeSyncStatus(status *OptimismSyncStatus, optimismSyncStatusOK bool) {
-	OpNodeL1CurrentGauge.Update(int64(status.CurrentL1.Number))
-	OpNodeL1HeadGauge.Update(int64(status.HeadL1.Number))
-	OpNodeL2UnsafeGauge.Update(int64(status.UnsafeL2.Number))
-	OpNodeEngineSyncTargetGauge.Update(int64(status.EngineSyncTarget.Number))
+	if status != nil {
+		OpNodeL1CurrentGauge.Update(int64(status.CurrentL1.Number))
+		OpNodeL1HeadGauge.Update(int64(status.HeadL1.Number))
+		OpNodeL2UnsafeGauge.Update(int64(status.UnsafeL2.Number))
+		OpNodeEngineSyncTargetGauge.Update(int64(status.EngineSyncTarget.Number))
+	}
 	if optimismSyncStatusOK {
 		OpNodeSyncStatusGauge.Update(1)
 	} else {
