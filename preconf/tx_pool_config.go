@@ -25,6 +25,16 @@ func (c *TxPoolConfig) String() string {
 	return fmt.Sprintf("FromPreconfs: %v, ToPreconfs: %v, AllPreconfs: %v, PreconfTimeout: %v", c.FromPreconfs, c.ToPreconfs, c.AllPreconfs, c.PreconfTimeout)
 }
 
+// Check if from is in FromPreconfs
+func (c *TxPoolConfig) IsPreconfTxFrom(from common.Address) bool {
+	for _, preconfFrom := range c.FromPreconfs {
+		if preconfFrom == from {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *TxPoolConfig) IsPreconfTx(from, to *common.Address) bool {
 	if from == nil || to == nil {
 		return false

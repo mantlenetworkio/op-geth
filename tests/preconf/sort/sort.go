@@ -73,7 +73,7 @@ func SortTest() {
 		config.Addr2: getBalance(ctx, l2client, config.Addr2),
 		config.Addr3: getBalance(ctx, l2client, config.Addr3),
 	}
-	log.Printf("Initial balances - config.Addr1: %v, config.Addr2: %v, config.Addr3: %v", startBalances[config.Addr1], startBalances[config.Addr2], startBalances[config.Addr3])
+	log.Printf("Initial balances - config.Addr1: %s MNT, config.Addr2: %s MNT, config.Addr3: %s MNT", config.BalanceString(startBalances[config.Addr1]), config.BalanceString(startBalances[config.Addr2]), config.BalanceString(startBalances[config.Addr3]))
 
 	// Get starting height
 	startHeight, err := l2client.BlockNumber(ctx)
@@ -161,11 +161,11 @@ func SortTest() {
 		config.Addr2: getBalance(ctx, l2client, config.Addr2),
 		config.Addr3: getBalance(ctx, l2client, config.Addr3),
 	}
-	log.Printf("Final balances - config.Addr1: %v, config.Addr2: %v, config.Addr3: %v", endBalances[config.Addr1], endBalances[config.Addr2], endBalances[config.Addr3])
+	log.Printf("Final balances - config.Addr1: %s MNT, config.Addr2: %s MNT, config.Addr3: %s MNT", config.BalanceString(endBalances[config.Addr1]), config.BalanceString(endBalances[config.Addr2]), config.BalanceString(endBalances[config.Addr3]))
 
 	expectedAddr2 := new(big.Int).Add(startBalances[config.Addr2], new(big.Int).Mul(transferAmount, big.NewInt(2)))
 	if endBalances[config.Addr2].Cmp(expectedAddr2) != 0 {
-		log.Printf("config.Addr2 balance error, expected: %v, actual: %v", expectedAddr2, endBalances[config.Addr2])
+		log.Printf("config.Addr2 balance error, expected: %s MNT, actual: %s MNT", config.BalanceString(expectedAddr2), config.BalanceString(endBalances[config.Addr2]))
 	} else {
 		log.Printf("config.Addr2 balance correct ✅\n")
 	}

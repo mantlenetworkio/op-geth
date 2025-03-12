@@ -6,6 +6,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 // TimedTxSet is a time-based transaction set
@@ -58,6 +59,7 @@ func (s *TimedTxSet) Add(tx *types.Transaction) {
 
 	// Metrics
 	MetricsPendingPreconfInc(1)
+	log.Trace("preconf added", "tx", tx.Hash())
 }
 
 // Contains checks if the transaction is in the set
@@ -98,6 +100,7 @@ func (s *TimedTxSet) Remove(hash common.Hash) {
 
 		// Metrics
 		MetricsPendingPreconfDec(1)
+		log.Trace("preconf removed", "tx", hash)
 	}
 }
 

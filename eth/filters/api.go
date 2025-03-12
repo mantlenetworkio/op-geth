@@ -190,7 +190,7 @@ func (api *FilterAPI) NewPreconfTransaction(ctx context.Context) (*rpc.Subscript
 	rpcSub := notifier.CreateSubscription()
 
 	go func() {
-		preconfTx := make(chan core.NewPreconfTxEvent, 100)
+		preconfTx := make(chan core.NewPreconfTxEvent, txChanSize)
 		preconfTxSub := api.events.SubscribePreconfTxs(preconfTx)
 
 		for {

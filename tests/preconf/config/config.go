@@ -35,3 +35,7 @@ var (
 	Addr2        = common.HexToAddress(ToAddressHex)
 	Addr3        = crypto.PubkeyToAddress(Addr3Key.PublicKey)
 )
+
+func BalanceString(balance *big.Int) string {
+	return new(big.Float).Quo(new(big.Float).SetInt(balance), big.NewFloat(1e18)).String()
+}

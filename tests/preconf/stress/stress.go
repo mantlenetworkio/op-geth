@@ -56,7 +56,7 @@ func stress(rawurl string) {
 		log.Printf("Failed to get initial To balance: %v\n", err)
 		return
 	}
-	log.Printf("To balance before stress test: %s MNT\n", new(big.Float).Quo(new(big.Float).SetInt(toBalanceBefore), big.NewFloat(1e18)).String())
+	log.Printf("To balance before stress test: %s MNT\n", config.BalanceString(toBalanceBefore))
 
 	baseNonce, err := client.PendingNonceAt(ctx, fromAddress)
 	if err != nil {
@@ -122,13 +122,13 @@ func stress(rawurl string) {
 		log.Printf("Failed to get final To balance: %v\n", err)
 		return
 	}
-	log.Printf("To balance after stress test: %s MNT\n", new(big.Float).Quo(new(big.Float).SetInt(toBalanceAfter), big.NewFloat(1e18)).String())
+	log.Printf("To balance after stress test: %s MNT\n", config.BalanceString(toBalanceAfter))
 
 	expectedIncrease := new(big.Int).Mul(big.NewInt(1e14), big.NewInt(int64(config.NumTransactions))) // 0.0001 MNT * NumTransactions
-	log.Printf("Expected increase in To balance: %s MNT\n", new(big.Float).Quo(new(big.Float).SetInt(expectedIncrease), big.NewFloat(1e18)).String())
+	log.Printf("Expected increase in To balance: %s MNT\n", config.BalanceString(expectedIncrease))
 
 	actualIncrease := new(big.Int).Sub(toBalanceAfter, toBalanceBefore)
-	log.Printf("Actual increase in To balance: %s MNT\n", new(big.Float).Quo(new(big.Float).SetInt(actualIncrease), big.NewFloat(1e18)).String())
+	log.Printf("Actual increase in To balance: %s MNT\n", config.BalanceString(actualIncrease))
 	if actualIncrease.Cmp(expectedIncrease) != 0 {
 		log.Println("WARNING: To balance change is incorrect!")
 	} else {

@@ -313,7 +313,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 		// setup preconf subscription
 		event.ResubscribeErr(time.Minute, func(_ context.Context, lastErr error) (event.Subscription, error) {
-			preconfCh := make(chan core.NewPreconfTxEvent, 100)
+			preconfCh := make(chan core.NewPreconfTxEvent, txChanSize)
 			sub, err := eth.seqWebsocketService.Subscribe(ctx, "eth", preconfCh, "newPreconfTransaction")
 			if err != nil {
 				log.Error("Subscribe newPreconfTransaction failed: %v", err)

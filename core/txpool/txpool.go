@@ -352,7 +352,7 @@ func NewTxPool(config Config, chainconfig *params.ChainConfig, chain blockChain)
 	go pool.scheduleReorgLoop()
 
 	// If journaling is enabled and has transactions to journal, load from disk
-	if (!config.NoLocals || config.JournalRemote) && config.Journal != "" {
+	if config.Journal != "" {
 		pool.journal = newTxJournal(config.Journal)
 
 		add := pool.AddLocals
@@ -362,7 +362,7 @@ func NewTxPool(config Config, chainconfig *params.ChainConfig, chain blockChain)
 		if err := pool.journal.load(add); err != nil {
 			log.Warn("Failed to load transaction journal", "err", err)
 		}
-		if err := pool.journal.rotate(pool.toJournal()); err != nil {
+		if err := pool.journal.rotate(pool.toJournal(), pool.preconfTxs.Transactions()); err != nil {
 			log.Warn("Failed to rotate transaction journal", "err", err)
 		}
 	}
@@ -445,7 +445,7 @@ func (pool *TxPool) loop() {
 		case <-journal.C:
 			if pool.journal != nil {
 				pool.mu.Lock()
-				if err := pool.journal.rotate(pool.toJournal()); err != nil {
+				if err := pool.journal.rotate(pool.toJournal(), pool.preconfTxs.Transactions()); err != nil {
 					log.Warn("Failed to rotate local tx journal", "err", err)
 				}
 				pool.mu.Unlock()
@@ -1208,23 +1208,24 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) []*types.Transac
 
 	preconfTxs := make([]*types.Transaction, 0)
 	for _, tx := range news {
+		txHash := tx.Hash()
 		// check tx is pending
 		pool.mu.RLock()
 		from, _ := types.Sender(pool.signer, tx)
 		isPending := pool.pending[from] != nil && pool.pending[from].txs.Get(tx.Nonce()) != nil
 		pool.mu.RUnlock()
 		if !isPending {
-			log.Debug("tx is not pending", "tx", tx.Hash())
+			log.Debug("tx is not pending", "tx", txHash)
 			continue
 		}
 
 		// check tx is preconf tx
 		if tx.To() == nil {
-			log.Debug("preconf address is nil", "tx", tx.Hash())
+			log.Debug("preconf address is nil", "tx", txHash)
 			continue
 		}
 		if !pool.config.Preconf.IsPreconfTx(&from, tx.To()) {
-			log.Debug("preconf from and to is not match", "tx", tx.Hash())
+			log.Debug("preconf from and to is not match", "tx", txHash)
 			continue
 		}
 
@@ -1238,7 +1239,7 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) []*types.Transac
 
 		// default preconf event
 		event := core.NewPreconfTxEvent{
-			TxHash:                 tx.Hash(),
+			TxHash:                 txHash,
 			PredictedL2BlockNumber: big.NewInt(0),
 		}
 		// timeout
@@ -1265,13 +1266,25 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) []*types.Transac
 		// send preconf event
 		pool.preconfTxFeed.Send(event)
 
+		// why only preconf success tx can be added to preconfTxs?
+		pool.preconfTxs.Add(tx)
+
 		// add preconf success tx to preconfTxs
 		if event.Status {
-			pool.preconfTxs.Add(tx)
 			preconf.PreconfTxSuccessMeter.Mark(1)
+			log.Trace("preconf success", "tx", txHash)
+			// add preconf success tx to journal
+			if pool.journal != nil {
+				if err := pool.journal.insert(tx); err != nil {
+					log.Warn("Failed to journal preconf success transaction", "tx", txHash, "err", err)
+				}
+				log.Trace("preconf success transaction journaled", "tx", txHash)
+			}
 		} else {
 			preconf.PreconfTxFailureMeter.Mark(1)
+			log.Trace("preconf failure", "tx", txHash)
 		}
+
 	}
 
 	return preconfTxs
@@ -1802,7 +1815,7 @@ func (pool *TxPool) truncatePending() {
 	spammers := prque.New[int64, common.Address](nil)
 	for addr, list := range pool.pending {
 		// Only evict transactions from high rollers
-		if !pool.locals.contains(addr) && uint64(list.Len()) > pool.config.AccountSlots {
+		if !pool.locals.contains(addr) && !pool.config.Preconf.IsPreconfTxFrom(addr) && uint64(list.Len()) > pool.config.AccountSlots {
 			spammers.Push(addr, int64(list.Len()))
 		}
 	}
