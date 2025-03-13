@@ -316,7 +316,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			preconfCh := make(chan core.NewPreconfTxEvent, txChanSize)
 			sub, err := eth.seqWebsocketService.Subscribe(ctx, "eth", preconfCh, "newPreconfTransaction")
 			if err != nil {
-				log.Error("Subscribe newPreconfTransaction failed: %v", err)
+				log.Error("Subscribe newPreconfTransaction failed", "error", err)
 				return nil, err
 			}
 
@@ -327,10 +327,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				for {
 					select {
 					case <-ctx.Done():
-						log.Error("Preconf resubscribe context error:", err)
+						log.Error("Preconf resubscribe context error", "error", err)
 						return
 					case err := <-sub.Err():
-						log.Error("Preconf resubscribe subscription error:", err)
+						log.Error("Preconf resubscribe subscription", "error", err, "lastErr", lastErr)
 						return
 					case tx := <-preconfCh:
 						eth.preconfTxFeed.Send(tx)

@@ -2,7 +2,6 @@ package sort
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"math/big"
 	"sync"
@@ -12,25 +11,22 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/ethereum/go-ethereum/internal/ethapi"
 	"github.com/ethereum/go-ethereum/tests/preconf/config"
 )
 
-// sortTest Order verification test
 func SortTest() {
-	log.Printf("SortTest starting ...\n")
-	defer log.Printf("SortTest completed\n")
+	sortTest(config.SequencerEndpoint)
+	sortTest(config.L2RpcEndpoint)
+}
+
+// sortTest Order verification test
+func sortTest(endpoint string) {
+	log.Printf("SortTest %s starting ...\n", endpoint)
+	defer log.Printf("SortTest %s completed\n", endpoint)
 
 	ctx := context.Background()
 
-	// Initialize client
-	l1client, err := ethclient.Dial(config.L1RpcEndpoint)
-	if err != nil {
-		log.Fatalf("failed to connect to L1 RPC: %v", err)
-	}
-	defer l1client.Close()
-
-	l2client, err := ethclient.Dial(config.SequencerEndpoint)
+	l2client, err := ethclient.Dial(endpoint)
 	if err != nil {
 		log.Fatalf("failed to connect to L2 RPC: %v", err)
 	}
@@ -43,10 +39,6 @@ func SortTest() {
 	}
 
 	// Create transaction signers
-	funderAuth, err := bind.NewKeyedTransactorWithChainID(config.FunderKey, l2ChainID)
-	if err != nil {
-		log.Fatalf("failed to create funder signer: %v", err)
-	}
 	addr1Auth, err := bind.NewKeyedTransactorWithChainID(config.Addr1Key, l2ChainID)
 	if err != nil {
 		log.Fatalf("failed to create config.Addr1 signer: %v", err)
@@ -60,18 +52,18 @@ func SortTest() {
 	oneMNT := big.NewInt(1e18)
 	transferAmount := new(big.Int).Mul(big.NewInt(config.NumTransactions), oneMNT)
 	fundAmount := new(big.Int).Mul(transferAmount, big.NewInt(10)) // Extra for gas
-	if err := fundAccount(ctx, l2client, funderAuth, config.Addr1, fundAmount); err != nil {
+	if err := config.FundAccount(ctx, l2client, config.Addr1, fundAmount); err != nil {
 		log.Fatalf("failed to fund config.Addr1: %v", err)
 	}
-	if err := fundAccount(ctx, l2client, funderAuth, config.Addr3, fundAmount); err != nil {
+	if err := config.FundAccount(ctx, l2client, config.Addr3, fundAmount); err != nil {
 		log.Fatalf("failed to fund config.Addr3: %v", err)
 	}
 
 	// Record initial balances
 	startBalances := map[common.Address]*big.Int{
-		config.Addr1: getBalance(ctx, l2client, config.Addr1),
-		config.Addr2: getBalance(ctx, l2client, config.Addr2),
-		config.Addr3: getBalance(ctx, l2client, config.Addr3),
+		config.Addr1: config.GetBalance(ctx, l2client, config.Addr1),
+		config.Addr2: config.GetBalance(ctx, l2client, config.Addr2),
+		config.Addr3: config.GetBalance(ctx, l2client, config.Addr3),
 	}
 	log.Printf("Initial balances - config.Addr1: %s MNT, config.Addr2: %s MNT, config.Addr3: %s MNT", config.BalanceString(startBalances[config.Addr1]), config.BalanceString(startBalances[config.Addr2]), config.BalanceString(startBalances[config.Addr3]))
 
@@ -157,9 +149,9 @@ func SortTest() {
 
 	// Verify final balances
 	endBalances := map[common.Address]*big.Int{
-		config.Addr1: getBalance(ctx, l2client, config.Addr1),
-		config.Addr2: getBalance(ctx, l2client, config.Addr2),
-		config.Addr3: getBalance(ctx, l2client, config.Addr3),
+		config.Addr1: config.GetBalance(ctx, l2client, config.Addr1),
+		config.Addr2: config.GetBalance(ctx, l2client, config.Addr2),
+		config.Addr3: config.GetBalance(ctx, l2client, config.Addr3),
 	}
 	log.Printf("Final balances - config.Addr1: %s MNT, config.Addr2: %s MNT, config.Addr3: %s MNT", config.BalanceString(endBalances[config.Addr1]), config.BalanceString(endBalances[config.Addr2]), config.BalanceString(endBalances[config.Addr3]))
 
@@ -171,66 +163,6 @@ func SortTest() {
 	}
 }
 
-// sendMNT Send MNT transaction
-func sendMNT(ctx context.Context, client *ethclient.Client, auth *bind.TransactOpts, to common.Address, amount *big.Int, nonce uint64) (*types.Transaction, error) {
-	if nonce == 0 {
-		var err error
-		nonce, err = client.PendingNonceAt(ctx, auth.From)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get nonce: %v", err)
-		}
-	}
-
-	tx := types.NewTransaction(nonce, to, amount, config.TransferGasLimit, big.NewInt(2e9), nil)
-	signedTx, err := auth.Signer(auth.From, tx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to sign transaction: %v", err)
-	}
-	if err := client.SendTransaction(ctx, signedTx); err != nil {
-		return nil, fmt.Errorf("failed to send transaction: %v", err)
-	}
-	return signedTx, nil
-}
-
-// sendMNTWithPreconf Send MNT transaction with pre-confirmed
-func sendMNTWithPreconf(ctx context.Context, client *ethclient.Client, auth *bind.TransactOpts, to common.Address, amount *big.Int, nonce uint64) (*types.Transaction, error) {
-	if nonce == 0 {
-		var err error
-		nonce, err = client.PendingNonceAt(ctx, auth.From)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get nonce: %v", err)
-		}
-	}
-
-	tx := types.NewTransaction(nonce, to, amount, config.TransferGasLimit, config.GasPrice, nil)
-	signedTx, err := auth.Signer(auth.From, tx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to sign transaction: %v", err)
-	}
-
-	var result ethapi.PreconfTransactionResult
-	if err := client.SendTransactionWithPreconf(ctx, signedTx, &result); err != nil {
-		return nil, fmt.Errorf("failed to send transaction: %v", err)
-	}
-	if result.Status == "failed" {
-		return nil, fmt.Errorf("transaction pre-confirmed failed: %s", result.Reason)
-	}
-	return signedTx, nil
-}
-
-// fundAccount Fund the account with initial amount
-func fundAccount(ctx context.Context, client *ethclient.Client, auth *bind.TransactOpts, to common.Address, amount *big.Int) error {
-	tx, err := sendMNT(ctx, client, auth, to, amount, 0)
-	if err != nil {
-		return err
-	}
-	_, err = bind.WaitMined(ctx, client, tx)
-	if err != nil {
-		return fmt.Errorf("failed to wait for transaction %s confirmation: %v", tx.Hash().Hex(), err)
-	}
-	return nil
-}
-
 // sendBatchTxs Send batch transactions
 func sendBatchTxs(ctx context.Context, client *ethclient.Client, auth *bind.TransactOpts, to common.Address, amount *big.Int, count int, txs *[]*types.Transaction) {
 	nonce, err := client.PendingNonceAt(ctx, auth.From)
@@ -240,7 +172,7 @@ func sendBatchTxs(ctx context.Context, client *ethclient.Client, auth *bind.Tran
 	}
 
 	for i := 0; i < count; i++ {
-		tx, err := sendMNT(ctx, client, auth, to, amount, nonce+uint64(i))
+		tx, err := config.SendMNT(ctx, client, auth, to, amount, nonce+uint64(i))
 		if err != nil {
 			log.Printf("failed to send transaction %d: %v", i, err)
 			continue
@@ -259,7 +191,7 @@ func sendBatchPreconfTxs(ctx context.Context, client *ethclient.Client, auth *bi
 	}
 
 	for i := 0; i < count; i++ {
-		tx, err := sendMNTWithPreconf(ctx, client, auth, to, amount, nonce+uint64(i))
+		tx, err := config.SendMNTWithPreconf(ctx, client, auth, to, amount, nonce+uint64(i))
 		if err != nil {
 			log.Printf("failed to send transaction %d: %v", i, err)
 			continue
@@ -267,14 +199,4 @@ func sendBatchPreconfTxs(ctx context.Context, client *ethclient.Client, auth *bi
 		*txs = append(*txs, tx)
 		time.Sleep(config.NonceInterval)
 	}
-}
-
-// getBalance Get account balance
-func getBalance(ctx context.Context, client *ethclient.Client, addr common.Address) *big.Int {
-	balance, err := client.BalanceAt(ctx, addr, nil)
-	if err != nil {
-		log.Printf("failed to get balance for %s: %v", addr.Hex(), err)
-		return big.NewInt(0)
-	}
-	return balance
 }

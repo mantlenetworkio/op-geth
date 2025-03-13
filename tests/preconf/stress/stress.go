@@ -19,14 +19,14 @@ import (
 )
 
 func StressTest() {
-	log.Printf("StressTest starting ...\n")
-	defer log.Printf("StressTest completed\n")
-
 	stress(config.SequencerEndpoint)
 	stress(config.L2RpcEndpoint)
 }
 
 func stress(rawurl string) {
+	log.Printf("StressTest %s starting ...\n", rawurl)
+	defer log.Printf("StressTest %s completed\n", rawurl)
+
 	ctx := context.Background()
 	client, err := ethclient.Dial(rawurl)
 	if err != nil {

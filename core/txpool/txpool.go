@@ -1282,7 +1282,7 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) []*types.Transac
 			}
 		} else {
 			preconf.PreconfTxFailureMeter.Mark(1)
-			log.Trace("preconf failure", "tx", txHash)
+			log.Trace("preconf failure", "tx", txHash, "reason", event.Reason)
 		}
 
 	}

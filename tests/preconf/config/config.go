@@ -1,11 +1,18 @@
 package config
 
 import (
+	"context"
+	"fmt"
+	"log"
 	"math/big"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/internal/ethapi"
 )
 
 // Configuration
@@ -34,8 +41,105 @@ var (
 	Addr1        = crypto.PubkeyToAddress(Addr1Key.PublicKey)
 	Addr2        = common.HexToAddress(ToAddressHex)
 	Addr3        = crypto.PubkeyToAddress(Addr3Key.PublicKey)
+	TestERC20    = common.HexToAddress("0xBd3867d8f687c5eB4a8B2c8C1ED959AE8992eF01")
+	TestPay      = common.HexToAddress("0x115693d25CDE8A00066b1f22390AfD2464eD565B")
+	// TestERC20 calldata
+	APPROVEDATA     = fmt.Sprintf("0x095ea7b3000000000000000000000000%s00000000000000000000000000000000000000000000d3c21bcecceda0ffffff", TestPay.Hex()[2:])
+	MINTDATA        = fmt.Sprintf("0x40c10f19000000000000000000000000%s0000000000000000000000000000000000000000000000000de0b6b3a7640000", Addr3.Hex()[2:])
+	BALANCEOFDATA   = "0x70a08231000000000000000000000000%s"
+	ALLOWANCEOFDATA = fmt.Sprintf("0xdd62ed3e000000000000000000000000%s000000000000000000000000%s", Addr3.Hex()[2:], TestPay.Hex()[2:])
+	TRANSFERDATA    = "0x2ccb1b30000000000000000000000000%s%s"
 )
 
 func BalanceString(balance *big.Int) string {
 	return new(big.Float).Quo(new(big.Float).SetInt(balance), big.NewFloat(1e18)).String()
+}
+
+// GetBalance Get account balance
+func GetBalance(ctx context.Context, client *ethclient.Client, addr common.Address) *big.Int {
+	balance, err := client.BalanceAt(ctx, addr, nil)
+	if err != nil {
+		log.Printf("failed to get balance for %s: %v", addr.Hex(), err)
+		return big.NewInt(0)
+	}
+	return balance
+}
+
+func GetNonce(ctx context.Context, client *ethclient.Client, addr common.Address) uint64 {
+	nonce, err := client.PendingNonceAt(ctx, addr)
+	if err != nil {
+		log.Printf("failed to get nonce for %s: %v", addr.Hex(), err)
+		return 0
+	}
+	return nonce
+}
+
+// SendMNT Send MNT transaction
+func SendMNT(ctx context.Context, client *ethclient.Client, auth *bind.TransactOpts, to common.Address, amount *big.Int, nonce uint64) (*types.Transaction, error) {
+	if nonce == 0 {
+		var err error
+		nonce, err = client.PendingNonceAt(ctx, auth.From)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get nonce: %v", err)
+		}
+	}
+
+	tx := types.NewTransaction(nonce, to, amount, TransferGasLimit, GasPrice, nil)
+	signedTx, err := auth.Signer(auth.From, tx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign transaction: %v", err)
+	}
+	if err := client.SendTransaction(ctx, signedTx); err != nil {
+		return nil, fmt.Errorf("failed to send transaction: %v", err)
+	}
+	return signedTx, nil
+}
+
+// SendMNTWithPreconf Send MNT transaction with pre-confirmed
+func SendMNTWithPreconf(ctx context.Context, client *ethclient.Client, auth *bind.TransactOpts, to common.Address, amount *big.Int, nonce uint64) (*types.Transaction, error) {
+	if nonce == 0 {
+		var err error
+		nonce, err = client.PendingNonceAt(ctx, auth.From)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get nonce: %v", err)
+		}
+	}
+
+	tx := types.NewTransaction(nonce, to, amount, TransferGasLimit, GasPrice, nil)
+	signedTx, err := auth.Signer(auth.From, tx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign transaction: %v", err)
+	}
+
+	var result ethapi.PreconfTransactionResult
+	if err := client.SendTransactionWithPreconf(ctx, signedTx, &result); err != nil {
+		return nil, fmt.Errorf("failed to send transaction: %v", err)
+	}
+	if result.Status == "failed" {
+		return nil, fmt.Errorf("transaction pre-confirmed failed: %s", result.Reason)
+	}
+	return signedTx, nil
+}
+
+// FundAccount Fund the account with initial amount
+func FundAccount(ctx context.Context, client *ethclient.Client, to common.Address, amount *big.Int) error {
+	l2ChainID, err := client.ChainID(ctx)
+	if err != nil {
+		log.Fatalf("failed to get L2 chain ID: %v", err)
+	}
+
+	funderAuth, err := bind.NewKeyedTransactorWithChainID(FunderKey, l2ChainID)
+	if err != nil {
+		log.Fatalf("failed to create funder signer: %v", err)
+	}
+
+	tx, err := SendMNT(ctx, client, funderAuth, to, amount, 0)
+	if err != nil {
+		return err
+	}
+	_, err = bind.WaitMined(ctx, client, tx)
+	if err != nil {
+		return fmt.Errorf("failed to wait for transaction %s confirmation: %v", tx.Hash().Hex(), err)
+	}
+	return nil
 }
