@@ -95,6 +95,9 @@ func erc20Test(endpoint string) {
 		time.Sleep(1 * time.Second) // let user transfer go first
 		nonce := config.GetNonce(ctx, client, addr1Auth.From)
 		for i := 0; i < config.NumTransactions; i++ {
+			if i%100 == 0 {
+				log.Printf("paying %d", i)
+			}
 			if err := pay(ctx, client, addr1Auth, i, nonce+uint64(i), transferAmount, &addr1Txs, &addr1PreconfFailedTx); err != nil {
 				if strings.Contains(err.Error(), "transaction preconf failed") {
 					continue
@@ -128,6 +131,9 @@ func erc20Test(endpoint string) {
 		defer wg.Done()
 		nonce := config.GetNonce(ctx, client, addr3Auth.From)
 		for i := 0; i < config.NumTransactions; i++ {
+			if i%100 == 0 {
+				log.Printf("transferring %d", i)
+			}
 			err := transfer(ctx, client, nonce+uint64(i), transferAmount, addr3Auth, &addr3Txs)
 			if err != nil {
 				if strings.Contains(err.Error(), "execution reverted: insufficient balance") {
@@ -192,7 +198,7 @@ func checkERC20(ctx context.Context, client *ethclient.Client) {
 	}
 
 	// 1 * Number.Transactions * 1e18
-	foundAmount := big.NewInt(10).Mul(big.NewInt(config.NumTransactions), big.NewInt(1e18))
+	foundAmount := big.NewInt(0).Mul(big.NewInt(1e6), big.NewInt(1e18))
 	config.FundAccount(ctx, client, config.Addr1, foundAmount)
 	config.FundAccount(ctx, client, config.Addr3, foundAmount)
 

@@ -41,8 +41,8 @@ var (
 	Addr1        = crypto.PubkeyToAddress(Addr1Key.PublicKey)
 	Addr2        = common.HexToAddress(ToAddressHex)
 	Addr3        = crypto.PubkeyToAddress(Addr3Key.PublicKey)
-	TestERC20    = common.HexToAddress("0x5FbDB2315678afecb367f032d93F642f64180aa3")
-	TestPay      = common.HexToAddress("0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512")
+	TestERC20    = common.HexToAddress("0x92fd3a6Ea14721559aFabc634dA9E0c614358cad")
+	TestPay      = common.HexToAddress("0x253B504f1cD229E86237185a4F42F33f89D4d95f")
 	// TestERC20 calldata
 	APPROVEDATA     = fmt.Sprintf("0x095ea7b3000000000000000000000000%s00000000000000000000000000000000000000000000d3c21bcecceda0ffffff", TestPay.Hex()[2:])
 	MINTDATA        = fmt.Sprintf("0x40c10f19000000000000000000000000%s0000000000000000000000000000000000000000000000000de0b6b3a7640000", Addr3.Hex()[2:])
@@ -116,7 +116,7 @@ func SendMNTWithPreconf(ctx context.Context, client *ethclient.Client, auth *bin
 		return nil, fmt.Errorf("failed to send transaction: %v", err)
 	}
 	if result.Status == "failed" {
-		return nil, fmt.Errorf("transaction pre-confirmed failed: %s", result.Reason)
+		return nil, fmt.Errorf("transaction pre-confirmed failed: %s, %s", result.Reason, result.TxHash)
 	}
 	return signedTx, nil
 }

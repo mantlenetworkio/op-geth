@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"math/rand"
 	"os"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -36,7 +37,9 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/preconf"
 	"github.com/ethereum/go-ethereum/trie"
+	"github.com/stretchr/testify/assert"
 )
 
 var (
@@ -2527,4 +2530,158 @@ func BenchmarkMultiAccountBatchInsert(b *testing.B) {
 	for _, tx := range batches {
 		pool.AddRemotesSync([]*types.Transaction{tx})
 	}
+}
+
+func TestExtractPreconfTxsFromPending(t *testing.T) {
+	// Create private keys needed for testing
+	key1, _ := crypto.GenerateKey()
+	key2, _ := crypto.GenerateKey()
+	key3, _ := crypto.GenerateKey()
+
+	addr1 := crypto.PubkeyToAddress(key1.PublicKey)
+	addr2 := crypto.PubkeyToAddress(key2.PublicKey)
+	addr3 := crypto.PubkeyToAddress(key3.PublicKey)
+
+	signer := types.LatestSigner(params.TestChainConfig)
+
+	// Create test transactions
+	tx1 := types.NewTransaction(0, addr2, big.NewInt(100), 21000, big.NewInt(1), nil)
+	tx1, _ = types.SignTx(tx1, signer, key1)
+
+	tx2 := types.NewTransaction(1, addr2, big.NewInt(200), 21000, big.NewInt(1), nil)
+	tx2, _ = types.SignTx(tx2, signer, key1)
+
+	tx3 := types.NewTransaction(0, addr1, big.NewInt(300), 21000, big.NewInt(1), nil)
+	tx3, _ = types.SignTx(tx3, signer, key2)
+
+	tx4 := types.NewTransaction(0, addr3, big.NewInt(400), 21000, big.NewInt(1), nil)
+	tx4, _ = types.SignTx(tx4, signer, key3)
+
+	// Create a test TxPool
+	pool := &TxPool{
+		config: Config{
+			Preconf: &preconf.TxPoolConfig{
+				FromPreconfs: []common.Address{addr1},
+				ToPreconfs:   []common.Address{addr2},
+			},
+		},
+		signer:     signer,
+		preconfTxs: preconf.NewTimedTxSet(),
+	}
+
+	// Add pre-confirmed transaction
+	pool.preconfTxs.Add(tx1)
+
+	// Test case 1: Basic functionality test
+	t.Run("Basic functionality", func(t *testing.T) {
+		// Create pending transaction mapping
+		pending := make(map[common.Address]types.Transactions)
+		pending[addr1] = types.Transactions{tx1, tx2}
+		pending[addr2] = types.Transactions{tx3}
+		pending[addr3] = types.Transactions{tx4}
+		assert.Equal(t, 3, len(pending))
+		assert.Equal(t, 2, len(pending[addr1]))
+		assert.Equal(t, 1, len(pending[addr2]))
+		assert.Equal(t, 1, len(pending[addr3]))
+
+		preconfTxs := pool.extractPreconfTxsFromPending(pending)
+
+		// Verify pre-confirmed transaction list
+		assert.Equal(t, 1, len(preconfTxs))
+		assert.Equal(t, tx1.Hash(), preconfTxs[0].Hash())
+
+		// Verify updated pending transaction mapping
+		assert.True(t, reflect.DeepEqual(pending, pending))
+		assert.Equal(t, 2, len(pending))
+		assert.Equal(t, 0, len(pending[addr1]))
+		assert.Equal(t, 1, len(pending[addr2]))
+		assert.Equal(t, tx3.Hash(), pending[addr2][0].Hash())
+		assert.Equal(t, 1, len(pending[addr3]))
+		assert.Equal(t, tx4.Hash(), pending[addr3][0].Hash())
+	})
+
+	// Test case 2: Empty pending transaction mapping
+	t.Run("Empty pending map", func(t *testing.T) {
+		emptyPending := make(map[common.Address]types.Transactions)
+		preconfTxs := pool.extractPreconfTxsFromPending(emptyPending)
+
+		assert.Equal(t, 0, len(preconfTxs))
+		assert.Equal(t, 0, len(emptyPending))
+	})
+
+	// Test case 3: Pre-confirmed transaction not in pending transaction mapping
+	t.Run("Preconf tx not in pending", func(t *testing.T) {
+		pendingWithoutPreconf := make(map[common.Address]types.Transactions)
+		pendingWithoutPreconf[addr2] = types.Transactions{tx3}
+		pendingWithoutPreconf[addr3] = types.Transactions{tx4}
+		assert.Equal(t, 2, len(pendingWithoutPreconf))
+
+		preconfTxs := pool.extractPreconfTxsFromPending(pendingWithoutPreconf)
+
+		assert.Equal(t, 0, len(preconfTxs))
+		assert.Equal(t, 2, len(pendingWithoutPreconf))
+	})
+
+	// Test case 4: All transactions are pre-confirmed transactions
+	t.Run("All transactions are preconf", func(t *testing.T) {
+		pool.config.Preconf.AllPreconfs = true
+		defer func() { pool.config.Preconf.AllPreconfs = false }()
+
+		// Add all transactions to the pre-confirmed set
+		pool.preconfTxs.Add(tx2)
+		pool.preconfTxs.Add(tx3)
+		pool.preconfTxs.Add(tx4)
+		defer func() {
+			pool.preconfTxs = preconf.NewTimedTxSet()
+			pool.preconfTxs.Add(tx1)
+		}()
+
+		pending := make(map[common.Address]types.Transactions)
+		pending[addr1] = types.Transactions{tx1, tx2}
+		pending[addr2] = types.Transactions{tx3}
+		pending[addr3] = types.Transactions{tx4}
+		assert.Equal(t, 3, len(pending))
+		assert.Equal(t, 2, len(pending[addr1]))
+		assert.Equal(t, 1, len(pending[addr2]))
+		assert.Equal(t, 1, len(pending[addr3]))
+
+		preconfTxs := pool.extractPreconfTxsFromPending(pending)
+
+		assert.Equal(t, 4, len(preconfTxs))
+		assert.Equal(t, 0, len(pending))
+	})
+
+	// Test case 5: Pre-confirmed transaction set is empty
+	t.Run("Empty preconf set", func(t *testing.T) {
+		emptyPreconfPool := &TxPool{
+			config: Config{
+				Preconf: &preconf.TxPoolConfig{
+					FromPreconfs: []common.Address{addr1},
+					ToPreconfs:   []common.Address{addr2},
+				},
+			},
+			signer:     signer,
+			preconfTxs: preconf.NewTimedTxSet(),
+		}
+		pending := make(map[common.Address]types.Transactions)
+		pending[addr1] = types.Transactions{tx1, tx2}
+		pending[addr2] = types.Transactions{tx3}
+		pending[addr3] = types.Transactions{tx4}
+		assert.Equal(t, 3, len(pending))
+		assert.Equal(t, 2, len(pending[addr1]))
+		assert.Equal(t, 1, len(pending[addr2]))
+		assert.Equal(t, 1, len(pending[addr3]))
+
+		preconfTxs := emptyPreconfPool.extractPreconfTxsFromPending(pending)
+
+		assert.Equal(t, 0, len(preconfTxs))
+
+		// Only the transaction from addr1 to addr2 should be removed
+		assert.Equal(t, 2, len(pending))
+		assert.Equal(t, 0, len(pending[addr1]))
+		assert.Equal(t, 1, len(pending[addr2]))
+		assert.Equal(t, 1, len(pending[addr3]))
+		assert.Equal(t, tx3.Hash(), pending[addr2][0].Hash())
+		assert.Equal(t, tx4.Hash(), pending[addr3][0].Hash())
+	})
 }

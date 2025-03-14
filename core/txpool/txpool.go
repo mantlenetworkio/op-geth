@@ -624,10 +624,32 @@ func (pool *TxPool) Locals() []common.Address {
 // PendingPreconfTxs retrieves the preconf transactions and the pending transactions.
 func (pool *TxPool) PendingPreconfTxs(enforceTips bool) ([]*types.Transaction, map[common.Address]types.Transactions) {
 	pending := pool.Pending(enforceTips)
+	return pool.extractPreconfTxsFromPending(pending), pending
+}
+
+func (pool *TxPool) extractPreconfTxsFromPending(pending map[common.Address]types.Transactions) []*types.Transaction {
+	// removes pending tx that are not in preconf txs
+	for from, txs := range pending {
+		if pool.config.Preconf.IsPreconfTxFrom(from) {
+			// Create a new slice to hold the transactions that are not deleted
+			var newTxs []*types.Transaction
+			for _, tx := range txs {
+				if pool.config.Preconf.IsPreconfTx(&from, tx.To()) && !pool.preconfTxs.Contains(tx.Hash()) {
+					continue
+				}
+				newTxs = append(newTxs, tx)
+			}
+			if len(newTxs) == 0 {
+				delete(pending, from)
+			} else {
+				pending[from] = newTxs
+			}
+		}
+	}
 
 	// removes the preconf transaction from the pending map, maintaining the order.
-	preconfTxs := pool.preconfTxs.Transactions()
-	for _, preconfTx := range preconfTxs {
+	preconfTxs := make([]*types.Transaction, 0)
+	for _, preconfTx := range pool.preconfTxs.Transactions() {
 		from, _ := types.Sender(pool.signer, preconfTx)
 
 		// Get the slice of transactions for the target address
@@ -654,8 +676,10 @@ func (pool *TxPool) PendingPreconfTxs(enforceTips bool) ([]*types.Transaction, m
 		} else {
 			pending[from] = newTxs // Replace with the new slice
 		}
+
+		preconfTxs = append(preconfTxs, preconfTx)
 	}
-	return preconfTxs, pending
+	return preconfTxs
 }
 
 // local retrieves all currently known local transactions, grouped by origin
@@ -999,9 +1023,6 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (replaced bool, err e
 
 	log.Trace("Pooled new future transaction", "hash", hash, "from", from, "to", tx.To())
 
-	// handle preconf txs
-	pool.handlePreconfTxs([]*types.Transaction{tx})
-
 	return replaced, nil
 }
 
@@ -1201,6 +1222,9 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 		<-done
 	}
 
+	// handle preconf txs
+	pool.handlePreconfTxs(news)
+
 	return errs
 }
 
@@ -1237,6 +1261,7 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) []*types.Transac
 			Tx:            tx,
 			PreconfResult: result,
 		})
+		log.Trace("txpool sent preconf tx request", "tx", txHash)
 
 		// default preconf event
 		event := core.NewPreconfTxEvent{
@@ -1249,6 +1274,7 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) []*types.Transac
 		// wait for miner.worker preconf response
 		select {
 		case response := <-result:
+			log.Trace("txpool received preconf tx response", "tx", txHash)
 			event.Status = response.Err == nil
 			if !event.Status {
 				event.Reason = response.Err.Error()
