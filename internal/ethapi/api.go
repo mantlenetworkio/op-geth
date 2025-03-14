@@ -2188,7 +2188,7 @@ func (s *TransactionAPI) SendRawTransactionWithPreconf(ctx context.Context, inpu
 				status, reason := "success", ""
 				if !preconfTx.Status {
 					status = "failed"
-					reason = preconfTx.Reason.Error()
+					reason = preconfTx.Reason
 				}
 				return &PreconfTransactionResult{
 					TxHash:      preconfTx.TxHash,

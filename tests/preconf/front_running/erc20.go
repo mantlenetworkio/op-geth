@@ -67,6 +67,8 @@ func erc20Test(endpoint string) {
 		log.Fatalf("failed to send mint transaction: %v", err)
 	}
 
+	log.Printf("addr1 balance: %s MNT", config.BalanceString(config.GetBalance(ctx, client, config.Addr1)))
+
 	// check addr3 erc20 balance
 	addr1BeforeBalance := erc20Balance(ctx, client, config.Addr1)
 	addr2BeforeBalance := erc20Balance(ctx, client, config.Addr2)

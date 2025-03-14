@@ -41,8 +41,8 @@ var (
 	Addr1        = crypto.PubkeyToAddress(Addr1Key.PublicKey)
 	Addr2        = common.HexToAddress(ToAddressHex)
 	Addr3        = crypto.PubkeyToAddress(Addr3Key.PublicKey)
-	TestERC20    = common.HexToAddress("0xBd3867d8f687c5eB4a8B2c8C1ED959AE8992eF01")
-	TestPay      = common.HexToAddress("0x115693d25CDE8A00066b1f22390AfD2464eD565B")
+	TestERC20    = common.HexToAddress("0x5FbDB2315678afecb367f032d93F642f64180aa3")
+	TestPay      = common.HexToAddress("0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512")
 	// TestERC20 calldata
 	APPROVEDATA     = fmt.Sprintf("0x095ea7b3000000000000000000000000%s00000000000000000000000000000000000000000000d3c21bcecceda0ffffff", TestPay.Hex()[2:])
 	MINTDATA        = fmt.Sprintf("0x40c10f19000000000000000000000000%s0000000000000000000000000000000000000000000000000de0b6b3a7640000", Addr3.Hex()[2:])
@@ -137,9 +137,12 @@ func FundAccount(ctx context.Context, client *ethclient.Client, to common.Addres
 	if err != nil {
 		return err
 	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	_, err = bind.WaitMined(ctx, client, tx)
 	if err != nil {
 		return fmt.Errorf("failed to wait for transaction %s confirmation: %v", tx.Hash().Hex(), err)
 	}
+	log.Printf("Funded account %s with %s MNT", to.Hex(), BalanceString(amount))
 	return nil
 }

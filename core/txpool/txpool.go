@@ -998,6 +998,10 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (replaced bool, err e
 	pool.journalTx(from, tx)
 
 	log.Trace("Pooled new future transaction", "hash", hash, "from", from, "to", tx.To())
+
+	// handle preconf txs
+	pool.handlePreconfTxs([]*types.Transaction{tx})
+
 	return replaced, nil
 }
 
@@ -1197,9 +1201,6 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 		<-done
 	}
 
-	// preconf requests
-	pool.handlePreconfTxs(news)
-
 	return errs
 }
 
@@ -1249,37 +1250,38 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) []*types.Transac
 		select {
 		case response := <-result:
 			event.Status = response.Err == nil
-			event.Reason = response.Err
+			if !event.Status {
+				event.Reason = response.Err.Error()
+			}
 			if response.Receipt != nil {
 				event.Status = response.Receipt.Status == types.ReceiptStatusSuccessful
 				if !event.Status {
-					event.Reason = vm.ErrExecutionReverted
+					event.Reason = vm.ErrExecutionReverted.Error()
 				}
 				event.PredictedL2BlockNumber.Add(response.Receipt.BlockNumber, big.NewInt(1)) // new tx can only be sealed in the next block
 			}
 			preconfTxs = append(preconfTxs, tx)
 		case <-timeout.C:
 			event.Status = false
-			event.Reason = errors.New("preconf timeout")
+			event.Reason = "preconf timeout"
 		}
 
 		// send preconf event
 		pool.preconfTxFeed.Send(event)
 
-		// why only preconf success tx can be added to preconfTxs?
+		// whether preconf tx success or not, it can be added to preconfTxs and journal
 		pool.preconfTxs.Add(tx)
+		if pool.journal != nil {
+			if err := pool.journal.insert(tx); err != nil {
+				log.Warn("Failed to journal preconf transaction", "tx", txHash, "err", err)
+			}
+			log.Trace("preconf transaction journaled", "tx", txHash)
+		}
 
-		// add preconf success tx to preconfTxs
+		// add preconf success tx to journal
 		if event.Status {
 			preconf.PreconfTxSuccessMeter.Mark(1)
 			log.Trace("preconf success", "tx", txHash)
-			// add preconf success tx to journal
-			if pool.journal != nil {
-				if err := pool.journal.insert(tx); err != nil {
-					log.Warn("Failed to journal preconf success transaction", "tx", txHash, "err", err)
-				}
-				log.Trace("preconf success transaction journaled", "tx", txHash)
-			}
 		} else {
 			preconf.PreconfTxFailureMeter.Mark(1)
 			log.Trace("preconf failure", "tx", txHash, "reason", event.Reason)

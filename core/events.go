@@ -27,7 +27,7 @@ import (
 type NewPreconfTxEvent struct {
 	TxHash                 common.Hash
 	Status                 bool     // "success" | "fail"
-	Reason                 error    // "optional failure message"
+	Reason                 string   // "optional failure message"
 	PredictedL2BlockNumber *big.Int // "predicted L2 block number"
 }
 

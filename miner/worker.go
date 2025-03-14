@@ -1074,7 +1074,7 @@ func (w *worker) commitTimedTransactions(env *environment, txs []*types.Transact
 			log.Trace("Gas limit exceeded for current block", "sender", from)
 
 		case errors.Is(err, core.ErrNonceTooLow):
-			// New head notification data race between the transaction pool and miner, shift
+			// New head notification data race between the transaction pool and miner
 			log.Trace("Skipping transaction with low nonce", "sender", from, "nonce", tx.Nonce())
 
 		case errors.Is(err, core.ErrNonceTooHigh):

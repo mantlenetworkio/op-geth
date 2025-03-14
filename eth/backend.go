@@ -334,9 +334,13 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 						return
 					case tx := <-preconfCh:
 						eth.preconfTxFeed.Send(tx)
+						if !tx.Status {
+							log.Trace("preconf transaction failed by seqWebsocketService", "tx", tx.TxHash.Hex(), "reason", tx.Reason)
+						}
 					}
 				}
 			}()
+			log.Trace("Preconf subscription seqWebsocketService started")
 
 			return sub, nil
 		})

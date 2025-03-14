@@ -76,11 +76,12 @@ func sortTest(endpoint string) {
 	// Send batch transactions
 	var wg sync.WaitGroup
 	var addr1Txs, addr3Txs []*types.Transaction
+	failedAddr1Txs := make(map[common.Hash]string)
 	wg.Add(2)
 
 	go func() {
 		defer wg.Done()
-		sendBatchPreconfTxs(ctx, l2client, addr1Auth, config.Addr2, oneMNT, config.NumTransactions, &addr1Txs)
+		sendBatchPreconfTxs(ctx, l2client, addr1Auth, config.Addr2, oneMNT, config.NumTransactions, &addr1Txs, &failedAddr1Txs)
 		for _, tx := range addr1Txs {
 			ctx, cancel := context.WithTimeout(ctx, 1*time.Second)
 			defer cancel()
@@ -141,7 +142,9 @@ func sortTest(endpoint string) {
 
 			// Verify order: config.Addr1's transaction must be before config.Addr3's
 			if lastFrom == config.Addr3 && from == config.Addr1 {
-				log.Fatalf("Block %d: Order error, config.Addr1 (%s) after config.Addr3 (%s)", i, from.Hex(), lastFrom.Hex())
+				if _, ok := failedAddr1Txs[tx.Hash()]; !ok {
+					log.Fatalf("Block %d: Order error, config.Addr1 (%s) after config.Addr3 (%s), tx: %s", i, from.Hex(), lastFrom.Hex(), tx.Hash().Hex())
+				}
 			}
 			lastFrom = from
 		}
@@ -172,6 +175,9 @@ func sendBatchTxs(ctx context.Context, client *ethclient.Client, auth *bind.Tran
 	}
 
 	for i := 0; i < count; i++ {
+		if i%100 == 0 {
+			log.Printf("sending MNT %d", i)
+		}
 		tx, err := config.SendMNT(ctx, client, auth, to, amount, nonce+uint64(i))
 		if err != nil {
 			log.Printf("failed to send transaction %d: %v", i, err)
@@ -183,7 +189,7 @@ func sendBatchTxs(ctx context.Context, client *ethclient.Client, auth *bind.Tran
 }
 
 // sendBatchPreconfTxs Send batch pre-confirmed transactions
-func sendBatchPreconfTxs(ctx context.Context, client *ethclient.Client, auth *bind.TransactOpts, to common.Address, amount *big.Int, count int, txs *[]*types.Transaction) {
+func sendBatchPreconfTxs(ctx context.Context, client *ethclient.Client, auth *bind.TransactOpts, to common.Address, amount *big.Int, count int, txs *[]*types.Transaction, failedTxs *map[common.Hash]string) {
 	nonce, err := client.PendingNonceAt(ctx, auth.From)
 	if err != nil {
 		log.Printf("failed to get nonce for %s: %v", auth.From.Hex(), err)
@@ -191,8 +197,14 @@ func sendBatchPreconfTxs(ctx context.Context, client *ethclient.Client, auth *bi
 	}
 
 	for i := 0; i < count; i++ {
+		if i%100 == 0 {
+			log.Printf("sending MNT with preconf %d", i)
+		}
 		tx, err := config.SendMNTWithPreconf(ctx, client, auth, to, amount, nonce+uint64(i))
 		if err != nil {
+			if err.Error() == "transaction pre-confirmed failed" {
+				(*failedTxs)[tx.Hash()] = err.Error()
+			}
 			log.Printf("failed to send transaction %d: %v", i, err)
 			continue
 		}
