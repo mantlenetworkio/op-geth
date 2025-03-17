@@ -2,13 +2,18 @@ package config
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"fmt"
 	"log"
 	"math/big"
+	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -31,6 +36,8 @@ const (
 	TestPayBytecodes    = "0x6080604052348015600e575f80fd5b5061038d8061001c5f395ff3fe608060405234801561000f575f80fd5b5060043610610034575f3560e01c8063a5f2a15214610038578063f7e94bbb14610068575b5f80fd5b610052600480360381019061004d9190610201565b610084565b60405161005f919061026b565b60405180910390f35b610082600480360381019061007d9190610284565b61012e565b005b5f805f9054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff166323b872dd8585856040518463ffffffff1660e01b81526004016100e2939291906102cd565b6020604051808303815f875af11580156100fe573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610122919061032c565b50600190509392505050565b805f806101000a81548173ffffffffffffffffffffffffffffffffffffffff021916908373ffffffffffffffffffffffffffffffffffffffff16021790555050565b5f80fd5b5f73ffffffffffffffffffffffffffffffffffffffff82169050919050565b5f61019d82610174565b9050919050565b6101ad81610193565b81146101b7575f80fd5b50565b5f813590506101c8816101a4565b92915050565b5f819050919050565b6101e0816101ce565b81146101ea575f80fd5b50565b5f813590506101fb816101d7565b92915050565b5f805f6060848603121561021857610217610170565b5b5f610225868287016101ba565b9350506020610236868287016101ba565b9250506040610247868287016101ed565b9150509250925092565b5f8115159050919050565b61026581610251565b82525050565b5f60208201905061027e5f83018461025c565b92915050565b5f6020828403121561029957610298610170565b5b5f6102a6848285016101ba565b91505092915050565b6102b881610193565b82525050565b6102c7816101ce565b82525050565b5f6060820190506102e05f8301866102af565b6102ed60208301856102af565b6102fa60408301846102be565b949350505050565b61030b81610251565b8114610315575f80fd5b50565b5f8151905061032681610302565b92915050565b5f6020828403121561034157610340610170565b5b5f61034e84828501610318565b9150509291505056fea264697066735822122006413856350c8f5b892784fe9200e18a4a10d1c5d78ee669db75ec31ed4e238764736f6c634300081a0033"
 	OptimismPortalProxy = "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853"
 	TransferGasLimit    = 210000000
+	PrintMod            = 50
+	WaitTime            = 5 * time.Second
 )
 
 var (
@@ -38,17 +45,21 @@ var (
 	FunderKey, _ = crypto.HexToECDSA(PrivateKeyHex)
 	Addr1Key, _  = crypto.HexToECDSA(Addr1Pk)
 	Addr3Key, _  = crypto.HexToECDSA(Addr3Pk)
+	FundAddr     = crypto.PubkeyToAddress(FunderKey.PublicKey)
 	Addr1        = crypto.PubkeyToAddress(Addr1Key.PublicKey)
 	Addr2        = common.HexToAddress(ToAddressHex)
 	Addr3        = crypto.PubkeyToAddress(Addr3Key.PublicKey)
-	TestERC20    = common.HexToAddress("0x92fd3a6Ea14721559aFabc634dA9E0c614358cad")
-	TestPay      = common.HexToAddress("0x253B504f1cD229E86237185a4F42F33f89D4d95f")
+	TestERC20    = common.HexToAddress("0x5FbDB2315678afecb367f032d93F642f64180aa3")
+	TestPay      = common.HexToAddress("0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512")
 	// TestERC20 calldata
 	APPROVEDATA     = fmt.Sprintf("0x095ea7b3000000000000000000000000%s00000000000000000000000000000000000000000000d3c21bcecceda0ffffff", TestPay.Hex()[2:])
 	MINTDATA        = fmt.Sprintf("0x40c10f19000000000000000000000000%s0000000000000000000000000000000000000000000000000de0b6b3a7640000", Addr3.Hex()[2:])
 	BALANCEOFDATA   = "0x70a08231000000000000000000000000%s"
 	ALLOWANCEOFDATA = fmt.Sprintf("0xdd62ed3e000000000000000000000000%s000000000000000000000000%s", Addr3.Hex()[2:], TestPay.Hex()[2:])
-	TRANSFERDATA    = "0x2ccb1b30000000000000000000000000%s%s"
+	TRANSFERDATA    = "0x2ccb1b30000000000000000000000000%s%s" // e.g. 0x2ccb1b3000000000000000000000000071920E3cb420fbD8Ba9a495E6f801c50375ea1270000000000000000000000000000000000000000000000000de0b6b3a7640000
+	// DepositTx
+	DepositAddr = common.HexToAddress(OptimismPortalProxy)
+	// DepositData = "0x40c10f19000000000000000000000000%s0000000000000000000000000000000000000000000000000de0b6b3a7640000"
 )
 
 func BalanceString(balance *big.Int) string {
@@ -73,6 +84,78 @@ func GetNonce(ctx context.Context, client *ethclient.Client, addr common.Address
 	}
 	return nonce
 }
+func SendDepositTx(ctx context.Context, client *ethclient.Client, auth *bind.TransactOpts, to common.Address, data string, nonce uint64) (*types.Transaction, error) {
+	if nonce == 0 {
+		var err error
+		nonce, err = client.PendingNonceAt(ctx, auth.From)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get nonce: %v", err)
+		}
+	}
+
+	abiJSON := `[
+		{
+			"name": "depositTransaction",
+			"type": "function",
+			"inputs": [
+				{"name": "_ethTxValue", "type": "uint256"},
+				{"name": "_mntValue", "type": "uint256"},
+				{"name": "_to", "type": "address"},
+				{"name": "_mntTxValue", "type": "uint256"},
+				{"name": "_gasLimit", "type": "uint64"},
+				{"name": "_isCreation", "type": "bool"},
+				{"name": "_data", "type": "bytes"}
+			]
+		}
+	]`
+
+	// Parse ABI
+	parsedABI, err := abi.JSON(strings.NewReader(abiJSON))
+	if err != nil {
+		log.Fatalf("Failed to parse ABI: %v\n", err)
+	}
+
+	// Prepare parameters
+	args := []interface{}{
+		big.NewInt(0),            // uint256: 0
+		big.NewInt(0),            // uint256: 0
+		to,                       // address
+		big.NewInt(0),            // uint256: 0
+		uint64(100000),           // uint64: 210000000
+		false,                    // bool: false
+		hexutil.MustDecode(data), // bytes
+	}
+
+	// Encode calldata
+	calldata, err := parsedABI.Pack("depositTransaction", args...)
+	if err != nil {
+		log.Fatalf("failed to pack calldata: %v", err)
+	}
+
+	// Output result (hexadecimal)
+	// log.Printf("Calldata: 0x%x\n", calldata)
+
+	gas, err := client.EstimateGas(ctx, ethereum.CallMsg{
+		From:  auth.From,
+		To:    &DepositAddr,
+		Data:  calldata,
+		Value: big.NewInt(0),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to estimate gas: %v", err)
+	}
+	// log.Println("deposit tx gas", gas)
+
+	tx := types.NewTransaction(nonce, DepositAddr, big.NewInt(0), gas, GasPrice, calldata)
+	signedTx, err := auth.Signer(auth.From, tx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign transaction: %v", err)
+	}
+	if err := client.SendTransaction(ctx, signedTx); err != nil {
+		return nil, fmt.Errorf("failed to send transaction: %v", err)
+	}
+	return signedTx, nil
+}
 
 // SendMNT Send MNT transaction
 func SendMNT(ctx context.Context, client *ethclient.Client, auth *bind.TransactOpts, to common.Address, amount *big.Int, nonce uint64) (*types.Transaction, error) {
@@ -84,7 +167,17 @@ func SendMNT(ctx context.Context, client *ethclient.Client, auth *bind.TransactO
 		}
 	}
 
-	tx := types.NewTransaction(nonce, to, amount, TransferGasLimit, GasPrice, nil)
+	gas, err := client.EstimateGas(ctx, ethereum.CallMsg{
+		From:  auth.From,
+		To:    &to,
+		Value: amount,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to estimate gas: %v", err)
+	}
+	log.Println("send native token gas", gas)
+
+	tx := types.NewTransaction(nonce, to, amount, gas, GasPrice, nil)
 	signedTx, err := auth.Signer(auth.From, tx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign transaction: %v", err)
@@ -123,12 +216,12 @@ func SendMNTWithPreconf(ctx context.Context, client *ethclient.Client, auth *bin
 
 // FundAccount Fund the account with initial amount
 func FundAccount(ctx context.Context, client *ethclient.Client, to common.Address, amount *big.Int) error {
-	l2ChainID, err := client.ChainID(ctx)
+	chainID, err := client.ChainID(ctx)
 	if err != nil {
 		log.Fatalf("failed to get L2 chain ID: %v", err)
 	}
 
-	funderAuth, err := bind.NewKeyedTransactorWithChainID(FunderKey, l2ChainID)
+	funderAuth, err := bind.NewKeyedTransactorWithChainID(FunderKey, chainID)
 	if err != nil {
 		log.Fatalf("failed to create funder signer: %v", err)
 	}
@@ -137,12 +230,29 @@ func FundAccount(ctx context.Context, client *ethclient.Client, to common.Addres
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, WaitTime)
 	defer cancel()
 	_, err = bind.WaitMined(ctx, client, tx)
 	if err != nil {
-		return fmt.Errorf("failed to wait for transaction %s confirmation: %v", tx.Hash().Hex(), err)
+		return fmt.Errorf("failed to wait for send native token transaction %s confirmation: %v", tx.Hash().Hex(), err)
 	}
 	log.Printf("Funded account %s with %s MNT", to.Hex(), BalanceString(amount))
 	return nil
+}
+
+func GetL1Auth(ctx context.Context, privateKey *ecdsa.PrivateKey) (*ethclient.Client, *bind.TransactOpts, error) {
+	l1client, err := ethclient.Dial(L1RpcEndpoint)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to connect to L1 RPC: %v", err)
+	}
+	defer l1client.Close()
+	l1chainID, err := l1client.NetworkID(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get L1 chain ID: %v", err)
+	}
+	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, l1chainID)
+	if err != nil {
+		log.Fatalf("failed to create %s signer: %v", crypto.PubkeyToAddress(privateKey.PublicKey).Hex(), err)
+	}
+	return l1client, auth, nil
 }

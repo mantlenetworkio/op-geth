@@ -69,7 +69,8 @@ func erc20Test(endpoint string) {
 
 	log.Printf("addr1 balance: %s MNT", config.BalanceString(config.GetBalance(ctx, client, config.Addr1)))
 
-	// check addr3 erc20 balance
+	// check addresses erc20 balance
+	addrFundBeforeBalance := erc20Balance(ctx, client, config.FundAddr)
 	addr1BeforeBalance := erc20Balance(ctx, client, config.Addr1)
 	addr2BeforeBalance := erc20Balance(ctx, client, config.Addr2)
 	addr3BeforeBalance := erc20Balance(ctx, client, config.Addr3)
@@ -87,15 +88,56 @@ func erc20Test(endpoint string) {
 	// Send batch transactions
 	var wg sync.WaitGroup
 	var addr1Txs, addr1PreconfFailedTx, addr3Txs []*types.Transaction
-	wg.Add(2)
+	wg.Add(3)
 
 	go func() {
 		defer wg.Done()
 
-		time.Sleep(1 * time.Second) // let user transfer go first
+		l1client, l1Addr3Auth, err := config.GetL1Auth(ctx, config.Addr3Key)
+		if err != nil {
+			log.Fatalf("failed to get L1 auth: %v", err)
+		}
+		fundAmount := big.NewInt(0).Mul(big.NewInt(1e18), big.NewInt(1000))
+		if err := config.FundAccount(ctx, l1client, config.Addr3, fundAmount); err != nil {
+			log.Fatalf("failed to fund account: %v", err)
+		}
+
+		depositTxs := make([]*types.Transaction, 0)
+		for i := 0; i < config.NumTransactions/20+1; i++ {
+			if i%config.PrintMod == 0 {
+				log.Printf("depositTx %d", i)
+			}
+			datastring := fmt.Sprintf(config.TRANSFERDATA, config.FundAddr.Hex()[2:], hex.EncodeToString(common.LeftPadBytes(transferAmount.Bytes(), 32)))
+			tx, err := config.SendDepositTx(ctx, l1client, l1Addr3Auth, config.TestERC20, datastring, 0)
+			if err != nil {
+				log.Fatalf("failed to send deposit transaction: %v", err)
+			}
+			depositTxs = append(depositTxs, tx)
+
+			time.Sleep(1 * time.Second)
+		}
+		for _, tx := range depositTxs {
+			ctx, cancel := context.WithTimeout(ctx, config.WaitTime)
+			defer cancel()
+			receipt, err := bind.WaitMined(ctx, l1client, tx)
+			if err != nil {
+				log.Fatalf("failed to wait for deposit transaction: %v", err)
+			}
+			if receipt.Status != types.ReceiptStatusSuccessful {
+				log.Fatalf("deposit transaction failed: %v, tx: %s", receipt.Status, tx.Hash().Hex())
+			}
+			// fmt.Println("deposit tx success", tx.Hash().Hex(), "block number", receipt.BlockNumber.Uint64())
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+
+		log.Printf("waiting for deposit tx and user transfer go first, and then pay")
+		time.Sleep(48 * time.Second) // let deposit tx and user transfer go first
 		nonce := config.GetNonce(ctx, client, addr1Auth.From)
 		for i := 0; i < config.NumTransactions; i++ {
-			if i%100 == 0 {
+			if i%config.PrintMod == 0 {
 				log.Printf("paying %d", i)
 			}
 			if err := pay(ctx, client, addr1Auth, i, nonce+uint64(i), transferAmount, &addr1Txs, &addr1PreconfFailedTx); err != nil {
@@ -106,7 +148,7 @@ func erc20Test(endpoint string) {
 			}
 		}
 		for _, tx := range addr1Txs {
-			ctx, cancel := context.WithTimeout(ctx, 1*time.Second)
+			ctx, cancel := context.WithTimeout(ctx, config.WaitTime)
 			defer cancel()
 			receipt, err := bind.WaitMined(ctx, client, tx)
 			if err == nil && receipt != nil {
@@ -114,9 +156,12 @@ func erc20Test(endpoint string) {
 					log.Fatalf("Preconf Transaction %s failed but preconf succeed - Status: %d, Actual Block: %d\n", tx.Hash(), receipt.Status, receipt.BlockNumber.Uint64())
 				}
 			}
+			// if receipt != nil && receipt.Status == types.ReceiptStatusSuccessful {
+			// 	log.Printf("preconf success block: %d", receipt.BlockNumber.Uint64())
+			// }
 		}
 		for _, tx := range addr1PreconfFailedTx {
-			ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			ctx, cancel := context.WithTimeout(ctx, config.WaitTime)
 			defer cancel()
 			receipt, err := bind.WaitMined(ctx, client, tx)
 			if err == nil && receipt != nil {
@@ -129,9 +174,12 @@ func erc20Test(endpoint string) {
 
 	go func() {
 		defer wg.Done()
+
+		log.Printf("waiting for deposit tx go first, and then transfer")
+		time.Sleep(46 * time.Second) // let deposit tx go first
 		nonce := config.GetNonce(ctx, client, addr3Auth.From)
 		for i := 0; i < config.NumTransactions; i++ {
-			if i%100 == 0 {
+			if i%config.PrintMod == 0 {
 				log.Printf("transferring %d", i)
 			}
 			err := transfer(ctx, client, nonce+uint64(i), transferAmount, addr3Auth, &addr3Txs)
@@ -143,12 +191,19 @@ func erc20Test(endpoint string) {
 			}
 		}
 		for _, tx := range addr3Txs {
-			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			ctx, cancel := context.WithTimeout(ctx, config.WaitTime)
 			defer cancel()
 			_, err := bind.WaitMined(ctx, client, tx)
 			if err != nil {
-				log.Fatalf("failed to wait for transaction: %v", err)
+				if strings.Contains(err.Error(), "context deadline exceeded") {
+					log.Printf("transfer tx replaced by deposit tx, from: %s, nonce: %d", addr3Auth.From.Hex(), tx.Nonce())
+					continue
+				}
+				log.Fatalf("failed to wait for transfer transaction: %v, tx: %s", err, tx.Hash().Hex())
 			}
+			// if receipt != nil && receipt.Status == types.ReceiptStatusSuccessful {
+			// 	log.Printf("transfer success block: %d", receipt.BlockNumber.Uint64())
+			// }
 		}
 	}()
 
@@ -156,18 +211,21 @@ func erc20Test(endpoint string) {
 	wg.Wait()
 	time.Sleep(5 * time.Second)
 
-	// check addr3 erc20 balance
+	// check addresses erc20 balance
+	addrFundAfterBalance := erc20Balance(ctx, client, config.FundAddr)
 	addr1AfterBalance := erc20Balance(ctx, client, config.Addr1)
 	addr2AfterBalance := erc20Balance(ctx, client, config.Addr2)
 	addr3AfterBalance := erc20Balance(ctx, client, config.Addr3)
 
+	addrFundAfterBalance.Sub(addrFundAfterBalance, addrFundBeforeBalance)
 	addr1AfterBalance.Sub(addr1AfterBalance, addr1BeforeBalance)
 	addr2AfterBalance.Sub(addr2AfterBalance, addr2BeforeBalance)
 	addr3AfterBalance.Sub(addr3BeforeBalance, addr3AfterBalance)
 
 	add := big.NewInt(0).Add(addr1AfterBalance, addr2AfterBalance)
+	add.Add(add, addrFundAfterBalance)
 	if add.Cmp(addr3AfterBalance) != 0 {
-		log.Fatalf("addr1 + addr2 is not equal to addr3 sub")
+		log.Fatalf("addr1 + addr2 + addrFund is not equal to addr3 sub")
 	}
 	fmt.Println("erc20 test completed✅")
 }
@@ -198,7 +256,7 @@ func checkERC20(ctx context.Context, client *ethclient.Client) {
 	}
 
 	// 1 * Number.Transactions * 1e18
-	foundAmount := big.NewInt(0).Mul(big.NewInt(1e6), big.NewInt(1e18))
+	foundAmount := big.NewInt(0).Mul(big.NewInt(1e4), big.NewInt(1e18))
 	config.FundAccount(ctx, client, config.Addr1, foundAmount)
 	config.FundAccount(ctx, client, config.Addr3, foundAmount)
 
@@ -238,9 +296,11 @@ func sendERC20Tx(ctx context.Context, client *ethclient.Client, auth *bind.Trans
 		return fmt.Errorf("failed to send transaction: %v", err)
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, config.WaitTime)
+	defer cancel()
 	receipt, err := bind.WaitMined(ctx, client, signedTx)
 	if err != nil {
-		return fmt.Errorf("failed to wait for transaction: %v", err)
+		return fmt.Errorf("failed to wait for send erc20transaction: %v", err)
 	}
 	if receipt.Status != types.ReceiptStatusSuccessful {
 		return fmt.Errorf("transaction failed, tx: %s", signedTx.Hash().Hex())

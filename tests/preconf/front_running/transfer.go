@@ -91,6 +91,8 @@ func transferTest(endpoint string) {
 	}
 
 	for _, tx := range txs {
+		ctx, cancel := context.WithTimeout(ctx, config.PrintMod)
+		defer cancel()
 		receipt, err := bind.WaitMined(ctx, client, tx)
 		if err != nil {
 			log.Fatalf("failed to wait for transaction %s confirmation: %v", tx.Hash().Hex(), err)
