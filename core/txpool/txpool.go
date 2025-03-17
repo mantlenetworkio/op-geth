@@ -692,69 +692,25 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	// Transactor should have enough funds to cover the costs
 	// cost == V + GP * GL
 	cost := tx.Cost()
+	balance := pool.currentState.GetBalance(from)
+	if b := balance; b.Cmp(cost) < 0 {
+		return core.ErrInsufficientFunds
+	}
 
 	if err = types.MetaTxCheck(tx.Data()); err != nil {
 		return err
 	}
 
-	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx,
-		pool.chainconfig.IsMetaTxV2(pool.chain.CurrentBlock().Time),
-		pool.chainconfig.IsMetaTxV3(pool.chain.CurrentBlock().Time),
-		pool.chainconfig.IsMantleEverest(pool.chain.CurrentBlock().Time))
-	if err != nil {
-		return err
-	}
-	var userBalance *big.Int
-	if metaTxParams != nil {
-		if metaTxParams.ExpireHeight < pool.chain.CurrentBlock().Number.Uint64() {
-			return types.ErrExpiredMetaTx
-		}
-		txGasCost := new(big.Int).Sub(cost, tx.Value())
-		sponsorAmount, selfPayAmount := types.CalculateSponsorPercentAmount(metaTxParams, txGasCost)
-		selfPayAmount = new(big.Int).Add(selfPayAmount, tx.Value())
-
-		sponsorBalance := pool.currentState.GetBalance(metaTxParams.GasFeeSponsor)
-		if sponsorBalance.Cmp(sponsorAmount) < 0 {
-			return types.ErrSponsorBalanceNotEnough
-		}
-		selfBalance := pool.currentState.GetBalance(from)
-		if selfBalance.Cmp(selfPayAmount) < 0 {
-			return core.ErrInsufficientFunds
-		}
-		userBalance = new(big.Int).Add(selfBalance, sponsorAmount)
-	} else {
-		userBalance = pool.currentState.GetBalance(from)
-		// Transactor should have enough funds to cover the costs
-		// cost == V + GP * GL
-		if b := userBalance; b.Cmp(cost) < 0 {
-			return core.ErrInsufficientFunds
-		}
-	}
-
 	// Verify that replacing transactions will not result in overdraft
 	list := pool.pending[from]
 	if list != nil { // Sender already has pending txs
-		_, sponsorCostSum := pool.validateMetaTxList(list)
-		userBalance = new(big.Int).Add(userBalance, sponsorCostSum)
 		sum := new(big.Int).Add(cost, list.totalcost)
 		if repl := list.txs.Get(tx.Nonce()); repl != nil {
-			replMetaTxParams, err := types.DecodeAndVerifyMetaTxParams(repl,
-				pool.chainconfig.IsMetaTxV2(pool.chain.CurrentBlock().Time),
-				pool.chainconfig.IsMetaTxV3(pool.chain.CurrentBlock().Time),
-				pool.chainconfig.IsMantleEverest(pool.chain.CurrentBlock().Time))
-			if err != nil {
-				return err
-			}
 			replCost := repl.Cost()
-			if replMetaTxParams != nil {
-				replTxGasCost := new(big.Int).Sub(repl.Cost(), repl.Value())
-				sponsorAmount, _ := types.CalculateSponsorPercentAmount(replMetaTxParams, replTxGasCost)
-				replCost = new(big.Int).Sub(replCost, sponsorAmount)
-			}
 			sum.Sub(sum, replCost)
 		}
-		if userBalance.Cmp(sum) < 0 {
-			log.Trace("Replacing transactions would overdraft", "sender", from, "balance", userBalance, "required", sum)
+		if balance.Cmp(sum) < 0 {
+			log.Trace("Replacing transactions would overdraft", "sender", from, "balance", balance, "required", sum)
 			return ErrOverdraft
 		}
 	}
@@ -1524,47 +1480,6 @@ func (pool *TxPool) reset(oldHead, newHead *types.Header) {
 	pool.shanghai = pool.chainconfig.IsShanghai(uint64(time.Now().Unix()))
 }
 
-func (pool *TxPool) validateMetaTxList(list *list) ([]*types.Transaction, *big.Int) {
-	currHeight := pool.chain.CurrentBlock().Number.Uint64()
-
-	var invalidMetaTxs []*types.Transaction
-	sponsorCostSum := big.NewInt(0)
-	sponsorCostSumPerSponsor := make(map[common.Address]*big.Int)
-	for _, tx := range list.txs.Flatten() {
-		metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx,
-			pool.chainconfig.IsMetaTxV2(pool.chain.CurrentBlock().Time),
-			pool.chainconfig.IsMetaTxV3(pool.chain.CurrentBlock().Time),
-			pool.chainconfig.IsMantleEverest(pool.chain.CurrentBlock().Time))
-		if err != nil {
-			invalidMetaTxs = append(invalidMetaTxs, tx)
-			continue
-		}
-		if metaTxParams == nil {
-			continue
-		}
-		if metaTxParams.ExpireHeight < currHeight {
-			invalidMetaTxs = append(invalidMetaTxs, tx)
-			continue
-		}
-		txGasCost := new(big.Int).Mul(tx.GasPrice(), new(big.Int).SetUint64(tx.Gas()))
-		sponsorAmount, _ := types.CalculateSponsorPercentAmount(metaTxParams, txGasCost)
-		var sponsorAmountAccumulated *big.Int
-		sponsorAmountAccumulated, ok := sponsorCostSumPerSponsor[metaTxParams.GasFeeSponsor]
-		if !ok {
-			sponsorAmountAccumulated = big.NewInt(0)
-		}
-		sponsorAmountAccumulated = big.NewInt(0).Add(sponsorAmountAccumulated, sponsorAmount)
-		if pool.currentState.GetBalance(metaTxParams.GasFeeSponsor).Cmp(sponsorAmountAccumulated) >= 0 {
-			sponsorCostSum = new(big.Int).Add(sponsorCostSum, sponsorAmount)
-			sponsorCostSumPerSponsor[metaTxParams.GasFeeSponsor] = sponsorAmountAccumulated
-		} else {
-			invalidMetaTxs = append(invalidMetaTxs, tx)
-			continue
-		}
-	}
-	return invalidMetaTxs, sponsorCostSum
-}
-
 // promoteExecutables moves transactions that have become processable from the
 // future queue to the set of pending transactions. During this process, all
 // invalidated transactions (low nonce, low balance) are deleted.
@@ -1585,16 +1500,7 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) []*types.Trans
 			pool.all.Remove(hash)
 		}
 		log.Trace("Removed old queued transactions", "count", len(forwards))
-		invalidMetaTxs, sponsorCostSum := pool.validateMetaTxList(list)
-		for _, tx := range invalidMetaTxs {
-			list.Remove(tx)
-			hash := tx.Hash()
-			pool.all.Remove(hash)
-		}
-		log.Trace("Removed invalid queued meta transaction", "count", len(invalidMetaTxs))
 		balance := pool.currentState.GetBalance(addr)
-		balance = new(big.Int).Add(balance, sponsorCostSum)
-
 		// Drop all transactions that are too costly (low balance or out of gas)
 		drops, _ := list.Filter(balance, pool.currentMaxGas)
 		for _, tx := range drops {
@@ -1792,16 +1698,7 @@ func (pool *TxPool) demoteUnexecutables() {
 			pool.all.Remove(hash)
 			log.Trace("Removed old pending transaction", "hash", hash)
 		}
-		invalidMetaTxs, sponsorCostSum := pool.validateMetaTxList(list)
-		for _, tx := range invalidMetaTxs {
-			list.Remove(tx)
-			hash := tx.Hash()
-			pool.all.Remove(hash)
-			log.Trace("Removed invalid pending meta transaction", "hash", hash)
-		}
 		balance := pool.currentState.GetBalance(addr)
-		balance = new(big.Int).Add(balance, sponsorCostSum)
-
 		// Drop all transactions that are too costly (low balance or out of gas), and queue any invalids back for later
 		drops, invalids := list.Filter(balance, pool.currentMaxGas)
 		for _, tx := range drops {

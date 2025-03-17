@@ -1286,6 +1286,10 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		runMode = core.GasEstimationWithSkipCheckBalanceMode
 	}
 
+	if err = types.MetaTxCheck(args.data()); err != nil {
+		return 0, err
+	}
+
 	// Recap the highest gas limit with account's available balance.
 	if feeCap.BitLen() != 0 {
 		state, _, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
@@ -1294,10 +1298,6 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		}
 
 		balance := state.GetBalance(*args.From) // from can't be nil
-		metaTxParams, err := types.DecodeMetaTxParams(args.data())
-		if err != nil {
-			return 0, err
-		}
 
 		available := new(big.Int).Set(balance)
 		if args.Value != nil && args.Value.ToInt().Int64() > 0 {
@@ -1308,19 +1308,6 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		}
 
 		allowance := new(big.Int).Div(available, feeCap)
-
-		if metaTxParams != nil {
-			sponsorBalance := state.GetBalance(metaTxParams.GasFeeSponsor)
-			sponsorAllowance := new(big.Int).Div(sponsorBalance, feeCap)
-			if metaTxParams.SponsorPercent == types.OneHundredPercent {
-				allowance = sponsorAllowance
-			} else {
-				// calculate sponsor & from allowance with sponsorPercent, use min value as allowance
-				fromAllowanceWithSponsorPercent := calculateGasAllowanceWithSponsorPercent(allowance, types.OneHundredPercent-metaTxParams.SponsorPercent)
-				sponsorAllowanceWithSponsorPercent := calculateGasAllowanceWithSponsorPercent(sponsorAllowance, metaTxParams.SponsorPercent)
-				allowance = math.BigMin(sponsorAllowanceWithSponsorPercent, fromAllowanceWithSponsorPercent)
-			}
-		}
 
 		// If the allowance is larger than maximum uint64, skip checking
 		// If the runMode is core.GasEstimationWithSkipCheckBalanceMode, skip checking
@@ -1417,50 +1404,6 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		}
 	}
 	return hexutil.Uint64(hi * gasBuffer / 100), nil
-}
-
-func calculateGasAllowanceWithSponsorPercent(allowance *big.Int, sponsorPercent uint64) *big.Int {
-	allowance.Div(allowance, big.NewInt(0).SetUint64(sponsorPercent))
-	allowance.Mul(allowance, big.NewInt(0).SetUint64(types.OneHundredPercent))
-	return allowance
-}
-
-func calculateGasWithAllowance(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, gasPriceForEstimate *big.Int, gasCap uint64) (uint64, error) {
-	state, _, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
-	if err != nil {
-		return 0, err
-	}
-	balance := state.GetBalance(*args.From) // from can't be nil
-	metaTxParams, err := types.DecodeMetaTxParams(args.data())
-	if err != nil {
-		return 0, err
-	}
-
-	available := new(big.Int).Set(balance)
-	if args.Value != nil {
-		if args.Value.ToInt().Cmp(available) >= 0 {
-			return 0, core.ErrInsufficientFundsForTransfer
-		}
-		available.Sub(available, args.Value.ToInt())
-	}
-	if metaTxParams != nil {
-		feeCap := new(big.Int).Mul(gasPriceForEstimate, big.NewInt(0).SetUint64(gasCap))
-		sponsorAmount, _ := types.CalculateSponsorPercentAmount(metaTxParams, feeCap)
-		sponsorBalance := state.GetBalance(metaTxParams.GasFeeSponsor)
-		if sponsorAmount.Cmp(sponsorBalance) < 0 {
-			available.Add(available, sponsorAmount)
-		} else {
-			available.Add(available, sponsorBalance)
-		}
-	}
-
-	allowanceGas := new(big.Int).Div(available, gasPriceForEstimate)
-
-	if allowanceGas.Uint64() < gasCap {
-		return allowanceGas.Uint64(), nil
-	}
-
-	return gasCap, nil
 }
 
 // EstimateGas returns an estimate of the amount of gas needed to execute the

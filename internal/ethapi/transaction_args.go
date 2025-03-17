@@ -276,8 +276,8 @@ func (args *TransactionArgs) ToMessage(globalGasCap uint64, baseFee *big.Int, ru
 	if args.AccessList != nil {
 		accessList = *args.AccessList
 	}
-	metaTxParams, err := types.DecodeMetaTxParams(data)
-	if err != nil {
+
+	if err := types.MetaTxCheck(data); err != nil {
 		return nil, err
 	}
 
@@ -291,7 +291,6 @@ func (args *TransactionArgs) ToMessage(globalGasCap uint64, baseFee *big.Int, ru
 		GasTipCap:         gasTipCap,
 		Data:              data,
 		AccessList:        accessList,
-		MetaTxParams:      metaTxParams,
 		SkipAccountChecks: true,
 		RunMode:           runMode,
 	}
