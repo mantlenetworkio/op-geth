@@ -208,26 +208,26 @@ func (c *preconfChecker) precheck() error {
 	}
 
 	// Not more than 5 seconds from the last L2Block.
-	if time.Since(c.envUpdatedAt) > 5*time.Second {
-		log.Trace("envTooOld", "envUpdatedAt", c.envUpdatedAt, "time.Since(envUpdatedAt)", time.Since(c.envUpdatedAt))
+	if time.Since(c.envUpdatedAt) > c.minerConfig.MantleToleranceDuration() {
+		log.Trace("envTooOld", "envUpdatedAt", c.envUpdatedAt, "time.Since(envUpdatedAt)", time.Since(c.envUpdatedAt), "tolerance", c.minerConfig.MantleToleranceDuration())
 		return ErrEnvTooOld
 	}
 
 	// Not more than 30 seconds from the last L1Block.
 	currentL1BlockTime := time.Unix(int64(c.optimismSyncStatus.CurrentL1.Time), 0)
-	if time.Since(currentL1BlockTime) > 30*time.Second {
-		log.Trace("currentL1BlockTooOld", "currentL1BlockTime", currentL1BlockTime, "time.Since(currentL1BlockTime)", time.Since(currentL1BlockTime))
+	if time.Since(currentL1BlockTime) > c.minerConfig.EthToleranceDuration() {
+		log.Trace("currentL1BlockTooOld", "currentL1BlockTime", currentL1BlockTime, "time.Since(currentL1BlockTime)", time.Since(currentL1BlockTime), "tolerance", c.minerConfig.EthToleranceDuration())
 		return ErrCurrentL1BlockTooOld
 	}
 	headL1BlockTime := time.Unix(int64(c.optimismSyncStatus.HeadL1.Time), 0)
-	if time.Since(headL1BlockTime) > 30*time.Second {
-		log.Trace("headL1BlockTooOld", "headL1BlockTime", headL1BlockTime, "time.Since(headL1BlockTime)", time.Since(headL1BlockTime))
+	if time.Since(headL1BlockTime) > c.minerConfig.EthToleranceDuration() {
+		log.Trace("headL1BlockTooOld", "headL1BlockTime", headL1BlockTime, "time.Since(headL1BlockTime)", time.Since(headL1BlockTime), "tolerance", c.minerConfig.EthToleranceDuration())
 		return ErrHeadL1BlockTooOld
 	}
 
 	// The distance between current_l1.number and head_l1.number should not exceed 5
-	if c.optimismSyncStatus.HeadL1.Number-c.optimismSyncStatus.CurrentL1.Number > 5 {
-		log.Trace("currentL1NumberAndHeadL1NumberDistanceTooLarge", "currentL1Number", c.optimismSyncStatus.CurrentL1.Number, "headL1Number", c.optimismSyncStatus.HeadL1.Number)
+	if c.optimismSyncStatus.HeadL1.Number-c.optimismSyncStatus.CurrentL1.Number > c.minerConfig.EthToleranceBlock() {
+		log.Trace("currentL1NumberAndHeadL1NumberDistanceTooLarge", "currentL1Number", c.optimismSyncStatus.CurrentL1.Number, "headL1Number", c.optimismSyncStatus.HeadL1.Number, "tolerance", c.minerConfig.EthToleranceBlock())
 		return ErrCurrentL1NumberAndHeadL1NumberDistanceTooLarge
 	}
 

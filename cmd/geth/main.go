@@ -140,6 +140,7 @@ var (
 		utils.MinerPreconfOpNodeHTTP,
 		utils.MinerPreconfL1RPCHTTP,
 		utils.MinerPreconfL1DepositAddress,
+		utils.MinerPreconfToleranceBlock,
 		utils.NATFlag,
 		utils.NoDiscoverFlag,
 		utils.DiscoveryV5Flag,

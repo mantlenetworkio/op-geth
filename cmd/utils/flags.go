@@ -627,6 +627,12 @@ var (
 		Value:    preconf.DefaultMinerConfig.L1DepositAddress,
 		Category: flags.MinerCategory,
 	}
+	MinerPreconfToleranceBlock = &cli.Int64Flag{
+		Name:     "miner.preconf.toleranceblock",
+		Usage:    "Preconf tolerance block",
+		Value:    preconf.DefaultMinerConfig.ToleranceBlock,
+		Category: flags.MinerCategory,
+	}
 
 	// Account settings
 	UnlockedAccountFlag = &cli.StringFlag{
@@ -1802,6 +1808,9 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	}
 	if ctx.IsSet(MinerPreconfL1DepositAddress.Name) {
 		cfg.PreconfConfig.L1DepositAddress = ctx.String(MinerPreconfL1DepositAddress.Name)
+	}
+	if ctx.IsSet(MinerPreconfToleranceBlock.Name) {
+		cfg.PreconfConfig.ToleranceBlock = ctx.Int64(MinerPreconfToleranceBlock.Name)
 	}
 }
 
