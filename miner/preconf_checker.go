@@ -209,21 +209,25 @@ func (c *preconfChecker) precheck() error {
 
 	// Not more than 5 seconds from the last L2Block.
 	if time.Since(c.envUpdatedAt) > 5*time.Second {
+		log.Trace("envTooOld", "envUpdatedAt", c.envUpdatedAt, "time.Since(envUpdatedAt)", time.Since(c.envUpdatedAt))
 		return ErrEnvTooOld
 	}
 
 	// Not more than 30 seconds from the last L1Block.
 	currentL1BlockTime := time.Unix(int64(c.optimismSyncStatus.CurrentL1.Time), 0)
 	if time.Since(currentL1BlockTime) > 30*time.Second {
+		log.Trace("currentL1BlockTooOld", "currentL1BlockTime", currentL1BlockTime, "time.Since(currentL1BlockTime)", time.Since(currentL1BlockTime))
 		return ErrCurrentL1BlockTooOld
 	}
 	headL1BlockTime := time.Unix(int64(c.optimismSyncStatus.HeadL1.Time), 0)
 	if time.Since(headL1BlockTime) > 30*time.Second {
+		log.Trace("headL1BlockTooOld", "headL1BlockTime", headL1BlockTime, "time.Since(headL1BlockTime)", time.Since(headL1BlockTime))
 		return ErrHeadL1BlockTooOld
 	}
 
 	// The distance between current_l1.number and head_l1.number should not exceed 5
 	if c.optimismSyncStatus.HeadL1.Number-c.optimismSyncStatus.CurrentL1.Number > 5 {
+		log.Trace("currentL1NumberAndHeadL1NumberDistanceTooLarge", "currentL1Number", c.optimismSyncStatus.CurrentL1.Number, "headL1Number", c.optimismSyncStatus.HeadL1.Number)
 		return ErrCurrentL1NumberAndHeadL1NumberDistanceTooLarge
 	}
 
@@ -232,6 +236,7 @@ func (c *preconfChecker) precheck() error {
 	engineSyncTargetBlockNumber := c.optimismSyncStatus.EngineSyncTarget.Number
 	unsafeL2BlockNumber := c.optimismSyncStatus.UnsafeL2.Number
 	if envBlockNumber < engineSyncTargetBlockNumber || envBlockNumber < unsafeL2BlockNumber {
+		log.Trace("envBlockNumberLessThanEngineSyncTargetBlockNumberOrUnsafeL2BlockNumber", "envBlockNumber", envBlockNumber, "engineSyncTargetBlockNumber", engineSyncTargetBlockNumber, "unsafeL2BlockNumber", unsafeL2BlockNumber)
 		return ErrEnvBlockNumberLessThanEngineSyncTargetBlockNumberOrUnsafeL2BlockNumber
 	}
 

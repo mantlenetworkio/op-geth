@@ -2201,7 +2201,7 @@ func (s *TransactionAPI) SendRawTransactionWithPreconf(ctx context.Context, inpu
 			return &PreconfTransactionResult{
 				TxHash:      txHash,
 				Status:      "failed",
-				Reason:      "preconf timeout",
+				Reason:      "UNKNOWN",
 				BlockHeight: hexutil.Uint64(0),
 			}, nil
 		}
