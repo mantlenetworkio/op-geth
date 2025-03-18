@@ -98,9 +98,7 @@ func erc20Test(endpoint string) {
 			log.Fatalf("failed to get L1 auth: %v", err)
 		}
 		fundAmount := big.NewInt(0).Mul(big.NewInt(1e18), big.NewInt(1000))
-		if err := config.FundAccount(ctx, l1client, config.Addr3, fundAmount); err != nil {
-			log.Fatalf("failed to fund account: %v", err)
-		}
+		config.FundAccount(ctx, l1client, config.Addr3, fundAmount)
 
 		depositTxs := make([]*types.Transaction, 0)
 		for i := 0; i < config.NumTransactions/20+1; i++ {
@@ -108,7 +106,7 @@ func erc20Test(endpoint string) {
 				log.Printf("depositTx %d", i)
 			}
 			datastring := fmt.Sprintf(config.TRANSFERDATA, config.FundAddr.Hex()[2:], hex.EncodeToString(common.LeftPadBytes(transferAmount.Bytes(), 32)))
-			tx, err := config.SendDepositTx(ctx, l1client, l1Addr3Auth, config.TestERC20, datastring, 0)
+			tx, err := config.SendDepositTx(ctx, l1client, l1Addr3Auth, config.TestERC20, datastring, big.NewInt(0), 0)
 			if err != nil {
 				log.Fatalf("failed to send deposit transaction: %v", err)
 			}
@@ -117,7 +115,7 @@ func erc20Test(endpoint string) {
 			time.Sleep(1 * time.Second)
 		}
 		for _, tx := range depositTxs {
-			ctx, cancel := context.WithTimeout(ctx, config.WaitTime)
+			ctx, cancel := context.WithTimeout(ctx, 6*config.WaitTime)
 			defer cancel()
 			receipt, err := bind.WaitMined(ctx, l1client, tx)
 			if err != nil {
@@ -277,12 +275,17 @@ func sendERC20Tx(ctx context.Context, client *ethclient.Client, auth *bind.Trans
 		return fmt.Errorf("failed to estimate gas: %v", err)
 	}
 
+	gasPrice, err := client.SuggestGasPrice(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to suggest gas price: %v", err)
+	}
+
 	tx := types.NewTransaction(
 		config.GetNonce(ctx, client, auth.From),
 		config.TestERC20,
 		big.NewInt(0),
 		gas,
-		config.GasPrice,
+		gasPrice,
 		hexutil.MustDecode(data),
 	)
 
@@ -334,13 +337,18 @@ func pay(ctx context.Context, client *ethclient.Client, auth *bind.TransactOpts,
 	// }
 	// fmt.Println("gas", gas) //138875846
 
+	gasPrice, err := client.SuggestGasPrice(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to suggest gas price: %v", err)
+	}
+
 	tx := types.NewTransaction(
 		nonce,
 		config.TestPay,
 		big.NewInt(0),
 		// gas,
 		1400000000,
-		config.GasPrice,
+		gasPrice,
 		data,
 	)
 
@@ -352,7 +360,7 @@ func pay(ctx context.Context, client *ethclient.Client, auth *bind.TransactOpts,
 	var result ethapi.PreconfTransactionResult
 	err = client.SendTransactionWithPreconf(ctx, signedTx, &result)
 	if err != nil {
-		return fmt.Errorf("failed to send transaction: %v", err)
+		return fmt.Errorf("failed to send transaction with preconf: %v", err)
 	}
 
 	if result.Status == "failed" {
@@ -378,12 +386,17 @@ func transfer(ctx context.Context, client *ethclient.Client, nonce uint64, trans
 		return fmt.Errorf("failed to estimate gas: %v", err)
 	}
 
+	gasPrice, err := client.SuggestGasPrice(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to suggest gas price: %v", err)
+	}
+
 	tx := types.NewTransaction(
 		nonce,
 		config.TestERC20,
 		big.NewInt(0),
 		gas,
-		config.GasPrice,
+		gasPrice,
 		hexutil.MustDecode(datastring),
 	)
 

@@ -2,10 +2,9 @@ package sort
 
 import (
 	"context"
-	"encoding/hex"
-	"fmt"
 	"log"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
@@ -83,13 +82,23 @@ func sortTest(endpoint string) {
 	// send deposit tx
 	go func() {
 		defer wg.Done()
-		sendBatchDepositTxs(ctx, l2client, addr1Auth, config.Addr2, oneMNT, config.NumTransactions, &depositTxs)
-		for _, tx := range depositTxs {
-			ctx, cancel := context.WithTimeout(ctx, config.WaitTime)
+		l1client, l1Addr3Auth, err := config.GetL1Auth(ctx, config.Addr3Key)
+		if err != nil {
+			log.Fatalf("failed to get L1 auth: %v", err)
+		}
+		fundAmount := new(big.Int).Mul(big.NewInt(1e4), oneMNT)
+		config.FundAccount(ctx, l1client, config.Addr3, fundAmount)
+
+		sendBatchDepositTxs(ctx, l1client, l1Addr3Auth, config.Addr2, oneMNT, config.NumTransactions/20+1, &depositTxs)
+		for i, tx := range depositTxs {
+			ctx, cancel := context.WithTimeout(ctx, 6*config.WaitTime)
 			defer cancel()
-			receipt, err := bind.WaitMined(ctx, l2client, tx)
-			if err == nil && receipt != nil {
-				break
+			receipt, err := bind.WaitMined(ctx, l1client, tx)
+			if err != nil {
+				log.Fatalf("failed to wait for deposit tx %d: %v, tx: %s", i, err, tx.Hash().Hex())
+			}
+			if receipt.Status != types.ReceiptStatusSuccessful {
+				log.Fatalf("deposit tx %d failed: %v", i, receipt.Status)
 			}
 		}
 	}()
@@ -98,13 +107,15 @@ func sortTest(endpoint string) {
 	go func() {
 		defer wg.Done()
 		sendBatchPreconfTxs(ctx, l2client, addr1Auth, config.Addr2, oneMNT, config.NumTransactions, &addr1Txs)
-		for _, tx := range addr1Txs {
+		for i, tx := range addr1Txs {
 			ctx, cancel := context.WithTimeout(ctx, config.WaitTime)
 			defer cancel()
 			receipt, err := bind.WaitMined(ctx, l2client, tx)
-			if err == nil && receipt != nil {
-				// fmt.Printf("Transaction %s confirmed - Status: %d, Actual Block: %d\n", tx.Hash(), receipt.Status, receipt.BlockNumber.Uint64())
-				break
+			if err != nil {
+				log.Fatalf("failed to wait for pre-confirmed tx %d: %v, tx: %s", i, err, tx.Hash().Hex())
+			}
+			if receipt.Status != types.ReceiptStatusSuccessful {
+				log.Fatalf("pre-confirmed tx %d failed: %v, tx: %s", i, receipt.Status, tx.Hash().Hex())
 			}
 		}
 	}()
@@ -113,13 +124,19 @@ func sortTest(endpoint string) {
 	go func() {
 		defer wg.Done()
 		sendBatchTxs(ctx, l2client, addr3Auth, config.Addr2, oneMNT, config.NumTransactions, &addr3Txs)
-		for _, tx := range addr3Txs {
+		for i, tx := range addr3Txs {
 			ctx, cancel := context.WithTimeout(ctx, config.WaitTime)
 			defer cancel()
 			receipt, err := bind.WaitMined(ctx, l2client, tx)
-			if err == nil && receipt != nil {
-				// fmt.Printf("Transaction %s confirmed - Status: %d, Actual Block: %d\n", tx.Hash(), receipt.Status, receipt.BlockNumber.Uint64())
-				break
+			if err != nil {
+				if strings.Contains(err.Error(), "context deadline exceeded") {
+					log.Printf("transfer tx replaced by deposit tx, from: %s, nonce: %d", addr3Auth.From.Hex(), tx.Nonce())
+					continue
+				}
+				log.Fatalf("failed to wait for transfer tx %d: %v, tx: %s", i, err, tx.Hash().Hex())
+			}
+			if receipt.Status != types.ReceiptStatusSuccessful {
+				log.Fatalf("transfer tx %d failed: %v, tx: %s", i, receipt.Status, tx.Hash().Hex())
 			}
 		}
 	}()
@@ -175,7 +192,7 @@ func sortTest(endpoint string) {
 
 	expectedAddr2 := new(big.Int).Add(startBalances[config.Addr2], new(big.Int).Mul(transferAmount, big.NewInt(2)))
 	if endBalances[config.Addr2].Cmp(expectedAddr2) != 0 {
-		log.Printf("config.Addr2 balance error, expected: %s MNT, actual: %s MNT", config.BalanceString(expectedAddr2), config.BalanceString(endBalances[config.Addr2]))
+		log.Fatalf("config.Addr2 balance error, expected: %s MNT, actual: %s MNT", config.BalanceString(expectedAddr2), config.BalanceString(endBalances[config.Addr2]))
 	} else {
 		log.Printf("config.Addr2 balance correct ✅\n")
 	}
@@ -195,7 +212,7 @@ func sendBatchTxs(ctx context.Context, client *ethclient.Client, auth *bind.Tran
 		}
 		tx, err := config.SendMNT(ctx, client, auth, to, amount, nonce+uint64(i))
 		if err != nil {
-			log.Printf("failed to send transaction %d: %v", i, err)
+			log.Printf("failed to send mnt %d: %v", i, err)
 			continue
 		}
 		*txs = append(*txs, tx)
@@ -217,7 +234,7 @@ func sendBatchPreconfTxs(ctx context.Context, client *ethclient.Client, auth *bi
 		}
 		tx, err := config.SendMNTWithPreconf(ctx, client, auth, to, amount, nonce+uint64(i))
 		if err != nil {
-			log.Printf("failed to send transaction %d: %v", i, err)
+			log.Printf("failed to send mnt with preconf %d: %v", i, err)
 			continue
 		}
 		*txs = append(*txs, tx)
@@ -235,12 +252,11 @@ func sendBatchDepositTxs(ctx context.Context, client *ethclient.Client, auth *bi
 
 	for i := 0; i < count; i++ {
 		if i%config.PrintMod == 0 {
-			log.Printf("sending MNT %d", i)
+			log.Printf("sending DepositTx %d", i)
 		}
-		datastring := fmt.Sprintf(config.TRANSFERDATA, config.FundAddr.Hex()[2:], hex.EncodeToString(common.LeftPadBytes(amount.Bytes(), 32)))
-		tx, err := config.SendDepositTx(ctx, client, auth, to, datastring, nonce+uint64(i))
+		tx, err := config.SendDepositTx(ctx, client, auth, to, "0x", amount, nonce+uint64(i))
 		if err != nil {
-			log.Printf("failed to send transaction %d: %v", i, err)
+			log.Printf("failed to send deposit tx %d: %v", i, err)
 			continue
 		}
 		*txs = append(*txs, tx)

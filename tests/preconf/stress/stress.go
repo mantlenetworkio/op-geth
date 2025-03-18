@@ -49,7 +49,13 @@ func stress(rawurl string) {
 		return
 	}
 
-	log.Printf("Starting batched stress test with %d transactions, batch size %d...\n", config.NumTransactions, config.BatchSize)
+	baseNonce, err := client.PendingNonceAt(ctx, fromAddress)
+	if err != nil {
+		log.Printf("Failed to get base nonce: %v\n", err)
+		return
+	}
+
+	log.Printf("Starting batched stress test with %d transactions, batch size %d, base nonce %d...\n", config.NumTransactions, config.BatchSize, baseNonce)
 
 	toBalanceBefore, err := client.BalanceAt(ctx, config.Addr2, nil)
 	if err != nil {
@@ -57,12 +63,6 @@ func stress(rawurl string) {
 		return
 	}
 	log.Printf("To balance before stress test: %s MNT\n", config.BalanceString(toBalanceBefore))
-
-	baseNonce, err := client.PendingNonceAt(ctx, fromAddress)
-	if err != nil {
-		log.Printf("Failed to get base nonce: %v\n", err)
-		return
-	}
 
 	var responseTimes []float64
 	var mu sync.Mutex
@@ -155,12 +155,17 @@ func sendRawTransactionWithPreconf(
 
 	value := big.NewInt(1e14) // 0.0001 MNT
 
+	gasPrice, err := client.SuggestGasPrice(ctx)
+	if err != nil {
+		log.Fatalf("failed to suggest gas price: %v", err)
+	}
+
 	tx := types.NewTransaction(
 		nonce,
 		config.Addr2,
 		value,
 		config.TransferGasLimit,
-		config.GasPrice,
+		gasPrice,
 		nil,
 	)
 

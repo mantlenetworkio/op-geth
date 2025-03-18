@@ -57,11 +57,16 @@ func transferTest(endpoint string) {
 		log.Fatalf("config.Addr1 nonce is less than 50")
 	}
 
+	gasPrice, err := client.SuggestGasPrice(ctx)
+	if err != nil {
+		log.Fatalf("failed to suggest gas price: %v", err)
+	}
+
 	balance := config.GetBalance(ctx, client, config.Addr1)
 	log.Printf("config.Addr1 nonce: %d, balance: %s MNT", nonce, config.BalanceString(balance))
 
 	// transferAmount = (balance - 100*gasfee)/100
-	gasFee := new(big.Int).Mul(big.NewInt(config.TransferGasLimit), config.GasPrice)
+	gasFee := new(big.Int).Mul(big.NewInt(config.TransferGasLimit), gasPrice)
 	_100TimesGasFee := new(big.Int).Mul(gasFee, big.NewInt(int64(100+config.NumTransactions)))
 	transferAmount := new(big.Int).Div(new(big.Int).Sub(balance, _100TimesGasFee), big.NewInt(int64(config.NumTransactions)))
 	log.Printf("transferAmount: %s MNT, gasFee: %s MNT\n", config.BalanceString(transferAmount), config.BalanceString(gasFee))
@@ -91,7 +96,7 @@ func transferTest(endpoint string) {
 	}
 
 	for _, tx := range txs {
-		ctx, cancel := context.WithTimeout(ctx, config.PrintMod)
+		ctx, cancel := context.WithTimeout(ctx, config.WaitTime)
 		defer cancel()
 		receipt, err := bind.WaitMined(ctx, client, tx)
 		if err != nil {

@@ -41,7 +41,6 @@ const (
 )
 
 var (
-	GasPrice     = big.NewInt(2e9)
 	FunderKey, _ = crypto.HexToECDSA(PrivateKeyHex)
 	Addr1Key, _  = crypto.HexToECDSA(Addr1Pk)
 	Addr3Key, _  = crypto.HexToECDSA(Addr3Pk)
@@ -84,7 +83,7 @@ func GetNonce(ctx context.Context, client *ethclient.Client, addr common.Address
 	}
 	return nonce
 }
-func SendDepositTx(ctx context.Context, client *ethclient.Client, auth *bind.TransactOpts, to common.Address, data string, nonce uint64) (*types.Transaction, error) {
+func SendDepositTx(ctx context.Context, client *ethclient.Client, auth *bind.TransactOpts, to common.Address, data string, l2MsgValue *big.Int, nonce uint64) (*types.Transaction, error) {
 	if nonce == 0 {
 		var err error
 		nonce, err = client.PendingNonceAt(ctx, auth.From)
@@ -120,7 +119,7 @@ func SendDepositTx(ctx context.Context, client *ethclient.Client, auth *bind.Tra
 		big.NewInt(0),            // uint256: 0
 		big.NewInt(0),            // uint256: 0
 		to,                       // address
-		big.NewInt(0),            // uint256: 0
+		l2MsgValue,               // uint256: 0
 		uint64(100000),           // uint64: 210000000
 		false,                    // bool: false
 		hexutil.MustDecode(data), // bytes
@@ -146,7 +145,12 @@ func SendDepositTx(ctx context.Context, client *ethclient.Client, auth *bind.Tra
 	}
 	// log.Println("deposit tx gas", gas)
 
-	tx := types.NewTransaction(nonce, DepositAddr, big.NewInt(0), gas, GasPrice, calldata)
+	// gasPrice, err := client.SuggestGasPrice(ctx)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("failed to suggest gas price: %v", err)
+	// }
+
+	tx := types.NewTransaction(nonce, DepositAddr, big.NewInt(0), gas, big.NewInt(1e12), calldata)
 	signedTx, err := auth.Signer(auth.From, tx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign transaction: %v", err)
@@ -166,6 +170,10 @@ func SendMNT(ctx context.Context, client *ethclient.Client, auth *bind.TransactO
 			return nil, fmt.Errorf("failed to get nonce: %v", err)
 		}
 	}
+	gasPrice, err := client.SuggestGasPrice(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to suggest gas price: %v", err)
+	}
 
 	gas, err := client.EstimateGas(ctx, ethereum.CallMsg{
 		From:  auth.From,
@@ -175,9 +183,9 @@ func SendMNT(ctx context.Context, client *ethclient.Client, auth *bind.TransactO
 	if err != nil {
 		return nil, fmt.Errorf("failed to estimate gas: %v", err)
 	}
-	log.Println("send native token gas", gas)
+	// log.Println("send native token gas", gas)
 
-	tx := types.NewTransaction(nonce, to, amount, gas, GasPrice, nil)
+	tx := types.NewTransaction(nonce, to, amount, gas, gasPrice, nil)
 	signedTx, err := auth.Signer(auth.From, tx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign transaction: %v", err)
@@ -198,7 +206,12 @@ func SendMNTWithPreconf(ctx context.Context, client *ethclient.Client, auth *bin
 		}
 	}
 
-	tx := types.NewTransaction(nonce, to, amount, TransferGasLimit, GasPrice, nil)
+	gasPrice, err := client.SuggestGasPrice(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to suggest gas price: %v", err)
+	}
+
+	tx := types.NewTransaction(nonce, to, amount, TransferGasLimit, gasPrice, nil)
 	signedTx, err := auth.Signer(auth.From, tx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign transaction: %v", err)
@@ -206,7 +219,7 @@ func SendMNTWithPreconf(ctx context.Context, client *ethclient.Client, auth *bin
 
 	var result ethapi.PreconfTransactionResult
 	if err := client.SendTransactionWithPreconf(ctx, signedTx, &result); err != nil {
-		return nil, fmt.Errorf("failed to send transaction: %v", err)
+		return nil, fmt.Errorf("failed to send transaction with pre-confirmed: %v", err)
 	}
 	if result.Status == "failed" {
 		return nil, fmt.Errorf("transaction pre-confirmed failed: %s, %s", result.Reason, result.TxHash)
