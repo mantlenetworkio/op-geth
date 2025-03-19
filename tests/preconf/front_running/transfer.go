@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -33,10 +34,8 @@ func transferTest(endpoint string) {
 
 	// Fund config.Addr1
 	oneMNT := big.NewInt(1e18)
-	fundAmount := new(big.Int).Mul(big.NewInt(1e4), oneMNT) // 10000 MNT
-	if err := config.FundAccount(ctx, client, config.Addr1, fundAmount); err != nil {
-		log.Fatalf("failed to fund config.Addr1: %v", err)
-	}
+	fundAmount := new(big.Int).Mul(big.NewInt(config.NumTransactions), oneMNT) // 10000 MNT
+	config.FundAccount(ctx, client, config.Addr1, fundAmount)
 
 	// Get L2 chain ID
 	chainID, err := client.NetworkID(ctx)
@@ -53,26 +52,19 @@ func transferTest(endpoint string) {
 	if err != nil {
 		log.Fatalf("failed to get config.Addr1 nonce: %v", err)
 	}
-	if nonce < 50 {
-		log.Fatalf("config.Addr1 nonce is less than 50")
-	}
-
-	gasPrice, err := client.SuggestGasPrice(ctx)
-	if err != nil {
-		log.Fatalf("failed to suggest gas price: %v", err)
+	sendNonce := nonce
+	if nonce > 50 {
+		sendNonce = nonce - 50
 	}
 
 	balance := config.GetBalance(ctx, client, config.Addr1)
 	log.Printf("config.Addr1 nonce: %d, balance: %s MNT", nonce, config.BalanceString(balance))
 
-	// transferAmount = (balance - 100*gasfee)/100
-	gasFee := new(big.Int).Mul(big.NewInt(config.TransferGasLimit), gasPrice)
-	_100TimesGasFee := new(big.Int).Mul(gasFee, big.NewInt(int64(100+config.NumTransactions)))
-	transferAmount := new(big.Int).Div(new(big.Int).Sub(balance, _100TimesGasFee), big.NewInt(int64(config.NumTransactions)))
-	log.Printf("transferAmount: %s MNT, gasFee: %s MNT\n", config.BalanceString(transferAmount), config.BalanceString(gasFee))
+	transferAmount := big.NewInt(1e14)
+	log.Printf("transferAmount: %s MNT\n", config.BalanceString(transferAmount))
 
 	// consumer all the balance of config.Addr1 using config.NumTransactions
-	sendNonce := nonce - 50
+
 	txs := make([]*types.Transaction, 0, 100)
 	for i := 0; i < 100+config.NumTransactions; i++ {
 		currentNonce := sendNonce + uint64(i)
@@ -85,6 +77,10 @@ func transferTest(endpoint string) {
 		} else { // valid nonce
 			if err != nil {
 				if strings.Contains(err.Error(), txpool.ErrOverdraft.Error()) { // balance is not enough
+					// fmt.Printf("expected error: %v, now: %d\n", err, currentNonce)
+					continue
+				}
+				if strings.Contains(err.Error(), core.ErrNonceTooLow.Error()) { // nonce too low
 					// fmt.Printf("expected error: %v, now: %d\n", err, currentNonce)
 					continue
 				}

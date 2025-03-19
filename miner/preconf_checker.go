@@ -107,6 +107,7 @@ func (c *preconfChecker) GetDepositTxs(start, end uint64) ([]*types.Transaction,
 		c.l1ethclient = l1ethclient
 	}
 
+	// filter logs from start to end, but not include end
 	logs, err := c.l1ethclient.FilterLogs(context.Background(), ethereum.FilterQuery{
 		FromBlock: big.NewInt(int64(start)),
 		ToBlock:   big.NewInt(int64(end)),
@@ -115,6 +116,7 @@ func (c *preconfChecker) GetDepositTxs(start, end uint64) ([]*types.Transaction,
 	if err != nil {
 		return nil, fmt.Errorf("failed to filter logs: %w", err)
 	}
+	log.Trace("filter deposit tx logs", "start", start, "end", end, "logs", len(logs))
 
 	depositTxs := make([]*types.Transaction, 0)
 	for _, log := range logs {
@@ -162,7 +164,9 @@ func (c *preconfChecker) UpdateOptimismSyncStatus(newOptimismSyncStatus *preconf
 		// update deposit txs if current_l1.number or head_l1.number is changed
 		if c.optimismSyncStatus.CurrentL1.Number != newOptimismSyncStatus.CurrentL1.Number ||
 			c.optimismSyncStatus.HeadL1.Number != newOptimismSyncStatus.HeadL1.Number {
-			depositTxs, err := c.GetDepositTxs(c.optimismSyncStatus.CurrentL1.Number, c.optimismSyncStatus.HeadL1.Number-2)
+			// c.optimismSyncStatus.CurrentL1.Number is already derived, so we need using c.optimismSyncStatus.CurrentL1.Number+1
+			// the end is not included, and we remain two block to prevent reorg, so we need using c.optimismSyncStatus.HeadL1.Number-1
+			depositTxs, err := c.GetDepositTxs(c.optimismSyncStatus.CurrentL1.Number+1, c.optimismSyncStatus.HeadL1.Number-1)
 			if err != nil {
 				log.Error("failed to get deposit txs", "err", err, "start", c.optimismSyncStatus.CurrentL1.Number, "end", c.optimismSyncStatus.HeadL1.Number-2)
 				preconf.MetricsL1Deposit(false, 0)
@@ -207,13 +211,13 @@ func (c *preconfChecker) precheck() error {
 		return ErrOptimismSyncNotOk
 	}
 
-	// Not more than 5 seconds from the last L2Block.
+	// Not more than MantleToleranceDuration(default 6s) from the last L2Block.
 	if time.Since(c.envUpdatedAt) > c.minerConfig.MantleToleranceDuration() {
 		log.Trace("envTooOld", "envUpdatedAt", c.envUpdatedAt, "time.Since(envUpdatedAt)", time.Since(c.envUpdatedAt), "tolerance", c.minerConfig.MantleToleranceDuration())
 		return ErrEnvTooOld
 	}
 
-	// Not more than 30 seconds from the last L1Block.
+	// Not more than EthToleranceDuration(default 72s) from the last L1Block.
 	currentL1BlockTime := time.Unix(int64(c.optimismSyncStatus.CurrentL1.Time), 0)
 	if time.Since(currentL1BlockTime) > c.minerConfig.EthToleranceDuration() {
 		log.Trace("currentL1BlockTooOld", "currentL1BlockTime", currentL1BlockTime, "time.Since(currentL1BlockTime)", time.Since(currentL1BlockTime), "tolerance", c.minerConfig.EthToleranceDuration())
@@ -225,7 +229,7 @@ func (c *preconfChecker) precheck() error {
 		return ErrHeadL1BlockTooOld
 	}
 
-	// The distance between current_l1.number and head_l1.number should not exceed 5
+	// The distance between current_l1.number and head_l1.number should not exceed EthToleranceBlock(default 6)
 	if c.optimismSyncStatus.HeadL1.Number-c.optimismSyncStatus.CurrentL1.Number > c.minerConfig.EthToleranceBlock() {
 		log.Trace("currentL1NumberAndHeadL1NumberDistanceTooLarge", "currentL1Number", c.optimismSyncStatus.CurrentL1.Number, "headL1Number", c.optimismSyncStatus.HeadL1.Number, "tolerance", c.minerConfig.EthToleranceBlock())
 		return ErrCurrentL1NumberAndHeadL1NumberDistanceTooLarge
@@ -255,20 +259,30 @@ func (c *preconfChecker) applyTx(env *environment, tx *types.Transaction) (*type
 		env.gasPool.SetGas(gp)
 		return nil, err
 	}
+	env.tcount++
 	return receipt, nil
 }
 
 func (c *preconfChecker) PausePreconf() {
 	c.mu.Lock()
+	log.Trace("pause preconf")
 }
 
 func (c *preconfChecker) UnpausePreconf(env *environment) {
 	defer c.mu.Unlock()
 	c.env = env
 	c.envUpdatedAt = time.Now()
+	log.Trace("unpause preconf", "env.header.Number", env.header.Number.Int64(), "envUpdatedAt", c.envUpdatedAt)
 
 	// LoadDepositTxs
-	c.env.txs = append(c.env.txs, c.depositTxs...)
+	log.Trace("apply deposit txs", "deposit_txs", len(c.depositTxs))
+	for _, tx := range c.depositTxs {
+		if _, err := c.applyTx(c.env, tx); err != nil {
+			log.Error("failed to apply deposit tx", "err", err, "tx", tx.Hash().Hex())
+			continue
+		}
+		log.Trace("applied deposit tx", "tx", tx.Hash().Hex(), "nonce", tx.Nonce())
+	}
 
 	// Metrics
 	preconf.MetricsOpGethEnvBlockNumber(env.header.Number.Int64())

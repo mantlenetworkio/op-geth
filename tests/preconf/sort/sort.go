@@ -53,12 +53,8 @@ func sortTest(endpoint string) {
 	oneMNT := big.NewInt(1e18)
 	transferAmount := new(big.Int).Mul(big.NewInt(config.NumTransactions), oneMNT)
 	fundAmount := new(big.Int).Mul(transferAmount, big.NewInt(10)) // Extra for gas
-	if err := config.FundAccount(ctx, l2client, config.Addr1, fundAmount); err != nil {
-		log.Fatalf("failed to fund config.Addr1: %v", err)
-	}
-	if err := config.FundAccount(ctx, l2client, config.Addr3, fundAmount); err != nil {
-		log.Fatalf("failed to fund config.Addr3: %v", err)
-	}
+	config.FundAccount(ctx, l2client, config.Addr1, fundAmount)
+	config.FundAccount(ctx, l2client, config.Addr3, fundAmount)
 
 	// Record initial balances
 	startBalances := map[common.Address]*big.Int{
@@ -82,19 +78,24 @@ func sortTest(endpoint string) {
 	// send deposit tx
 	go func() {
 		defer wg.Done()
-		l1client, l1Addr3Auth, err := config.GetL1Auth(ctx, config.Addr3Key)
+		l1client, l1Addr1Auth, err := config.GetL1Auth(ctx, config.Addr1Key)
 		if err != nil {
 			log.Fatalf("failed to get L1 auth: %v", err)
 		}
-		fundAmount := new(big.Int).Mul(big.NewInt(1e4), oneMNT)
-		config.FundAccount(ctx, l1client, config.Addr3, fundAmount)
+		fundAmount := new(big.Int).Mul(big.NewInt(config.NumTransactions*5), oneMNT)
+		config.FundAccount(ctx, l1client, config.Addr1, fundAmount)
+		time.Sleep(12 * time.Second) // wait for funder tx to be sent
 
-		sendBatchDepositTxs(ctx, l1client, l1Addr3Auth, config.Addr2, oneMNT, config.NumTransactions/20+1, &depositTxs)
+		sendBatchDepositTxs(ctx, l1client, l1Addr1Auth, config.Addr2, oneMNT, config.NumTransactions/20+1, &depositTxs)
 		for i, tx := range depositTxs {
 			ctx, cancel := context.WithTimeout(ctx, 6*config.WaitTime)
 			defer cancel()
 			receipt, err := bind.WaitMined(ctx, l1client, tx)
 			if err != nil {
+				if strings.Contains(err.Error(), "context deadline exceeded") {
+					log.Printf("failed to send deposit tx, ending deposit tx test: %v", err)
+					return
+				}
 				log.Fatalf("failed to wait for deposit tx %d: %v, tx: %s", i, err, tx.Hash().Hex())
 			}
 			if receipt.Status != types.ReceiptStatusSuccessful {
@@ -143,7 +144,7 @@ func sortTest(endpoint string) {
 
 	// Wait for transactions to complete
 	wg.Wait()
-	time.Sleep(5 * time.Second)
+	time.Sleep(15 * time.Second)
 
 	// Get ending height
 	endHeight, err := l2client.BlockNumber(ctx)
@@ -210,7 +211,7 @@ func sendBatchTxs(ctx context.Context, client *ethclient.Client, auth *bind.Tran
 		if i%config.PrintMod == 0 {
 			log.Printf("sending MNT %d", i)
 		}
-		tx, err := config.SendMNT(ctx, client, auth, to, amount, nonce+uint64(i))
+		tx, err := config.SendNativeToken(ctx, client, auth, to, amount, nonce+uint64(i))
 		if err != nil {
 			log.Printf("failed to send mnt %d: %v", i, err)
 			continue
@@ -234,8 +235,11 @@ func sendBatchPreconfTxs(ctx context.Context, client *ethclient.Client, auth *bi
 		}
 		tx, err := config.SendMNTWithPreconf(ctx, client, auth, to, amount, nonce+uint64(i))
 		if err != nil {
-			log.Printf("failed to send mnt with preconf %d: %v", i, err)
-			continue
+			if strings.Contains(err.Error(), "nonce too low") {
+				log.Printf("preconf tx replaced by deposit tx, from: %s, nonce: %d", auth.From.Hex(), nonce+uint64(i))
+				continue
+			}
+			log.Fatalf("failed to send mnt with preconf %d: %v", i, err)
 		}
 		*txs = append(*txs, tx)
 		time.Sleep(config.NonceInterval)

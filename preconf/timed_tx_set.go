@@ -59,7 +59,7 @@ func (s *TimedTxSet) Add(tx *types.Transaction) {
 
 	// Metrics
 	MetricsPendingPreconfInc(1)
-	log.Trace("preconf added", "tx", tx.Hash())
+	log.Trace("preconf added", "tx", tx.Hash().Hex())
 }
 
 // Contains checks if the transaction is in the set
@@ -131,4 +131,39 @@ func (s *TimedTxSet) Clear() {
 
 	s.txMap = make(map[common.Hash]*txEntry)
 	s.txQueue = make([]*txEntry, 0)
+}
+
+func (s *TimedTxSet) Forward(addr common.Address, nonce uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Iterate over the list to be deleted
+	var toHashRemove []common.Hash
+
+	for _, entry := range s.txQueue {
+		from, _ := types.Sender(types.LatestSignerForChainID(entry.tx.ChainId()), entry.tx)
+		if from == addr && entry.tx.Nonce() < nonce {
+			toHashRemove = append(toHashRemove, entry.tx.Hash())
+			log.Trace("preconf removed by forward", "tx", entry.tx.Hash(), "nonce", nonce, "tx.nonce", entry.tx.Nonce())
+		}
+	}
+
+	// Process the transactions to be deleted
+	for _, hash := range toHashRemove {
+		// Remove from the queue
+		for i, e := range s.txQueue {
+			if e.tx.Hash() == hash {
+				s.txQueue = append(s.txQueue[:i], s.txQueue[i+1:]...)
+				break
+			}
+		}
+
+		// Remove from the map
+		if _, exists := s.txMap[hash]; exists {
+			delete(s.txMap, hash)
+
+			// Metrics update
+			MetricsPendingPreconfDec(1)
+		}
+	}
 }

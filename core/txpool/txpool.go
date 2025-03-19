@@ -628,21 +628,15 @@ func (pool *TxPool) PendingPreconfTxs(enforceTips bool) ([]*types.Transaction, m
 }
 
 func (pool *TxPool) extractPreconfTxsFromPending(pending map[common.Address]types.Transactions) []*types.Transaction {
-	// removes pending tx that are not in preconf txs
+	// check preconf tx in pending map and also in preconfTxs
 	for from, txs := range pending {
 		if pool.config.Preconf.IsPreconfTxFrom(from) {
-			// Create a new slice to hold the transactions that are not deleted
-			var newTxs []*types.Transaction
 			for _, tx := range txs {
 				if pool.config.Preconf.IsPreconfTx(&from, tx.To()) && !pool.preconfTxs.Contains(tx.Hash()) {
+					// This tx will be sealed like a normal tx, not a preconf tx
+					log.Error("Missing preconf tx in preconfTxs, please report the issue", "tx", tx.Hash(), "from", from.Hex(), "nonce", tx.Nonce())
 					continue
 				}
-				newTxs = append(newTxs, tx)
-			}
-			if len(newTxs) == 0 {
-				delete(pending, from)
-			} else {
-				pending[from] = newTxs
 			}
 		}
 	}
@@ -659,6 +653,7 @@ func (pool *TxPool) extractPreconfTxsFromPending(pending map[common.Address]type
 		// show the error log.
 		if !exists || len(txs) == 0 {
 			log.Error("Missing transaction in pending map, please report the issue", "hash", preconfTx.Hash())
+			pool.preconfTxs.Remove(preconfTx.Hash()) // remove it prevent log always print
 			continue
 		}
 
@@ -994,7 +989,10 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (replaced bool, err e
 			pool.all.Remove(old.Hash())
 			pool.priced.Removed(1)
 			pendingReplaceMeter.Mark(1)
+			pool.preconfTxs.Remove(old.Hash())
+			log.Trace("add: removed old tx", "hash", old.Hash())
 		}
+		pool.addPreconfTx(tx)
 		pool.all.Add(tx, isLocal)
 		pool.priced.Put(tx, isLocal)
 		pool.journalTx(from, tx)
@@ -1116,10 +1114,14 @@ func (pool *TxPool) promoteTx(addr common.Address, hash common.Hash, tx *types.T
 		pool.all.Remove(old.Hash())
 		pool.priced.Removed(1)
 		pendingReplaceMeter.Mark(1)
+		pool.preconfTxs.Remove(old.Hash())
+		log.Trace("promoteTx: removed old tx", "hash", old.Hash())
 	} else {
 		// Nothing was replaced, bump the pending counter
 		pendingGauge.Inc(1)
 	}
+	// add new tx to preconfTxs
+	pool.addPreconfTx(tx)
 	// Set the potentially new pending nonce and notify any subsystems of the new tx
 	pool.pendingNonces.set(addr, tx.Nonce()+1)
 
@@ -1228,29 +1230,37 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 	return errs
 }
 
+func (pool *TxPool) addPreconfTx(tx *types.Transaction) {
+	txHash := tx.Hash()
+
+	// check tx is preconf tx
+	if tx.To() == nil {
+		log.Debug("preconf address is nil", "tx", tx.Hash().Hex())
+		return
+	}
+	from, _ := types.Sender(pool.signer, tx)
+	if !pool.config.Preconf.IsPreconfTx(&from, tx.To()) {
+		log.Debug("preconf from and to is not match", "tx", txHash)
+		return
+	}
+
+	pool.preconfTxs.Add(tx)
+	if pool.journal != nil {
+		if err := pool.journal.insert(tx); err != nil {
+			log.Warn("Failed to journal preconf transaction", "tx", txHash, "err", err)
+		}
+		log.Trace("preconf transaction journaled", "tx", txHash)
+	}
+}
+
 func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) []*types.Transaction {
 	defer preconf.MetricsPreconfTxPoolHandleCost(time.Now())
 
 	preconfTxs := make([]*types.Transaction, 0)
 	for _, tx := range news {
 		txHash := tx.Hash()
-		// check tx is pending
-		pool.mu.RLock()
-		from, _ := types.Sender(pool.signer, tx)
-		isPending := pool.pending[from] != nil && pool.pending[from].txs.Get(tx.Nonce()) != nil
-		pool.mu.RUnlock()
-		if !isPending {
-			log.Debug("tx is not pending", "tx", txHash)
-			continue
-		}
-
-		// check tx is preconf tx
-		if tx.To() == nil {
-			log.Debug("preconf address is nil", "tx", txHash)
-			continue
-		}
-		if !pool.config.Preconf.IsPreconfTx(&from, tx.To()) {
-			log.Debug("preconf from and to is not match", "tx", txHash)
+		if !pool.preconfTxs.Contains(txHash) {
+			log.Debug("tx not in preconfTxs, skip handle", "tx", txHash)
 			continue
 		}
 
@@ -1294,15 +1304,6 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) []*types.Transac
 
 		// send preconf event
 		pool.preconfTxFeed.Send(event)
-
-		// whether preconf tx success or not, it can be added to preconfTxs and journal
-		pool.preconfTxs.Add(tx)
-		if pool.journal != nil {
-			if err := pool.journal.insert(tx); err != nil {
-				log.Warn("Failed to journal preconf transaction", "tx", txHash, "err", err)
-			}
-			log.Trace("preconf transaction journaled", "tx", txHash)
-		}
 
 		// add preconf success tx to journal
 		if event.Status {
@@ -1975,9 +1976,9 @@ func (pool *TxPool) demoteUnexecutables() {
 		for _, tx := range olds {
 			hash := tx.Hash()
 			pool.all.Remove(hash)
-			pool.preconfTxs.Remove(hash)
 			log.Trace("Removed old pending transaction", "hash", hash)
 		}
+		pool.preconfTxs.Forward(addr, nonce) // remove all preconf txs with tx.nonce < nonce
 		invalidMetaTxs, sponsorCostSum := pool.validateMetaTxList(list)
 		for _, tx := range invalidMetaTxs {
 			list.Remove(tx)

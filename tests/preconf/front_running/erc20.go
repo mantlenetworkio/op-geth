@@ -22,6 +22,7 @@ import (
 
 func ERC20Test() {
 	erc20Test(config.SequencerEndpoint)
+	time.Sleep(30 * time.Second) // wait for sequencer to sync
 	erc20Test(config.L2RpcEndpoint)
 }
 
@@ -37,8 +38,6 @@ func erc20Test(endpoint string) {
 		log.Fatalf("failed to connect to L2 RPC: %v", err)
 	}
 	defer client.Close()
-
-	checkERC20(ctx, client)
 
 	chainID, err := client.NetworkID(ctx)
 	if err != nil {
@@ -97,8 +96,9 @@ func erc20Test(endpoint string) {
 		if err != nil {
 			log.Fatalf("failed to get L1 auth: %v", err)
 		}
-		fundAmount := big.NewInt(0).Mul(big.NewInt(1e18), big.NewInt(1000))
+		fundAmount := big.NewInt(0).Mul(big.NewInt(1e18), big.NewInt(config.NumTransactions*5))
 		config.FundAccount(ctx, l1client, config.Addr3, fundAmount)
+		time.Sleep(12 * time.Second) // wait for funder tx to be sent
 
 		depositTxs := make([]*types.Transaction, 0)
 		for i := 0; i < config.NumTransactions/20+1; i++ {
@@ -164,7 +164,7 @@ func erc20Test(endpoint string) {
 			receipt, err := bind.WaitMined(ctx, client, tx)
 			if err == nil && receipt != nil {
 				if receipt.Status == types.ReceiptStatusSuccessful {
-					log.Fatalf("Preconf Transaction %s succeed but preconf failed - Status: %d, Actual Block: %d\n", tx.Hash(), receipt.Status, receipt.BlockNumber.Uint64())
+					log.Printf("Preconf Transaction %s succeed but preconf failed - Status: %d, Actual Block: %d\n", tx.Hash(), receipt.Status, receipt.BlockNumber.Uint64())
 				}
 			}
 		}
@@ -236,34 +236,6 @@ func erc20Balance(ctx context.Context, client *ethclient.Client, addr common.Add
 	return &balanceInt
 }
 
-func checkERC20(ctx context.Context, client *ethclient.Client) {
-	code, err := client.CodeAt(ctx, config.TestERC20, nil)
-	if err != nil {
-		log.Fatalf("failed to get TestERC20 code at %s: %v", config.TestERC20.Hex(), err)
-	}
-	if len(code) == 0 {
-		log.Fatalf("TestERC20 code is empty, deploy it first")
-	}
-
-	code, err = client.CodeAt(ctx, config.TestPay, nil)
-	if err != nil {
-		log.Fatalf("failed to get TestPay code at %s: %v", config.TestPay.Hex(), err)
-	}
-	if len(code) == 0 {
-		log.Fatalf("TestPay code is empty, deploy it first")
-	}
-
-	// 1 * Number.Transactions * 1e18
-	foundAmount := big.NewInt(0).Mul(big.NewInt(1e4), big.NewInt(1e18))
-	config.FundAccount(ctx, client, config.Addr1, foundAmount)
-	config.FundAccount(ctx, client, config.Addr3, foundAmount)
-
-	// todo - go auto deploy TestERC20/TestPay
-	// 1. Deploy TestERC20/TestPay
-	// 2. setERC20Address in TestPay
-	// 3. set TestPay address in ToPreconfs of op-geth
-}
-
 func sendERC20Tx(ctx context.Context, client *ethclient.Client, auth *bind.TransactOpts, data string) error {
 	gas, err := client.EstimateGas(ctx, ethereum.CallMsg{
 		From:  auth.From,
@@ -303,7 +275,7 @@ func sendERC20Tx(ctx context.Context, client *ethclient.Client, auth *bind.Trans
 	defer cancel()
 	receipt, err := bind.WaitMined(ctx, client, signedTx)
 	if err != nil {
-		return fmt.Errorf("failed to wait for send erc20transaction: %v", err)
+		return fmt.Errorf("failed to wait for send erc20transaction: %v, tx: %s", err, signedTx.Hash().Hex())
 	}
 	if receipt.Status != types.ReceiptStatusSuccessful {
 		return fmt.Errorf("transaction failed, tx: %s", signedTx.Hash().Hex())

@@ -130,7 +130,7 @@ func stress(rawurl string) {
 	actualIncrease := new(big.Int).Sub(toBalanceAfter, toBalanceBefore)
 	log.Printf("Actual increase in To balance: %s MNT\n", config.BalanceString(actualIncrease))
 	if actualIncrease.Cmp(expectedIncrease) != 0 {
-		log.Println("WARNING: To balance change is incorrect!")
+		log.Fatal("To balance change is incorrect!")
 	} else {
 		log.Println("To balance change is correct ✅")
 	}
@@ -182,7 +182,7 @@ func sendRawTransactionWithPreconf(
 	responseTime := endTime - startTime
 
 	if err != nil {
-		log.Printf("Error sending transaction %d: %v\n", iteration, err)
+		log.Printf("Error sending transaction %d: %v, txHash: %s\n", iteration, err, tx.Hash().Hex())
 		return TxResult{ResponseTime: responseTime, StartTime: startTime, EndTime: endTime}
 	}
 
@@ -195,13 +195,14 @@ func sendRawTransactionWithPreconf(
 	if result.Status == "failed" {
 		log.Printf("Transaction %d failed: %s\n", iteration, result.Reason)
 	}
+	// log.Printf("preconf txHash: %s, nonce: %d\n", txHash.Hex(), tx.Nonce())
 
 	// Background confirmation
 	go func() {
 		for {
 			receipt, err := client.TransactionReceipt(ctx, txHash)
 			if err == nil && receipt != nil {
-				// log.Printf("Transaction %d confirmed - Status: %d, Expected Block: %d, Actual Block: %d\n", iteration, receipt.Status, uint64(result.BlockHeight), receipt.BlockNumber.Uint64())
+				// log.Printf("Transaction %d:%s %d confirmed - Status: %d, Expected Block: %d, Actual Block: %d\n", iteration, txHash.Hex(), tx.Nonce(), receipt.Status, uint64(result.BlockHeight), receipt.BlockNumber.Uint64())
 
 				if result.BlockHeight.String() != hexutil.EncodeBig(receipt.BlockNumber) {
 					log.Printf("TxHash: %s, Block height mismatch: %d != %d, reason: %s\n", result.TxHash, result.BlockHeight, receipt.BlockNumber.Uint64(), result.Reason)
