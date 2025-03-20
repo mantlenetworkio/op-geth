@@ -27,6 +27,12 @@ func (c *TxPoolConfig) String() string {
 
 // Check if from is in FromPreconfs
 func (c *TxPoolConfig) IsPreconfTxFrom(from common.Address) bool {
+	// If AllPreconfs is true, all transactions are considered preconf
+	if c.AllPreconfs {
+		return true
+	}
+
+	// Check if from is in FromPreconfs
 	for _, preconfFrom := range c.FromPreconfs {
 		if preconfFrom == from {
 			return true
@@ -36,13 +42,13 @@ func (c *TxPoolConfig) IsPreconfTxFrom(from common.Address) bool {
 }
 
 func (c *TxPoolConfig) IsPreconfTx(from, to *common.Address) bool {
-	if from == nil || to == nil {
-		return false
-	}
-
 	// If AllPreconfs is true, all transactions are considered preconf
 	if c.AllPreconfs {
 		return true
+	}
+
+	if from == nil || to == nil {
+		return false
 	}
 
 	// Check if from is in FromPreconfs
