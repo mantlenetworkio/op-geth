@@ -627,6 +627,16 @@ func (pool *TxPool) PendingPreconfTxs(enforceTips bool) ([]*types.Transaction, m
 	return pool.extractPreconfTxsFromPending(pending), pending
 }
 
+// extractPreconfTxsFromPending extracts pre-confirmation transactions from the pending pool and ensures consistency
+// between pending and preconfTxs. It checks that all preconf transactions in pending are in pool.preconfTxs,
+// and all transactions in pool.preconfTxs are in pending. Any inconsistencies are logged as errors.
+// Finally, it removes preconf transactions from pending and returns them while preserving the order of remaining transactions.
+//
+// Parameters:
+// - pending: A map of addresses to their pending transactions.
+//
+// Returns:
+// - A slice of pre-confirmation transactions extracted from pending.
 func (pool *TxPool) extractPreconfTxsFromPending(pending map[common.Address]types.Transactions) []*types.Transaction {
 	// check preconf tx in pending map and also in preconfTxs
 	for from, txs := range pending {
@@ -1234,10 +1244,6 @@ func (pool *TxPool) addPreconfTx(tx *types.Transaction) {
 	txHash := tx.Hash()
 
 	// check tx is preconf tx
-	if tx.To() == nil {
-		log.Debug("preconf address is nil", "tx", tx.Hash().Hex())
-		return
-	}
 	from, _ := types.Sender(pool.signer, tx)
 	if !pool.config.Preconf.IsPreconfTx(&from, tx.To()) {
 		log.Debug("preconf from and to is not match", "tx", txHash)

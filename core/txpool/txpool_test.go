@@ -2558,22 +2558,26 @@ func TestExtractPreconfTxsFromPending(t *testing.T) {
 	tx4, _ = types.SignTx(tx4, signer, key3)
 
 	// Create a test TxPool
-	pool := &TxPool{
-		config: Config{
-			Preconf: &preconf.TxPoolConfig{
-				FromPreconfs: []common.Address{addr1},
-				ToPreconfs:   []common.Address{addr2},
+	createTxPool := func() *TxPool {
+		pool := &TxPool{
+			config: Config{
+				Preconf: &preconf.TxPoolConfig{
+					FromPreconfs: []common.Address{addr1},
+					ToPreconfs:   []common.Address{addr2},
+				},
 			},
-		},
-		signer:     signer,
-		preconfTxs: preconf.NewTimedTxSet(),
+			signer:     signer,
+			preconfTxs: preconf.NewTimedTxSet(),
+		}
+		// Add pre-confirmed transaction
+		pool.preconfTxs.Add(tx1)
+		return pool
 	}
-
-	// Add pre-confirmed transaction
-	pool.preconfTxs.Add(tx1)
 
 	// Test case 1: Basic functionality test
 	t.Run("Basic functionality", func(t *testing.T) {
+		pool := createTxPool()
+
 		// Create pending transaction mapping
 		pending := make(map[common.Address]types.Transactions)
 		pending[addr1] = types.Transactions{tx1, tx2}
@@ -2592,8 +2596,8 @@ func TestExtractPreconfTxsFromPending(t *testing.T) {
 
 		// Verify updated pending transaction mapping
 		assert.True(t, reflect.DeepEqual(pending, pending))
-		assert.Equal(t, 2, len(pending))
-		assert.Equal(t, 0, len(pending[addr1]))
+		assert.Equal(t, 3, len(pending))
+		assert.Equal(t, 1, len(pending[addr1]))
 		assert.Equal(t, 1, len(pending[addr2]))
 		assert.Equal(t, tx3.Hash(), pending[addr2][0].Hash())
 		assert.Equal(t, 1, len(pending[addr3]))
@@ -2601,7 +2605,9 @@ func TestExtractPreconfTxsFromPending(t *testing.T) {
 	})
 
 	// Test case 2: Empty pending transaction mapping
-	t.Run("Empty pending map", func(t *testing.T) {
+	t.Run("Preconf tx not in pending, and pending map is empty", func(t *testing.T) {
+		pool := createTxPool()
+
 		emptyPending := make(map[common.Address]types.Transactions)
 		preconfTxs := pool.extractPreconfTxsFromPending(emptyPending)
 
@@ -2610,31 +2616,29 @@ func TestExtractPreconfTxsFromPending(t *testing.T) {
 	})
 
 	// Test case 3: Pre-confirmed transaction not in pending transaction mapping
-	t.Run("Preconf tx not in pending", func(t *testing.T) {
+	t.Run("Preconf tx not in pending, and pending map is not empty", func(t *testing.T) {
+		pool := createTxPool()
 		pendingWithoutPreconf := make(map[common.Address]types.Transactions)
+		pendingWithoutPreconf[addr1] = types.Transactions{tx2}
 		pendingWithoutPreconf[addr2] = types.Transactions{tx3}
 		pendingWithoutPreconf[addr3] = types.Transactions{tx4}
-		assert.Equal(t, 2, len(pendingWithoutPreconf))
+		assert.Equal(t, 3, len(pendingWithoutPreconf))
 
 		preconfTxs := pool.extractPreconfTxsFromPending(pendingWithoutPreconf)
 
-		assert.Equal(t, 0, len(preconfTxs))
-		assert.Equal(t, 2, len(pendingWithoutPreconf))
+		assert.Equal(t, 1, len(preconfTxs))
+		assert.Equal(t, 3, len(pendingWithoutPreconf))
 	})
 
 	// Test case 4: All transactions are pre-confirmed transactions
 	t.Run("All transactions are preconf", func(t *testing.T) {
+		pool := createTxPool()
 		pool.config.Preconf.AllPreconfs = true
-		defer func() { pool.config.Preconf.AllPreconfs = false }()
 
 		// Add all transactions to the pre-confirmed set
 		pool.preconfTxs.Add(tx2)
 		pool.preconfTxs.Add(tx3)
 		pool.preconfTxs.Add(tx4)
-		defer func() {
-			pool.preconfTxs = preconf.NewTimedTxSet()
-			pool.preconfTxs.Add(tx1)
-		}()
 
 		pending := make(map[common.Address]types.Transactions)
 		pending[addr1] = types.Transactions{tx1, tx2}
@@ -2653,16 +2657,9 @@ func TestExtractPreconfTxsFromPending(t *testing.T) {
 
 	// Test case 5: Pre-confirmed transaction set is empty
 	t.Run("Empty preconf set", func(t *testing.T) {
-		emptyPreconfPool := &TxPool{
-			config: Config{
-				Preconf: &preconf.TxPoolConfig{
-					FromPreconfs: []common.Address{addr1},
-					ToPreconfs:   []common.Address{addr2},
-				},
-			},
-			signer:     signer,
-			preconfTxs: preconf.NewTimedTxSet(),
-		}
+		emptyPreconfPool := createTxPool()
+		emptyPreconfPool.preconfTxs.Remove(tx1.Hash())
+
 		pending := make(map[common.Address]types.Transactions)
 		pending[addr1] = types.Transactions{tx1, tx2}
 		pending[addr2] = types.Transactions{tx3}
@@ -2677,8 +2674,8 @@ func TestExtractPreconfTxsFromPending(t *testing.T) {
 		assert.Equal(t, 0, len(preconfTxs))
 
 		// Only the transaction from addr1 to addr2 should be removed
-		assert.Equal(t, 2, len(pending))
-		assert.Equal(t, 0, len(pending[addr1]))
+		assert.Equal(t, 3, len(pending))
+		assert.Equal(t, 2, len(pending[addr1]))
 		assert.Equal(t, 1, len(pending[addr2]))
 		assert.Equal(t, 1, len(pending[addr3]))
 		assert.Equal(t, tx3.Hash(), pending[addr2][0].Hash())
