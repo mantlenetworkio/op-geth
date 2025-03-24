@@ -51,15 +51,16 @@ func (s *TimedTxSet) Add(tx *types.Transaction) {
 				break
 			}
 		}
+		log.Trace("preconf replaced", "tx", hash.Hex())
+	} else {
+		// Only increment metrics for new transactions
+		MetricsPendingPreconfInc(1)
+		log.Trace("preconf added", "tx", tx.Hash().Hex())
 	}
 
 	// Add the new entry
 	s.txMap[hash] = entry
 	s.txQueue = append(s.txQueue, entry)
-
-	// Metrics
-	MetricsPendingPreconfInc(1)
-	log.Trace("preconf added", "tx", tx.Hash().Hex())
 }
 
 // Contains checks if the transaction is in the set
