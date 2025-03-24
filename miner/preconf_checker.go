@@ -135,54 +135,59 @@ func (c *preconfChecker) UpdateOptimismSyncStatus(newOptimismSyncStatus *preconf
 	defer c.mu.Unlock()
 
 	// Initialization
-	c.optimismSyncStatusOk = false
 	if c.optimismSyncStatus == nil {
 		c.optimismSyncStatus = newOptimismSyncStatus
+		c.optimismSyncStatusOk = true
+		c.updateDepositTxs(newOptimismSyncStatus.CurrentL1.Number, newOptimismSyncStatus.HeadL1.Number)
+		return
 	}
 
 	log.Debug("update optimism sync status", "current_l1.number", c.optimismSyncStatus.CurrentL1.Number, "head_l1.number", c.optimismSyncStatus.HeadL1.Number,
 		"unsafe_l2.number", c.optimismSyncStatus.UnsafeL2.Number, "engine_sync_target.number", c.optimismSyncStatus.EngineSyncTarget.Number,
 		"new_current_l1.number", newOptimismSyncStatus.CurrentL1.Number, "new_head_l1.number", newOptimismSyncStatus.HeadL1.Number,
 		"new_unsafe_l2.number", newOptimismSyncStatus.UnsafeL2.Number, "new_engine_sync_target.number", newOptimismSyncStatus.EngineSyncTarget.Number)
-	// current_l1.number normal growth
-	// head_l1.number normal growth
-	// unsafe_l2.number normal growth
-	// engine_sync_target.number normal growth
-	if c.optimismSyncStatus.CurrentL1.Number <= newOptimismSyncStatus.CurrentL1.Number &&
-		c.optimismSyncStatus.HeadL1.Number <= newOptimismSyncStatus.HeadL1.Number &&
-		c.optimismSyncStatus.UnsafeL2.Number <= newOptimismSyncStatus.UnsafeL2.Number &&
-		c.optimismSyncStatus.EngineSyncTarget.Number <= newOptimismSyncStatus.EngineSyncTarget.Number {
 
-		// update optimism sync status ok
-		c.optimismSyncStatusOk = true
-	} else {
-		log.Error("optimism sync status is not ok, l1 reorg?", "old", c.optimismSyncStatus, "new", newOptimismSyncStatus)
-	}
-
-	// update deposit txs if current_l1.number or head_l1.number is changed and optimism sync status is ok
-	if c.optimismSyncStatusOk {
-		// update deposit txs if current_l1.number or head_l1.number is changed
+	// check optimism sync status
+	if c.isSyncStatusOk(newOptimismSyncStatus) {
+		// if l1 block changes, update depositTxs
 		if c.optimismSyncStatus.CurrentL1.Number != newOptimismSyncStatus.CurrentL1.Number ||
 			c.optimismSyncStatus.HeadL1.Number != newOptimismSyncStatus.HeadL1.Number {
-			// c.optimismSyncStatus.CurrentL1.Number is already derived, so we need using c.optimismSyncStatus.CurrentL1.Number+1
-			// the end is not included, and we remain two block to prevent reorg, so we need using c.optimismSyncStatus.HeadL1.Number-1
-			depositTxs, err := c.GetDepositTxs(c.optimismSyncStatus.CurrentL1.Number+1, c.optimismSyncStatus.HeadL1.Number-1)
-			if err != nil {
-				log.Error("failed to get deposit txs", "err", err, "start", c.optimismSyncStatus.CurrentL1.Number, "end", c.optimismSyncStatus.HeadL1.Number-2)
-				preconf.MetricsL1Deposit(false, 0)
-			} else {
-				c.depositTxs = depositTxs
-				preconf.MetricsL1Deposit(true, len(depositTxs))
-			}
-
-			log.Debug("update deposit txs", "current_l1.number", c.optimismSyncStatus.CurrentL1.Number, "head_l1.number", c.optimismSyncStatus.HeadL1.Number,
-				"new_current_l1.number", newOptimismSyncStatus.CurrentL1.Number, "new_head_l1.number", newOptimismSyncStatus.HeadL1.Number,
-				"deposit_txs", len(depositTxs))
+			c.updateDepositTxs(newOptimismSyncStatus.CurrentL1.Number, newOptimismSyncStatus.HeadL1.Number)
 		}
-
-		// update optimism sync status
 		c.optimismSyncStatus = newOptimismSyncStatus
+		c.optimismSyncStatusOk = true
+	} else {
+		c.optimismSyncStatusOk = false
+		log.Error("optimism sync status is not ok, l1 reorg?", "old", c.optimismSyncStatus, "new", newOptimismSyncStatus)
 	}
+}
+
+// check optimism sync status
+//
+// current_l1.number normal growth
+// head_l1.number normal growth
+// unsafe_l2.number normal growth
+// engine_sync_target.number normal growth
+func (c *preconfChecker) isSyncStatusOk(newStatus *preconf.OptimismSyncStatus) bool {
+	return c.optimismSyncStatus.CurrentL1.Number <= newStatus.CurrentL1.Number &&
+		c.optimismSyncStatus.HeadL1.Number <= newStatus.HeadL1.Number &&
+		c.optimismSyncStatus.UnsafeL2.Number <= newStatus.UnsafeL2.Number &&
+		c.optimismSyncStatus.EngineSyncTarget.Number <= newStatus.EngineSyncTarget.Number
+}
+
+// update depositTxs
+func (c *preconfChecker) updateDepositTxs(currentL1, headL1 uint64) {
+	start, end := currentL1+1, headL1-1
+	depositTxs, err := c.GetDepositTxs(start, end)
+	if err != nil {
+		c.depositTxs = nil
+		log.Error("failed to get deposit txs", "err", err, "start", start, "end", end)
+		preconf.MetricsL1Deposit(false, 0)
+		return
+	}
+	c.depositTxs = depositTxs
+	preconf.MetricsL1Deposit(true, len(depositTxs))
+	log.Debug("update deposit txs", "current_l1.number", currentL1, "head_l1.number", headL1, "start", start, "end", end, "deposit_txs", len(depositTxs))
 }
 
 func (c *preconfChecker) Preconf(tx *types.Transaction) (*types.Receipt, error) {
