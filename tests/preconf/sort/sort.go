@@ -107,6 +107,7 @@ func sortTest(endpoint string) {
 	// send pre-confirmed tx
 	go func() {
 		defer wg.Done()
+		time.Sleep(12 * time.Second) // wait for deposit tx to be sent
 		sendBatchPreconfTxs(ctx, l2client, addr1Auth, config.Addr2, oneMNT, config.NumTransactions, &addr1Txs)
 		for i, tx := range addr1Txs {
 			ctx, cancel := context.WithTimeout(ctx, config.WaitTime)
@@ -124,6 +125,7 @@ func sortTest(endpoint string) {
 	// send transfer tx
 	go func() {
 		defer wg.Done()
+		time.Sleep(12 * time.Second) // wait for deposit tx to be sent
 		sendBatchTxs(ctx, l2client, addr3Auth, config.Addr2, oneMNT, config.NumTransactions, &addr3Txs)
 		for i, tx := range addr3Txs {
 			ctx, cancel := context.WithTimeout(ctx, config.WaitTime)
@@ -236,10 +238,10 @@ func sendBatchPreconfTxs(ctx context.Context, client *ethclient.Client, auth *bi
 		tx, err := config.SendMNTWithPreconf(ctx, client, auth, to, amount, nonce+uint64(i))
 		if err != nil {
 			if strings.Contains(err.Error(), "nonce too low") {
-				log.Printf("preconf tx replaced by deposit tx, from: %s, nonce: %d", auth.From.Hex(), nonce+uint64(i))
+				log.Printf("preconf tx replaced by deposit tx, from: %s, nonce: %d, tx: %s", auth.From.Hex(), nonce+uint64(i), tx.Hash().Hex())
 				continue
 			}
-			log.Fatalf("failed to send mnt with preconf %d: %v", i, err)
+			log.Fatalf("failed to send mnt with preconf %d: %v, tx: %s", i, err, tx.Hash().Hex())
 		}
 		*txs = append(*txs, tx)
 		time.Sleep(config.NonceInterval)

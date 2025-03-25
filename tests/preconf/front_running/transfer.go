@@ -81,7 +81,7 @@ func transferTest(endpoint string) {
 					continue
 				}
 				if strings.Contains(err.Error(), core.ErrNonceTooLow.Error()) { // nonce too low
-					// fmt.Printf("expected error: %v, now: %d\n", err, currentNonce)
+					log.Printf("nonce too low, bug? error: %v, tx: %s", err, tx.Hash().Hex())
 					continue
 				}
 				log.Fatalf("should be no error: %v", err)

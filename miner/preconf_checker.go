@@ -107,11 +107,12 @@ func (c *preconfChecker) GetDepositTxs(start, end uint64) ([]*types.Transaction,
 		c.l1ethclient = l1ethclient
 	}
 
-	// filter logs from start to end, but not include end
+	// filter deposit logs from start to end, but not include end
 	logs, err := c.l1ethclient.FilterLogs(context.Background(), ethereum.FilterQuery{
 		FromBlock: big.NewInt(int64(start)),
 		ToBlock:   big.NewInt(int64(end)),
 		Addresses: []common.Address{common.HexToAddress(c.minerConfig.L1DepositAddress)},
+		Topics:    [][]common.Hash{{preconf.DepositEventABIHash}},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to filter logs: %w", err)
@@ -200,7 +201,25 @@ func (c *preconfChecker) Preconf(tx *types.Transaction) (*types.Receipt, error) 
 		return nil, err
 	}
 
-	return c.applyTx(c.env, tx)
+	receipt, err := c.applyTx(c.env, tx)
+	if err != nil {
+		if errors.Is(err, core.ErrNonceTooLow) {
+			// if a tx is rejected because of nonce too low, it is possible that it has already been included in a block.
+			// In this case, check if there is a corresponding receipt in env, and return it if found.
+			for _, receipt := range c.env.receipts {
+				if receipt.TxHash == tx.Hash() {
+					log.Trace("preconf tx already in block", "tx", tx.Hash().Hex())
+					return receipt, nil
+				}
+			}
+		}
+		return nil, err
+	}
+
+	// new tx can only be sealed in the next block
+	cpy := *receipt
+	cpy.BlockNumber = new(big.Int).Add(receipt.BlockNumber, big.NewInt(1))
+	return &cpy, nil
 }
 
 func (c *preconfChecker) precheck() error {
@@ -264,6 +283,8 @@ func (c *preconfChecker) applyTx(env *environment, tx *types.Transaction) (*type
 		env.gasPool.SetGas(gp)
 		return nil, err
 	}
+	env.txs = append(env.txs, tx)
+	env.receipts = append(env.receipts, receipt)
 	env.tcount++
 	return receipt, nil
 }

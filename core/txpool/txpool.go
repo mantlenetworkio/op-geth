@@ -1300,7 +1300,7 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) []*types.Transac
 				if !event.Status {
 					event.Reason = vm.ErrExecutionReverted.Error()
 				}
-				event.PredictedL2BlockNumber.Add(response.Receipt.BlockNumber, big.NewInt(1)) // new tx can only be sealed in the next block
+				event.PredictedL2BlockNumber = response.Receipt.BlockNumber
 			}
 			preconfTxs = append(preconfTxs, tx)
 		case <-timeout.C:
@@ -2001,6 +2001,7 @@ func (pool *TxPool) demoteUnexecutables() {
 			hash := tx.Hash()
 			log.Trace("Removed unpayable pending transaction", "hash", hash)
 			pool.all.Remove(hash)
+			pool.preconfTxs.Remove(hash)
 		}
 		pendingNofundsMeter.Mark(int64(len(drops)))
 

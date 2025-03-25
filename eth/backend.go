@@ -327,7 +327,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				for {
 					select {
 					case <-ctx.Done():
-						log.Error("Preconf resubscribe context error", "error", err)
+						log.Error("Preconf resubscribe context error", "error", ctx.Err(), "lastErr", lastErr)
 						return
 					case err := <-sub.Err():
 						log.Error("Preconf resubscribe subscription", "error", err, "lastErr", lastErr)
