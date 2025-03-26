@@ -17,18 +17,22 @@
 package core
 
 import (
-	"math/big"
-
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
+)
+
+const (
+	PreconfStatusSuccess = "success"
+	PreconfStatusFailed  = "failed"
 )
 
 // NewPreconfTxsEvent is posted when a preconf transaction enters the transaction pool.
 type NewPreconfTxEvent struct {
-	TxHash                 common.Hash
-	Status                 bool     // "success" | "fail"
-	Reason                 string   // "optional failure message"
-	PredictedL2BlockNumber *big.Int // "predicted L2 block number"
+	TxHash                 common.Hash    `json:"txHash"`
+	Status                 string         `json:"status"`      // "success" | "failed"
+	Reason                 string         `json:"reason"`      // "optional failure message"
+	PredictedL2BlockNumber hexutil.Uint64 `json:"blockHeight"` // "predicted L2 block number"
 }
 
 // NewPreconfTxRequestEvent is posted when a preconf transaction request enters the transaction pool.

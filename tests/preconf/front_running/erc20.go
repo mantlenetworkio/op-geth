@@ -14,9 +14,9 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/ethereum/go-ethereum/internal/ethapi"
 	"github.com/ethereum/go-ethereum/tests/preconf/config"
 )
 
@@ -329,13 +329,13 @@ func pay(ctx context.Context, client *ethclient.Client, auth *bind.TransactOpts,
 		return fmt.Errorf("signing transaction: %v", err)
 	}
 
-	var result ethapi.PreconfTransactionResult
+	var result core.NewPreconfTxEvent
 	err = client.SendTransactionWithPreconf(ctx, signedTx, &result)
 	if err != nil {
 		return fmt.Errorf("failed to send transaction with preconf: %v", err)
 	}
 
-	if result.Status == "failed" {
+	if result.Status == core.PreconfStatusFailed {
 		*preconfFailedTx = append(*preconfFailedTx, signedTx)
 		// log.Printf("transaction preconf failed, i: %d, tx: %s, reason: %v", i, signedTx.Hash().Hex(), result.Reason)
 		return fmt.Errorf("transaction preconf failed, tx: %s, reason: %v", signedTx.Hash().Hex(), result.Reason)

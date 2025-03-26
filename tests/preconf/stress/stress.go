@@ -10,10 +10,10 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/ethereum/go-ethereum/internal/ethapi"
 	"github.com/ethereum/go-ethereum/tests/preconf/config"
 	"golang.org/x/sync/semaphore"
 )
@@ -176,7 +176,7 @@ func sendRawTransactionWithPreconf(
 	}
 
 	startTime := float64(time.Now().UnixNano()) / 1e6 // ms
-	var result ethapi.PreconfTransactionResult
+	var result core.NewPreconfTxEvent
 	err = client.SendTransactionWithPreconf(ctx, signedTx, &result)
 	endTime := float64(time.Now().UnixNano()) / 1e6
 	responseTime := endTime - startTime
@@ -192,7 +192,7 @@ func sendRawTransactionWithPreconf(
 		panic("Transaction hash mismatch")
 	}
 
-	if result.Status == "failed" {
+	if result.Status == core.PreconfStatusFailed {
 		log.Printf("Transaction %d failed: %s\n", iteration, result.Reason)
 	}
 	// log.Printf("preconf txHash: %s, nonce: %d\n", txHash.Hex(), tx.Nonce())
@@ -204,8 +204,8 @@ func sendRawTransactionWithPreconf(
 			if err == nil && receipt != nil {
 				// log.Printf("Transaction %d:%s %d confirmed - Status: %d, Expected Block: %d, Actual Block: %d\n", iteration, txHash.Hex(), tx.Nonce(), receipt.Status, uint64(result.BlockHeight), receipt.BlockNumber.Uint64())
 
-				if result.BlockHeight.String() != hexutil.EncodeBig(receipt.BlockNumber) {
-					log.Printf("TxHash: %s, Block height mismatch: %d != %d, reason: %s\n", result.TxHash, result.BlockHeight, receipt.BlockNumber.Uint64(), result.Reason)
+				if result.PredictedL2BlockNumber.String() != hexutil.EncodeBig(receipt.BlockNumber) {
+					log.Printf("TxHash: %s, Block height mismatch: %d != %d, reason: %s\n", result.TxHash, result.PredictedL2BlockNumber, receipt.BlockNumber.Uint64(), result.Reason)
 				}
 
 				break

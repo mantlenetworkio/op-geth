@@ -14,10 +14,10 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/ethereum/go-ethereum/internal/ethapi"
 )
 
 // Configuration
@@ -217,11 +217,11 @@ func SendMNTWithPreconf(ctx context.Context, client *ethclient.Client, auth *bin
 		return nil, fmt.Errorf("failed to sign transaction: %v", err)
 	}
 
-	var result ethapi.PreconfTransactionResult
+	var result core.NewPreconfTxEvent
 	if err := client.SendTransactionWithPreconf(ctx, signedTx, &result); err != nil {
 		return signedTx, fmt.Errorf("failed to send transaction with pre-confirmed: %v", err)
 	}
-	if result.Status == "failed" {
+	if result.Status == core.PreconfStatusFailed {
 		return signedTx, fmt.Errorf("transaction pre-confirmed failed: %s, %s", result.Reason, result.TxHash)
 	}
 	return signedTx, nil

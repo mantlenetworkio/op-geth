@@ -2158,54 +2158,46 @@ func (s *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil.B
 	return SubmitTransaction(ctx, s.b, tx)
 }
 
-// PreconfTransactionResult represents a preconf transaction.
-type PreconfTransactionResult struct {
-	TxHash      common.Hash    `json:"txHash"`
-	Status      string         `json:"status"`
-	Reason      string         `json:"reason"`
-	BlockHeight hexutil.Uint64 `json:"blockHeight"`
-}
-
-// SendRawTransaction will add the signed transaction to the transaction pool.
+// SendRawTransactionWithPreconf will add the signed preconf transaction to the transaction pool and return the preconf result.
 // The sender is responsible for signing the transaction and using the correct nonce.
-func (s *TransactionAPI) SendRawTransactionWithPreconf(ctx context.Context, input hexutil.Bytes) (*PreconfTransactionResult, error) {
-	preconfTxCh := make(chan core.NewPreconfTxEvent, 100)
-	defer close(preconfTxCh)
-	sub := s.b.SubscribeNewPreconfTxEvent(preconfTxCh)
-	defer sub.Unsubscribe()
+func (s *TransactionAPI) SendRawTransactionWithPreconf(ctx context.Context, input hexutil.Bytes) (*core.NewPreconfTxEvent, error) {
+	tx := new(types.Transaction)
+	if err := tx.UnmarshalBinary(input); err != nil {
+		return nil, err
+	}
 
-	txHash, err := s.SendRawTransaction(ctx, input)
+	// SubmitTransaction(ctx, s.b, tx)
+	// If the transaction fee cap is already specified, ensure the
+	// fee of the given transaction is _reasonable_.
+	if err := checkTxFee(tx.GasPrice(), tx.Gas(), s.b.RPCTxFeeCap()); err != nil {
+		return nil, err
+	}
+	if !s.b.UnprotectedAllowed() && !tx.Protected() {
+		// Ensure only eip155 signed transactions are submitted if EIP155Required is set.
+		return nil, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
+	}
+
+	// Send the transaction with preconf
+	result, err := s.b.SendTxWithPreconf(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 
-	timeout := time.NewTimer(1 * time.Second)
-	defer timeout.Stop()
-	for {
-		select {
-		case preconfTx := <-preconfTxCh:
-			if preconfTx.TxHash == txHash {
-				status, reason := "success", ""
-				if !preconfTx.Status {
-					status = "failed"
-					reason = preconfTx.Reason
-				}
-				return &PreconfTransactionResult{
-					TxHash:      preconfTx.TxHash,
-					Status:      status,
-					Reason:      reason,
-					BlockHeight: hexutil.Uint64(preconfTx.PredictedL2BlockNumber.Uint64()),
-				}, nil
-			}
-		case <-timeout.C:
-			return &PreconfTransactionResult{
-				TxHash:      txHash,
-				Status:      "failed",
-				Reason:      "UNKNOWN",
-				BlockHeight: hexutil.Uint64(0),
-			}, nil
-		}
+	// Print a log with full tx details for manual investigations and interventions
+	signer := types.MakeSigner(s.b.ChainConfig(), s.b.CurrentBlock().Number)
+	from, err := types.Sender(signer, tx)
+	if err != nil {
+		return nil, err
 	}
+
+	if tx.To() == nil {
+		addr := crypto.CreateAddress(from, tx.Nonce())
+		log.Info("Submitted contract creation", "hash", tx.Hash().Hex(), "from", from, "nonce", tx.Nonce(), "contract", addr.Hex(), "value", tx.Value())
+	} else {
+		log.Info("Submitted transaction", "hash", tx.Hash().Hex(), "from", from, "nonce", tx.Nonce(), "recipient", tx.To(), "value", tx.Value())
+	}
+
+	return result, nil
 }
 
 // Sign calculates an ECDSA signature for:

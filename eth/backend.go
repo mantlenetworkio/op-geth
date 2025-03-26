@@ -104,11 +104,6 @@ type Ethereum struct {
 	lock sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
 
 	shutdownTracker *shutdowncheck.ShutdownTracker // Tracks if and when the node has shutdown ungracefully
-
-	// preconfs
-	seqWebsocketService *rpc.Client
-	preconfTxFeed       event.Feed
-	scope               event.SubscriptionScope
 }
 
 // New creates a new Ethereum object (including the
@@ -300,50 +295,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			return nil, err
 		}
 		eth.seqRPCService = client
-	}
-
-	if config.RollupSequencerWebsocket != "" {
-		// setup sequencer websocket client
-		ctx := context.Background()
-		client, err := rpc.DialContext(ctx, config.RollupSequencerWebsocket)
-		if err != nil {
-			return nil, err
-		}
-		eth.seqWebsocketService = client
-
-		// setup preconf subscription
-		event.ResubscribeErr(time.Minute, func(_ context.Context, lastErr error) (event.Subscription, error) {
-			preconfCh := make(chan core.NewPreconfTxEvent, txChanSize)
-			sub, err := eth.seqWebsocketService.Subscribe(ctx, "eth", preconfCh, "newPreconfTransaction")
-			if err != nil {
-				log.Error("Subscribe newPreconfTransaction failed", "error", err)
-				return nil, err
-			}
-
-			// Handle received messages
-			go func() {
-				defer sub.Unsubscribe()
-				defer close(preconfCh)
-				for {
-					select {
-					case <-ctx.Done():
-						log.Error("Preconf resubscribe context error", "error", ctx.Err(), "lastErr", lastErr)
-						return
-					case err := <-sub.Err():
-						log.Error("Preconf resubscribe subscription", "error", err, "lastErr", lastErr)
-						return
-					case tx := <-preconfCh:
-						eth.preconfTxFeed.Send(tx)
-						if !tx.Status {
-							log.Trace("preconf transaction failed by seqWebsocketService", "tx", tx.TxHash.Hex(), "reason", tx.Reason)
-						}
-					}
-				}
-			}()
-			log.Trace("Preconf subscription seqWebsocketService started")
-
-			return sub, nil
-		})
 	}
 
 	if config.RollupHistoricalRPC != "" {
@@ -637,9 +588,6 @@ func (s *Ethereum) Stop() error {
 	s.engine.Close()
 	if s.seqRPCService != nil {
 		s.seqRPCService.Close()
-	}
-	if s.seqWebsocketService != nil {
-		s.seqWebsocketService.Close()
 	}
 	if s.historicalRPCService != nil {
 		s.historicalRPCService.Close()

@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	cmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/common/prque"
 	"github.com/ethereum/go-ethereum/consensus/misc"
@@ -1259,10 +1260,9 @@ func (pool *TxPool) addPreconfTx(tx *types.Transaction) {
 	}
 }
 
-func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) []*types.Transaction {
+func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) {
 	defer preconf.MetricsPreconfTxPoolHandleCost(time.Now())
 
-	preconfTxs := make([]*types.Transaction, 0)
 	for _, tx := range news {
 		txHash := tx.Hash()
 		if !pool.preconfTxs.Contains(txHash) {
@@ -1282,7 +1282,7 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) []*types.Transac
 		// default preconf event
 		event := core.NewPreconfTxEvent{
 			TxHash:                 txHash,
-			PredictedL2BlockNumber: big.NewInt(0),
+			PredictedL2BlockNumber: hexutil.Uint64(0),
 		}
 		// timeout
 		timeout := time.NewTimer(pool.config.Preconf.PreconfTimeout)
@@ -1291,20 +1291,23 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) []*types.Transac
 		select {
 		case response := <-result:
 			log.Trace("txpool received preconf tx response", "tx", txHash)
-			event.Status = response.Err == nil
-			if !event.Status {
+			if response.Err == nil {
+				event.Status = core.PreconfStatusSuccess
+			} else {
+				event.Status = core.PreconfStatusFailed
 				event.Reason = response.Err.Error()
 			}
 			if response.Receipt != nil {
-				event.Status = response.Receipt.Status == types.ReceiptStatusSuccessful
-				if !event.Status {
+				if response.Receipt.Status == types.ReceiptStatusSuccessful {
+					event.Status = core.PreconfStatusSuccess
+				} else {
+					event.Status = core.PreconfStatusFailed
 					event.Reason = vm.ErrExecutionReverted.Error()
 				}
-				event.PredictedL2BlockNumber = response.Receipt.BlockNumber
+				event.PredictedL2BlockNumber = hexutil.Uint64(response.Receipt.BlockNumber.Uint64())
 			}
-			preconfTxs = append(preconfTxs, tx)
 		case <-timeout.C:
-			event.Status = false
+			event.Status = core.PreconfStatusFailed
 			event.Reason = "preconf timeout"
 		}
 
@@ -1312,17 +1315,14 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) []*types.Transac
 		pool.preconfTxFeed.Send(event)
 
 		// add preconf success tx to journal
-		if event.Status {
+		if event.Status == core.PreconfStatusSuccess {
 			preconf.PreconfTxSuccessMeter.Mark(1)
 			log.Trace("preconf success", "tx", txHash)
 		} else {
 			preconf.PreconfTxFailureMeter.Mark(1)
 			log.Trace("preconf failure", "tx", txHash, "reason", event.Reason)
 		}
-
 	}
-
-	return preconfTxs
 }
 
 // addTxsLocked attempts to queue a batch of transactions if they are valid.

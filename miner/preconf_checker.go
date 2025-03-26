@@ -63,6 +63,10 @@ func NewPreconfChecker(chainConfig *params.ChainConfig, chain *core.BlockChain, 
 }
 
 func (c *preconfChecker) loop() {
+	if !c.minerConfig.EnablePreconfChecker {
+		log.Debug("preconf checker is disabled, skip loop")
+		return
+	}
 	for {
 		time.Sleep(1 * time.Second)
 

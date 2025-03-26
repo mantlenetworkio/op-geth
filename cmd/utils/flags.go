@@ -609,6 +609,12 @@ var (
 		Value:    ethconfig.Defaults.Miner.NewPayloadTimeout,
 		Category: flags.MinerCategory,
 	}
+	MinerEnablePreconfChecker = &cli.BoolFlag{
+		Name:     "miner.enablepreconfchecker",
+		Usage:    "Enable preconf checker",
+		Value:    preconf.DefaultMinerConfig.EnablePreconfChecker,
+		Category: flags.MinerCategory,
+	}
 	MinerPreconfOpNodeHTTP = &cli.StringFlag{
 		Name:     "miner.optimismnodehttp",
 		Usage:    "Optimism node http",
@@ -972,11 +978,6 @@ var (
 	RollupSequencerHTTPFlag = &cli.StringFlag{
 		Name:     "rollup.sequencerhttp",
 		Usage:    "HTTP endpoint for the sequencer mempool",
-		Category: flags.RollupCategory,
-	}
-	RollupSequencerWebsocketFlag = &cli.StringFlag{
-		Name:     "rollup.sequencerwebsocket",
-		Usage:    "Websocket endpoint for the sequencer mempool",
 		Category: flags.RollupCategory,
 	}
 
@@ -1800,6 +1801,9 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	if ctx.IsSet(RollupComputePendingBlock.Name) {
 		cfg.RollupComputePendingBlock = ctx.Bool(RollupComputePendingBlock.Name)
 	}
+	if ctx.IsSet(MinerEnablePreconfChecker.Name) {
+		cfg.PreconfConfig.EnablePreconfChecker = ctx.Bool(MinerEnablePreconfChecker.Name)
+	}
 	if ctx.IsSet(MinerPreconfOpNodeHTTP.Name) {
 		cfg.PreconfConfig.OptimismNodeHTTP = ctx.String(MinerPreconfOpNodeHTTP.Name)
 	}
@@ -2018,10 +2022,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	// Only configure sequencer http flag if we're running in verifier mode i.e. --mine is disabled.
 	if ctx.IsSet(RollupSequencerHTTPFlag.Name) && !ctx.IsSet(MiningEnabledFlag.Name) {
 		cfg.RollupSequencerHTTP = ctx.String(RollupSequencerHTTPFlag.Name)
-	}
-	// Only configure sequencer websocket flag if we're running in verifier mode i.e. --mine is disabled.
-	if ctx.IsSet(RollupSequencerWebsocketFlag.Name) && !ctx.IsSet(MiningEnabledFlag.Name) {
-		cfg.RollupSequencerWebsocket = ctx.String(RollupSequencerWebsocketFlag.Name)
 	}
 	if ctx.IsSet(RollupHistoricalRPCFlag.Name) {
 		cfg.RollupHistoricalRPC = ctx.String(RollupHistoricalRPCFlag.Name)

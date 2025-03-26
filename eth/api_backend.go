@@ -311,6 +311,49 @@ func (b *EthAPIBackend) SendTx(ctx context.Context, tx *types.Transaction) error
 	return b.eth.txPool.AddLocal(tx)
 }
 
+func (b *EthAPIBackend) SendTxWithPreconf(ctx context.Context, tx *types.Transaction) (*core.NewPreconfTxEvent, error) {
+	if b.eth.seqRPCService != nil {
+		data, err := tx.MarshalBinary()
+		if err != nil {
+			return nil, err
+		}
+		var result *core.NewPreconfTxEvent
+		if err = b.eth.seqRPCService.CallContext(ctx, &result, "eth_sendRawTransactionWithPreconf", hexutil.Encode(data)); err != nil {
+			return nil, fmt.Errorf("failed to forward tx to sequencer, please try again. Error message: '%w'", err)
+		}
+		return result, nil
+	}
+
+	return b.sendTxWithPreconf(ctx, tx)
+}
+
+func (b *EthAPIBackend) sendTxWithPreconf(ctx context.Context, tx *types.Transaction) (*core.NewPreconfTxEvent, error) {
+	preconfTxCh := make(chan core.NewPreconfTxEvent, 100)
+	defer close(preconfTxCh)
+	sub := b.SubscribeNewPreconfTxEvent(preconfTxCh)
+	defer sub.Unsubscribe()
+
+	// Send tx
+	txHash := tx.Hash()
+	if err := b.SendTx(ctx, tx); err != nil {
+		return nil, err
+	}
+
+	// Wait for preconf tx event
+	timeout := time.NewTimer(1 * time.Second)
+	defer timeout.Stop()
+	for {
+		select {
+		case preconfTx := <-preconfTxCh:
+			if preconfTx.TxHash == txHash {
+				return &preconfTx, nil
+			}
+		case <-timeout.C:
+			return nil, errors.New("preconf tx event not received")
+		}
+	}
+}
+
 func (b *EthAPIBackend) GetPoolTransactions() (types.Transactions, error) {
 	pending := b.eth.txPool.Pending(false)
 	var txs types.Transactions
@@ -350,10 +393,6 @@ func (b *EthAPIBackend) TxPool() *txpool.TxPool {
 }
 
 func (b *EthAPIBackend) SubscribeNewPreconfTxEvent(ch chan<- core.NewPreconfTxEvent) event.Subscription {
-	if b.eth.seqWebsocketService != nil {
-		return b.eth.scope.Track(b.eth.preconfTxFeed.Subscribe(ch))
-	}
-
 	return b.eth.TxPool().SubscribeNewPreconfTxEvent(ch)
 }
 
