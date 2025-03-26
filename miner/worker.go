@@ -1038,11 +1038,6 @@ func (w *worker) commitTimedTransactions(env *environment, txs []*types.Transact
 	var coalescedLogs []*types.Log
 
 	for _, tx := range txs {
-		// Retrieve the next transaction and abort if all done.
-		if tx == nil {
-			break
-		}
-
 		// Check interruption signal and abort building if it's fired.
 		if interrupt != nil {
 			if signal := atomic.LoadInt32(interrupt); signal != commitInterruptNone {

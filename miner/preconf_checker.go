@@ -34,13 +34,20 @@ var (
 	ErrEnvBlockNumberLessThanEngineSyncTargetBlockNumberOrUnsafeL2BlockNumber = errors.New("env block number is less than engine sync target block number or unsafe l2 block number")
 )
 
+const (
+	RequestTimeout = 5 * time.Second
+)
+
 type preconfChecker struct {
 	mu sync.RWMutex
 
 	chainConfig *params.ChainConfig
 	chain       *core.BlockChain
 	minerConfig *preconf.MinerConfig
-	l1ethclient *ethclient.Client
+
+	// clients
+	opnodeClient *http.Client
+	l1ethclient  *ethclient.Client
 
 	env          *environment
 	envUpdatedAt time.Time
@@ -53,9 +60,10 @@ type preconfChecker struct {
 
 func NewPreconfChecker(chainConfig *params.ChainConfig, chain *core.BlockChain, minerConfig *preconf.MinerConfig) *preconfChecker {
 	checker := &preconfChecker{
-		chainConfig: chainConfig,
-		chain:       chain,
-		minerConfig: minerConfig,
+		chainConfig:  chainConfig,
+		chain:        chain,
+		minerConfig:  minerConfig,
+		opnodeClient: &http.Client{Timeout: RequestTimeout},
 	}
 	log.Info("preconf checker", "minner.config", checker.minerConfig.String())
 	go checker.loop()
@@ -75,7 +83,7 @@ func (c *preconfChecker) loop() {
 }
 
 func (c *preconfChecker) syncOptimismStatus() error {
-	resp, err := http.Post(c.minerConfig.OptimismNodeHTTP, "application/json", strings.NewReader(`{"jsonrpc":"2.0","method":"optimism_syncStatus","params":[],"id":1}`))
+	resp, err := c.opnodeClient.Post(c.minerConfig.OptimismNodeHTTP, "application/json", strings.NewReader(`{"jsonrpc":"2.0","method":"optimism_syncStatus","params":[],"id":1}`))
 	if err != nil {
 		return fmt.Errorf("failed to get optimism sync status from opNode: %w", err)
 	}
@@ -100,7 +108,9 @@ func (c *preconfChecker) syncOptimismStatus() error {
 
 func (c *preconfChecker) GetDepositTxs(start, end uint64) ([]*types.Transaction, error) {
 	if c.l1ethclient == nil {
-		l1ethclient, err := ethclient.Dial(c.minerConfig.L1RPCHTTP)
+		dialCtx, dialCancel := context.WithTimeout(context.Background(), RequestTimeout)
+		defer dialCancel()
+		l1ethclient, err := ethclient.DialContext(dialCtx, c.minerConfig.L1RPCHTTP)
 		if err != nil {
 			return nil, fmt.Errorf("failed to dial l1 rpc: %w", err)
 		}
@@ -108,7 +118,9 @@ func (c *preconfChecker) GetDepositTxs(start, end uint64) ([]*types.Transaction,
 	}
 
 	// filter deposit logs from start to end, but not include end
-	logs, err := c.l1ethclient.FilterLogs(context.Background(), ethereum.FilterQuery{
+	filterCtx, filterCancel := context.WithTimeout(context.Background(), RequestTimeout)
+	defer filterCancel()
+	logs, err := c.l1ethclient.FilterLogs(filterCtx, ethereum.FilterQuery{
 		FromBlock: big.NewInt(int64(start)),
 		ToBlock:   big.NewInt(int64(end)),
 		Addresses: []common.Address{common.HexToAddress(c.minerConfig.L1DepositAddress)},

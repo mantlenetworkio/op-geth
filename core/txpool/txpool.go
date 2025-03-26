@@ -1254,15 +1254,15 @@ func (pool *TxPool) addPreconfTx(tx *types.Transaction) {
 	if pool.journal != nil {
 		if err := pool.journal.insert(tx); err != nil {
 			log.Warn("Failed to journal preconf transaction", "tx", txHash, "err", err)
+		} else {
+			log.Trace("preconf transaction journaled", "tx", txHash)
 		}
-		log.Trace("preconf transaction journaled", "tx", txHash)
 	}
 }
 
-func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) []*types.Transaction {
+func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) {
 	defer preconf.MetricsPreconfTxPoolHandleCost(time.Now())
 
-	preconfTxs := make([]*types.Transaction, 0)
 	for _, tx := range news {
 		txHash := tx.Hash()
 		if !pool.preconfTxs.Contains(txHash) {
@@ -1302,7 +1302,6 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) []*types.Transac
 				}
 				event.PredictedL2BlockNumber = response.Receipt.BlockNumber
 			}
-			preconfTxs = append(preconfTxs, tx)
 		case <-timeout.C:
 			event.Status = false
 			event.Reason = "preconf timeout"
@@ -1319,10 +1318,7 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) []*types.Transac
 			preconf.PreconfTxFailureMeter.Mark(1)
 			log.Trace("preconf failure", "tx", txHash, "reason", event.Reason)
 		}
-
 	}
-
-	return preconfTxs
 }
 
 // addTxsLocked attempts to queue a batch of transactions if they are valid.
