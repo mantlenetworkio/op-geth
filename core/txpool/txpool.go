@@ -1255,8 +1255,9 @@ func (pool *TxPool) addPreconfTx(tx *types.Transaction) {
 	if pool.journal != nil {
 		if err := pool.journal.insert(tx); err != nil {
 			log.Warn("Failed to journal preconf transaction", "tx", txHash, "err", err)
+		} else {
+			log.Trace("preconf transaction journaled", "tx", txHash)
 		}
-		log.Trace("preconf transaction journaled", "tx", txHash)
 	}
 }
 
