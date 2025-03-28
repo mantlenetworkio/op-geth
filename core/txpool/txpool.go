@@ -269,7 +269,9 @@ type TxPool struct {
 	signer      types.Signer
 	mu          sync.RWMutex
 
-	// Preconf Feeds
+	// Preconf variables
+	preconfReadyCh       chan struct{}
+	preconfReadyOnce     sync.Once
 	preconfTxRequestFeed event.Feed
 	preconfTxFeed        event.Feed
 	preconfTxs           *preconf.TimedTxSet // Set of preconf transactions
@@ -345,6 +347,7 @@ func NewTxPool(config Config, chainconfig *params.ChainConfig, chain blockChain)
 	pool.reset(nil, chain.CurrentBlock())
 
 	// Initialize preconfs
+	pool.preconfReadyCh = make(chan struct{})
 	pool.preconfTxs = preconf.NewTimedTxSet()
 	log.Info("preconf", "txpool.config", pool.config.Preconf.String())
 
@@ -624,7 +627,26 @@ func (pool *TxPool) Locals() []common.Address {
 
 // PendingPreconfTxs retrieves the preconf transactions and the pending transactions.
 func (pool *TxPool) PendingPreconfTxs(enforceTips bool) ([]*types.Transaction, map[common.Address]types.Transactions) {
-	pending := pool.Pending(enforceTips)
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+
+	pending := make(map[common.Address]types.Transactions)
+	for addr, list := range pool.pending {
+		txs := list.Flatten()
+
+		// If the miner requests tip enforcement, cap the lists now
+		if enforceTips && !pool.locals.contains(addr) {
+			for i, tx := range txs {
+				if tx.EffectiveGasTipIntCmp(pool.gasPrice, pool.priced.urgent.baseFee) < 0 {
+					txs = txs[:i]
+					break
+				}
+			}
+		}
+		if len(txs) > 0 {
+			pending[addr] = txs
+		}
+	}
 	return pool.extractPreconfTxsFromPending(pending), pending
 }
 
@@ -1235,10 +1257,16 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 		<-done
 	}
 
-	// handle preconf txs
-	pool.handlePreconfTxs(news)
-
 	return errs
+}
+
+// PreconfReady closes the preconfReadyCh channel to notify the miner that preconf is ready
+// This is called every time a worker is ready with an env, but it only closes once, so we need to use sync.Once to ensure it only closes once
+func (pool *TxPool) PreconfReady() {
+	pool.preconfReadyOnce.Do(func() {
+		close(pool.preconfReadyCh)
+		log.Info("preconf ready")
+	})
 }
 
 func (pool *TxPool) addPreconfTx(tx *types.Transaction) {
@@ -1252,13 +1280,9 @@ func (pool *TxPool) addPreconfTx(tx *types.Transaction) {
 	}
 
 	pool.preconfTxs.Add(tx)
-	if pool.journal != nil {
-		if err := pool.journal.insert(tx); err != nil {
-			log.Warn("Failed to journal preconf transaction", "tx", txHash, "err", err)
-		} else {
-			log.Trace("preconf transaction journaled", "tx", txHash)
-		}
-	}
+
+	// handle preconf txs
+	pool.handlePreconfTxs([]*types.Transaction{tx})
 }
 
 func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) {
@@ -1273,56 +1297,78 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) {
 
 		// send preconf request event
 		result := make(chan *core.PreconfResponse)
-		defer close(result)
 		pool.preconfTxRequestFeed.Send(core.NewPreconfTxRequest{
 			Tx:            tx,
 			PreconfResult: result,
 		})
 		log.Trace("txpool sent preconf tx request", "tx", txHash)
 
-		// default preconf event
-		event := core.NewPreconfTxEvent{
-			TxHash:                 txHash,
-			PredictedL2BlockNumber: hexutil.Uint64(0),
-		}
-		// timeout
-		timeout := time.NewTimer(pool.config.Preconf.PreconfTimeout)
-		defer timeout.Stop()
-		// wait for miner.worker preconf response
-		select {
-		case response := <-result:
-			log.Trace("txpool received preconf tx response", "tx", txHash)
-			if response.Err == nil {
-				event.Status = core.PreconfStatusSuccess
-			} else {
-				event.Status = core.PreconfStatusFailed
-				event.Reason = response.Err.Error()
+		// avoid race condition
+		tx := tx
+		// goroutine to avoid blocking
+		go func() {
+			defer close(result)
+
+			// wait for preconf ready, no need to wait again after it's ready, as it only needs to wait once when the service restarts
+			// wait for 10s, if not ready, skip
+			select {
+			case <-pool.preconfReadyCh:
+			case <-time.After(10 * time.Second):
+				log.Error("preconf txs not ready, skip handle", "tx", txHash)
+				return
 			}
-			if response.Receipt != nil {
-				if response.Receipt.Status == types.ReceiptStatusSuccessful {
+
+			// default preconf event
+			event := core.NewPreconfTxEvent{
+				TxHash:                 txHash,
+				PredictedL2BlockNumber: hexutil.Uint64(0),
+			}
+			// timeout
+			timeout := time.NewTimer(pool.config.Preconf.PreconfTimeout)
+			defer timeout.Stop()
+			// wait for miner.worker preconf response
+			select {
+			case response := <-result:
+				log.Trace("txpool received preconf tx response", "tx", txHash)
+				if response.Err == nil {
 					event.Status = core.PreconfStatusSuccess
 				} else {
 					event.Status = core.PreconfStatusFailed
-					event.Reason = vm.ErrExecutionReverted.Error()
+					event.Reason = response.Err.Error()
 				}
-				event.PredictedL2BlockNumber = hexutil.Uint64(response.Receipt.BlockNumber.Uint64())
+				if response.Receipt != nil {
+					if response.Receipt.Status == types.ReceiptStatusSuccessful {
+						event.Status = core.PreconfStatusSuccess
+					} else {
+						event.Status = core.PreconfStatusFailed
+						event.Reason = vm.ErrExecutionReverted.Error()
+					}
+					event.PredictedL2BlockNumber = hexutil.Uint64(response.Receipt.BlockNumber.Uint64())
+				}
+			case <-timeout.C:
+				event.Status = core.PreconfStatusFailed
+				event.Reason = "preconf timeout"
 			}
-		case <-timeout.C:
-			event.Status = core.PreconfStatusFailed
-			event.Reason = "preconf timeout"
-		}
 
-		// send preconf event
-		pool.preconfTxFeed.Send(event)
+			// send preconf event
+			pool.preconfTxFeed.Send(event)
 
-		// add preconf success tx to journal
-		if event.Status == core.PreconfStatusSuccess {
-			preconf.PreconfTxSuccessMeter.Mark(1)
-			log.Trace("preconf success", "tx", txHash)
-		} else {
-			preconf.PreconfTxFailureMeter.Mark(1)
-			log.Trace("preconf failure", "tx", txHash, "reason", event.Reason)
-		}
+			// add preconf success tx to journal
+			if event.Status == core.PreconfStatusSuccess {
+				preconf.PreconfTxSuccessMeter.Mark(1)
+				log.Trace("preconf success", "tx", txHash)
+				if pool.journal != nil {
+					if err := pool.journal.insert(tx); err != nil {
+						log.Warn("Failed to journal preconf success transaction", "tx", txHash, "err", err)
+					} else {
+						log.Trace("preconf success transaction journaled", "tx", txHash)
+					}
+				}
+			} else {
+				preconf.PreconfTxFailureMeter.Mark(1)
+				log.Trace("preconf failure", "tx", txHash, "reason", event.Reason)
+			}
+		}()
 	}
 }
 

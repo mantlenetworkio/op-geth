@@ -1230,7 +1230,7 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 // be customized with the plugin in the future.
 func (w *worker) fillTransactions(interrupt *int32, env *environment) error {
 	w.preconfChecker.PausePreconf()
-	defer func() { w.preconfChecker.UnpausePreconf(env.copy()) }()
+	defer func() { w.preconfChecker.UnpausePreconf(env.copy(), w.eth.TxPool().PreconfReady) }()
 
 	// Split the pending transactions into locals and remotes
 	// Fill the block with all available pending transactions.

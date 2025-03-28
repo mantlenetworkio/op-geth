@@ -76,13 +76,13 @@ func (c *preconfChecker) loop() {
 		return
 	}
 	for {
-		time.Sleep(1 * time.Second)
-
 		if err := c.syncOptimismStatus(); err != nil {
 			log.Error("Failed to sync optimism status", "err", err)
 		}
 
 		preconf.MetricsOpNodeSyncStatus(c.optimismSyncStatus, c.optimismSyncStatusOk)
+
+		time.Sleep(1 * time.Second)
 	}
 }
 
@@ -310,7 +310,7 @@ func (c *preconfChecker) PausePreconf() {
 	log.Trace("pause preconf")
 }
 
-func (c *preconfChecker) UnpausePreconf(env *environment) {
+func (c *preconfChecker) UnpausePreconf(env *environment, preconfReady func()) {
 	defer c.mu.Unlock()
 	c.env = env
 	c.envUpdatedAt = time.Now()
@@ -328,4 +328,7 @@ func (c *preconfChecker) UnpausePreconf(env *environment) {
 
 	// Metrics
 	preconf.MetricsOpGethEnvBlockNumber(env.header.Number.Int64())
+
+	// notify txpool that preconf is ready
+	preconfReady()
 }
