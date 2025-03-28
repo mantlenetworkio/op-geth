@@ -340,15 +340,19 @@ func (b *EthAPIBackend) sendTxWithPreconf(ctx context.Context, tx *types.Transac
 	}
 
 	// Wait for preconf tx event
-	timeout := time.NewTimer(1 * time.Second)
-	defer timeout.Stop()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	for {
 		select {
 		case preconfTx := <-preconfTxCh:
 			if preconfTx.TxHash == txHash {
+				if preconfTx.Status == core.PreconfStatusFailed {
+					log.Trace("api backend received preconf tx failed event", "tx", txHash, "reason", preconfTx.Reason)
+				}
 				return &preconfTx, nil
 			}
-		case <-timeout.C:
+		case <-ctx.Done():
+			log.Trace("preconf tx event not received", "tx", txHash, "err", ctx.Err())
 			return nil, errors.New("preconf tx event not received")
 		}
 	}
