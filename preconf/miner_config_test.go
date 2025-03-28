@@ -13,7 +13,7 @@ func TestMinerConfig_String(t *testing.T) {
 		ToleranceBlock:   5,
 	}
 
-	expected := "EnablePreconfChecker: false, OptimismNodeHTTP: http://test-optimism:8545, L1RPCHTTP: http://test-l1:8545, L1DepositAddress: 0x1234567890abcdef1234567890abcdef12345678, ToleranceBlock: 5, MantleToleranceDuration: 10s, EthToleranceDuration: 1m36s, EthToleranceBlock: 8"
+	expected := "EnablePreconfChecker: false, OptimismNodeHTTP: http://test-optimism:8545, L1RPCHTTP: http://test-l1:8545, L1DepositAddress: 0x1234567890abcdef1234567890abcdef12345678, ToleranceBlock: 5, MantleToleranceDuration: 10s, EthToleranceDuration: 2m0s, EthToleranceBlock: 8"
 	if got := config.String(); got != expected {
 		t.Errorf("MinerConfig.String() = %v, want %v", got, expected)
 	}
@@ -48,9 +48,9 @@ func TestMinerConfig_EthToleranceDuration(t *testing.T) {
 		toleranceBlock int64
 		want           time.Duration
 	}{
-		{"Zero tolerance", 0, 36 * time.Second},     // (0+3)*12
-		{"Default tolerance", 3, 72 * time.Second},  // (3+3)*12
-		{"Custom tolerance", 10, 156 * time.Second}, // (10+3)*12
+		{"Zero tolerance", 0, 60 * time.Second},     // (0+3+2)*12
+		{"Default tolerance", 3, 96 * time.Second},  // (3+3+2)*12
+		{"Custom tolerance", 10, 180 * time.Second}, // (10+3+2)*12
 	}
 
 	for _, tt := range tests {

@@ -1286,7 +1286,7 @@ func (pool *TxPool) addPreconfTx(tx *types.Transaction) {
 }
 
 func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) {
-	defer preconf.MetricsPreconfTxPoolHandleCost(time.Now())
+	now := time.Now()
 
 	for _, tx := range news {
 		txHash := tx.Hash()
@@ -1307,6 +1307,7 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) {
 		tx := tx
 		// goroutine to avoid blocking
 		go func() {
+			defer preconf.MetricsPreconfTxPoolHandleCost(now)
 			defer close(result)
 
 			// wait for preconf ready, no need to wait again after it's ready, as it only needs to wait once when the service restarts

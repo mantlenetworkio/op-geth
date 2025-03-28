@@ -31,8 +31,10 @@ func (c *MinerConfig) MantleToleranceDuration() time.Duration {
 	return time.Duration(c.ToleranceBlock*2) * time.Second
 }
 
+// 3 is the fixed delay of 3 blocks for the op-node to start deriving
+// 2 is the possible delay of 2 blocks for l1rpc to obtain the latest block height
 func (c *MinerConfig) EthToleranceDuration() time.Duration {
-	return time.Duration(c.ToleranceBlock+3) * 12 * time.Second
+	return time.Duration(c.ToleranceBlock+3+2) * 12 * time.Second
 }
 
 func (c *MinerConfig) EthToleranceBlock() uint64 {

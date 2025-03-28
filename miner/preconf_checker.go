@@ -155,21 +155,29 @@ func (c *preconfChecker) UpdateOptimismSyncStatus(newOptimismSyncStatus *preconf
 	if c.optimismSyncStatus == nil {
 		c.optimismSyncStatus = newOptimismSyncStatus
 		c.optimismSyncStatusOk = true
-		c.updateDepositTxs(newOptimismSyncStatus.CurrentL1.Number, newOptimismSyncStatus.HeadL1.Number)
+		c.updateDepositTxs(newOptimismSyncStatus.UnsafeL2.L1Origin.Number, newOptimismSyncStatus.HeadL1.Number)
 		return
 	}
 
-	log.Debug("update optimism sync status", "current_l1.number", c.optimismSyncStatus.CurrentL1.Number, "head_l1.number", c.optimismSyncStatus.HeadL1.Number,
-		"unsafe_l2.number", c.optimismSyncStatus.UnsafeL2.Number, "engine_sync_target.number", c.optimismSyncStatus.EngineSyncTarget.Number,
-		"new_current_l1.number", newOptimismSyncStatus.CurrentL1.Number, "new_head_l1.number", newOptimismSyncStatus.HeadL1.Number,
-		"new_unsafe_l2.number", newOptimismSyncStatus.UnsafeL2.Number, "new_engine_sync_target.number", newOptimismSyncStatus.EngineSyncTarget.Number)
+	log.Debug("update optimism sync status",
+		"current_l1.number", c.optimismSyncStatus.CurrentL1.Number,
+		"head_l1.number", c.optimismSyncStatus.HeadL1.Number,
+		"unsafe_l2.l1_origin.number", c.optimismSyncStatus.UnsafeL2.L1Origin.Number,
+		"unsafe_l2.number", c.optimismSyncStatus.UnsafeL2.Number,
+		"engine_sync_target.number", c.optimismSyncStatus.EngineSyncTarget.Number,
+		"new_current_l1.number", newOptimismSyncStatus.CurrentL1.Number,
+		"new_head_l1.number", newOptimismSyncStatus.HeadL1.Number,
+		"new_unsafe_l2.l1_origin.number", newOptimismSyncStatus.UnsafeL2.L1Origin.Number,
+		"new_unsafe_l2.number", newOptimismSyncStatus.UnsafeL2.Number,
+		"new_engine_sync_target.number", newOptimismSyncStatus.EngineSyncTarget.Number,
+	)
 
 	// check optimism sync status
 	if c.isSyncStatusOk(newOptimismSyncStatus) {
 		// if l1 block changes, update depositTxs
-		if c.optimismSyncStatus.CurrentL1.Number != newOptimismSyncStatus.CurrentL1.Number ||
+		if c.optimismSyncStatus.UnsafeL2.L1Origin.Number != newOptimismSyncStatus.UnsafeL2.L1Origin.Number ||
 			c.optimismSyncStatus.HeadL1.Number != newOptimismSyncStatus.HeadL1.Number {
-			c.updateDepositTxs(newOptimismSyncStatus.CurrentL1.Number, newOptimismSyncStatus.HeadL1.Number)
+			c.updateDepositTxs(newOptimismSyncStatus.UnsafeL2.L1Origin.Number, newOptimismSyncStatus.HeadL1.Number)
 		}
 		c.optimismSyncStatus = newOptimismSyncStatus
 		c.optimismSyncStatusOk = true
@@ -193,6 +201,8 @@ func (c *preconfChecker) isSyncStatusOk(newStatus *preconf.OptimismSyncStatus) b
 }
 
 // update depositTxs
+// We cannot use `newOptimismSyncStatus.CurrentL1.Number` because it may not have been successfully derived yet, which could cause us to
+// miss the deposit transactions for this block. Therefore, we can only use `newOptimismSyncStatus.UnsafeL2.L1Origin.Number`
 func (c *preconfChecker) updateDepositTxs(currentL1, headL1 uint64) {
 	start, end := currentL1+1, headL1-1
 	depositTxs, err := c.GetDepositTxs(start, end)
@@ -257,7 +267,7 @@ func (c *preconfChecker) precheck() error {
 		return ErrEnvTooOld
 	}
 
-	// Not more than EthToleranceDuration(default 72s) from the last L1Block.
+	// Not more than EthToleranceDuration(default 2m0s) from the last L1Block.
 	currentL1BlockTime := time.Unix(int64(c.optimismSyncStatus.CurrentL1.Time), 0)
 	if time.Since(currentL1BlockTime) > c.minerConfig.EthToleranceDuration() {
 		log.Trace("currentL1BlockTooOld", "currentL1BlockTime", currentL1BlockTime, "time.Since(currentL1BlockTime)", time.Since(currentL1BlockTime), "tolerance", c.minerConfig.EthToleranceDuration())
