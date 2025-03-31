@@ -659,11 +659,13 @@ func (w *worker) mainLoop() {
 				// Not fatal, just warn to the log
 				log.Warn("preconf failed", "tx", ev.Tx.Hash(), "err", err)
 			}
-			ev.PreconfResult <- &core.PreconfResponse{
-				Receipt: receipt,
-				Err:     err,
+			// Prevent panic caused by writing after ev.PreconfResult is closed
+			select {
+			case ev.PreconfResult <- &core.PreconfResponse{Receipt: receipt, Err: err}:
+				log.Trace("worker sent preconf tx response", "tx", ev.Tx.Hash())
+			case <-time.After(time.Second):
+				log.Warn("preconf tx response timeout, preconf result is closed?", "tx", ev.Tx.Hash())
 			}
-			log.Trace("worker sent preconf tx response", "tx", ev.Tx.Hash())
 		case ev := <-w.txsCh:
 			if w.chainConfig.Optimism != nil && !w.config.RollupComputePendingBlock {
 				continue // don't update the pending-block snapshot if we are not computing the pending block
@@ -1030,23 +1032,28 @@ func (w *worker) commitTransactions(env *environment, txs *types.TransactionsByP
 	return nil
 }
 
-func (w *worker) commitTimedTransactions(env *environment, txs []*types.Transaction, interrupt *int32) error {
+func (w *worker) commitTimedTransactions(env *environment, txs []*types.Transaction, interrupt *int32) ([]*types.Transaction, error) {
 	gasLimit := env.header.GasLimit
 	if env.gasPool == nil {
 		env.gasPool = new(core.GasPool).AddGas(gasLimit)
 	}
 	var coalescedLogs []*types.Log
 
-	for _, tx := range txs {
+	// unsealedIndex is the index of the first unsealed transaction
+	unsealedIndex := 0
+
+FIFO:
+	for i, tx := range txs {
+		unsealedIndex = i
 		// Check interruption signal and abort building if it's fired.
 		if interrupt != nil {
 			if signal := atomic.LoadInt32(interrupt); signal != commitInterruptNone {
-				return signalToErr(signal)
+				return nil, signalToErr(signal)
 			}
 		}
 		// If we don't have enough gas for any further transactions then we're done.
 		if env.gasPool.Gas() < params.TxGas {
-			log.Trace("Not enough gas for further transactions", "have", env.gasPool, "want", params.TxGas)
+			log.Trace("Not enough gas for further transactions", "have", env.gasPool, "want", params.TxGas, "index", i, "tx", tx.Hash().Hex())
 			break
 		}
 
@@ -1058,7 +1065,6 @@ func (w *worker) commitTimedTransactions(env *environment, txs []*types.Transact
 		// phase, start ignoring the sender until we do.
 		if tx.Protected() && !w.chainConfig.IsEIP155(env.header.Number) {
 			log.Trace("Ignoring reply protected transaction", "hash", tx.Hash(), "eip155", w.chainConfig.EIP155Block)
-
 			continue
 		}
 		// Start executing the transaction
@@ -1068,7 +1074,8 @@ func (w *worker) commitTimedTransactions(env *environment, txs []*types.Transact
 		switch {
 		case errors.Is(err, core.ErrGasLimitReached):
 			// Pop the current out-of-gas transaction without shifting in the next from the account
-			log.Trace("Gas limit exceeded for current block", "sender", from)
+			log.Trace("Gas limit exceeded for current block", "sender", from, "index", i, "tx", tx.Hash().Hex())
+			break FIFO
 
 		case errors.Is(err, core.ErrNonceTooLow):
 			// New head notification data race between the transaction pool and miner
@@ -1108,7 +1115,14 @@ func (w *worker) commitTimedTransactions(env *environment, txs []*types.Transact
 		}
 		w.pendingLogsFeed.Send(cpy)
 	}
-	return nil
+
+	// check if there are any unsealed transactions
+	unsealedTxs := make([]*types.Transaction, 0)
+	if unsealedIndex+1 != len(txs) { // If unsealedIndex is not the last transaction, add unsealedIndex and subsequent transactions to unsealedTxs
+		unsealedTxs = txs[unsealedIndex:] // From unsealedIndex to the last transaction
+		log.Debug("unsealed transactions", "unsealedIndex", unsealedIndex, "len(tx)", len(txs))
+	}
+	return unsealedTxs, nil
 }
 
 // generateParams wraps various of settings for generating sealing task.
@@ -1229,16 +1243,28 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 // into the given sealing block. The transaction selection and ordering strategy can
 // be customized with the plugin in the future.
 func (w *worker) fillTransactions(interrupt *int32, env *environment) error {
-	w.preconfChecker.PausePreconf()
+	unsealedPreconfTxsCh := w.preconfChecker.PausePreconf()
 	defer func() { w.preconfChecker.UnpausePreconf(env.copy(), w.eth.TxPool().PreconfReady) }()
 
 	// Split the pending transactions into locals and remotes
 	// Fill the block with all available pending transactions.
 	preconfTxs, pending := w.eth.TxPool().PendingPreconfTxs(true)
+
+	var unsealedPreconfTxs []*types.Transaction
 	if len(preconfTxs) > 0 {
-		if err := w.commitTimedTransactions(env, preconfTxs, interrupt); err != nil {
+		unsealedTxs, err := w.commitTimedTransactions(env, preconfTxs, interrupt)
+		if err != nil {
 			return err
 		}
+		unsealedPreconfTxs = unsealedTxs
+	}
+	unsealedPreconfTxsCh <- unsealedPreconfTxs
+	// If there are unsealed preconfirmation transactions, we cannot include new transactions
+	// as this could cause other transactions to be packaged before preconfirmation transactions,
+	// potentially causing successfully preconfirmed transactions to actually fail
+	if len(unsealedPreconfTxs) > 0 {
+		log.Debug("Ending fillTransactions due to unsealed preconfirmation transactions", "unsealedPreconfTxs", unsealedPreconfTxs)
+		return nil
 	}
 
 	localTxs, remoteTxs := make(map[common.Address]types.Transactions), pending

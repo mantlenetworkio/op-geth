@@ -1313,7 +1313,7 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) {
 			// wait for 10s, if not ready, skip
 			select {
 			case <-pool.preconfReadyCh:
-			case <-time.After(10 * time.Second):
+			case <-time.After(time.Minute):
 				log.Error("preconf txs not ready, skip handle", "tx", txHash)
 				return
 			}

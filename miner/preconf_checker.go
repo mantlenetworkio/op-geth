@@ -32,6 +32,7 @@ var (
 	ErrHeadL1BlockTooOld                                                      = errors.New("head l1 block is too old")
 	ErrCurrentL1NumberAndHeadL1NumberDistanceTooLarge                         = errors.New("current l1 number and head l1 number distance is too large")
 	ErrEnvBlockNumberLessThanEngineSyncTargetBlockNumberOrUnsafeL2BlockNumber = errors.New("env block number is less than engine sync target block number or unsafe l2 block number")
+	ErrEnvBlockNumberAndEngineSyncTargetBlockNumberDistanceTooLarge           = errors.New("env block number and engine sync target block number distance is too large")
 )
 
 const (
@@ -55,7 +56,9 @@ type preconfChecker struct {
 	optimismSyncStatus   *preconf.OptimismSyncStatus
 	optimismSyncStatusOk bool
 
-	depositTxs []*types.Transaction
+	// need pre apply to env
+	depositTxs           []*types.Transaction
+	unSealedPreconfTxsCh chan []*types.Transaction
 }
 
 func NewPreconfChecker(chainConfig *params.ChainConfig, chain *core.BlockChain, minerConfig *preconf.MinerConfig) *preconfChecker {
@@ -228,26 +231,23 @@ func (c *preconfChecker) Preconf(tx *types.Transaction) (*types.Receipt, error) 
 	if err := c.precheck(); err != nil {
 		return nil, err
 	}
+	log.Trace("preconf", "tx", tx.Hash().Hex(), "nonce", tx.Nonce(), "env.header.Number", c.env.header.Number)
 
-	receipt, err := c.applyTx(c.env, tx)
-	if err != nil {
-		if errors.Is(err, core.ErrNonceTooLow) {
-			// if a tx is rejected because of nonce too low, it is possible that it has already been included in a block.
-			// In this case, check if there is a corresponding receipt in env, and return it if found.
-			for _, receipt := range c.env.receipts {
-				if receipt.TxHash == tx.Hash() {
-					log.Trace("preconf tx already in block", "tx", tx.Hash().Hex())
-					return receipt, nil
-				}
-			}
+	// First check if the transaction is already in the env.receipts. If so, return it directly.
+	// During unpause, unsealed preconf txs are loaded, and the transaction might already be included.
+	// This also helps avoid "nonce too low" errors.
+	// If a tx is rejected because of nonce too low, it is possible that it has already been included in a block.
+	// In this case, check if there is a corresponding receipt in env, and return it if found.
+	for _, receipt := range c.env.receipts {
+		if receipt.TxHash == tx.Hash() {
+			log.Trace("preconf tx already in block", "tx", tx.Hash().Hex())
+			return receipt, nil
 		}
-		return nil, err
 	}
 
-	// new tx can only be sealed in the next block
-	cpy := *receipt
-	cpy.BlockNumber = new(big.Int).Add(receipt.BlockNumber, big.NewInt(1))
-	return &cpy, nil
+	// apply tx
+	log.Trace("apply tx", "tx", tx.Hash().Hex(), "nonce", tx.Nonce())
+	return c.applyTxWithResetEnv(c.env, tx)
 }
 
 func (c *preconfChecker) precheck() error {
@@ -289,14 +289,44 @@ func (c *preconfChecker) precheck() error {
 
 	// env block number should be greater than engine sync target block number and unsafe l2 block number
 	envBlockNumber := c.env.header.Number.Uint64()
-	engineSyncTargetBlockNumber := c.optimismSyncStatus.EngineSyncTarget.Number
-	unsafeL2BlockNumber := c.optimismSyncStatus.UnsafeL2.Number
+	engineSyncTargetBlockNumber, unsafeL2BlockNumber := c.optimismSyncStatus.EngineSyncTarget.Number, c.optimismSyncStatus.UnsafeL2.Number
 	if envBlockNumber < engineSyncTargetBlockNumber || envBlockNumber < unsafeL2BlockNumber {
 		log.Trace("envBlockNumberLessThanEngineSyncTargetBlockNumberOrUnsafeL2BlockNumber", "envBlockNumber", envBlockNumber, "engineSyncTargetBlockNumber", engineSyncTargetBlockNumber, "unsafeL2BlockNumber", unsafeL2BlockNumber)
 		return ErrEnvBlockNumberLessThanEngineSyncTargetBlockNumberOrUnsafeL2BlockNumber
 	}
 
+	// The distance between envblock.number and (engine_sync_target.number or unsafe_l2.number) should not exceed 6.
+	// Here's an explanation for why it's 6: a deposit transaction from L1 includes at least 1(l1.header.number-1 rather than l1.header.number-2) L1 block,
+	// which corresponds to 6 L2 blocks. Therefore, we can have up to 6 blocks in advance to ensure that preconfirmations are not affected by deposit transactions.
+	if envBlockNumber-engineSyncTargetBlockNumber > c.minerConfig.EthToleranceBlock() || envBlockNumber-unsafeL2BlockNumber > 6 {
+		// When there are a large number of preconfirmation transactions in the queue, it may cause the future 6 blocks to be
+		// filled with preconfirmation transactions. At this point, stop new preconfirmation transactions from entering,
+		// because there may be unblocked deposit transactions in future blocks, which cannot be predicted at this time.
+		log.Trace("envBlockNumberAndEngineSyncTargetBlockNumberDistanceTooLarge", "envBlockNumber", c.env.header.Number.Uint64(), "engineSyncTargetBlockNumber", c.optimismSyncStatus.EngineSyncTarget.Number, "unsafeL2BlockNumber", c.optimismSyncStatus.UnsafeL2.Number, "tolerance", c.minerConfig.EthToleranceBlock())
+		return ErrEnvBlockNumberAndEngineSyncTargetBlockNumberDistanceTooLarge
+	}
+
 	return nil
+}
+
+// applyTxWithResetEnv applies a transaction and resets the environment if a gas limit reached error occurs.
+func (c *preconfChecker) applyTxWithResetEnv(env *environment, tx *types.Transaction) (*types.Receipt, error) {
+	receipt, err := c.applyTx(env, tx)
+	if err != nil {
+		if errors.Is(err, core.ErrGasLimitReached) {
+			// This indicates we should reset the env's gas limit and increment header.number+1.
+			// This avoids gas limit reached errors and nonce too high errors for subsequent preconfirmation transactions.
+			// No need to worry about transactions that always fill up the block gas limit,
+			// as transactions that are too costly are filtered out when entering the transaction pool.
+			preGasLimit, txGasLimit := c.env.gasPool.Gas(), tx.Gas()
+			c.env.header.Number = new(big.Int).Add(c.env.header.Number, common.Big1)
+			c.env.gasPool.SetGas(c.env.header.GasLimit)
+			log.Trace("reset env for gas limit reached", "env.header.Number", c.env.header.Number, "env.gasPool(pre)", preGasLimit, "tx.gas", txGasLimit, "env.gasPool(now)", c.env.gasPool.Gas(), "tx", tx.Hash())
+			return c.applyTx(c.env, tx)
+		}
+		return nil, err
+	}
+	return receipt, nil
 }
 
 func (c *preconfChecker) applyTx(env *environment, tx *types.Transaction) (*types.Receipt, error) {
@@ -317,25 +347,54 @@ func (c *preconfChecker) applyTx(env *environment, tx *types.Transaction) (*type
 	return receipt, nil
 }
 
-func (c *preconfChecker) PausePreconf() {
+func (c *preconfChecker) PausePreconf() chan<- []*types.Transaction {
 	c.mu.Lock()
+
+	// close old channel to avoid resource leak
+	if c.unSealedPreconfTxsCh != nil {
+		close(c.unSealedPreconfTxsCh)
+	}
+	c.unSealedPreconfTxsCh = make(chan []*types.Transaction, 1) // buffer 1 to avoid worker block
+
 	log.Trace("pause preconf")
+	return c.unSealedPreconfTxsCh
 }
 
 func (c *preconfChecker) UnpausePreconf(env *environment, preconfReady func()) {
 	defer c.mu.Unlock()
 	c.env = env
 	c.envUpdatedAt = time.Now()
-	log.Trace("unpause preconf", "env.header.Number", env.header.Number.Int64(), "envUpdatedAt", c.envUpdatedAt)
+	log.Trace("unpause preconf", "env.header.Number", env.header.Number.Int64(), "env.gasPool", env.gasPool.Gas(), "envUpdatedAt", c.envUpdatedAt)
+	// reset env
+	c.env.header.Number = new(big.Int).Add(c.env.header.Number, common.Big1)
+	c.env.gasPool.SetGas(c.env.header.GasLimit)
+	log.Trace("reset env", "env.header.Number", c.env.header.Number.Int64(), "env.gasPool", c.env.gasPool.Gas())
 
-	// LoadDepositTxs
+	// Load deposit txs
 	log.Trace("apply deposit txs", "deposit_txs", len(c.depositTxs))
 	for _, tx := range c.depositTxs {
 		if _, err := c.applyTx(c.env, tx); err != nil {
-			log.Error("failed to apply deposit tx", "err", err, "tx", tx.Hash().Hex())
+			log.Warn("failed to apply deposit tx", "err", err, "tx", tx.Hash().Hex())
 			continue
 		}
 		log.Trace("applied deposit tx", "tx", tx.Hash().Hex(), "nonce", tx.Nonce())
+	}
+
+	// Load unsealed preconf txs
+	var unsealedPreconfTxs []*types.Transaction
+	select {
+	case unsealedPreconfTxs = <-c.unSealedPreconfTxsCh:
+	case <-time.After(1 * time.Second):
+		log.Error("no received unsealed preconf txs to apply, please report this issue")
+	}
+	log.Trace("apply unsealed preconf txs", "count", len(unsealedPreconfTxs))
+	for _, tx := range unsealedPreconfTxs {
+		receipt, err := c.applyTxWithResetEnv(c.env, tx)
+		if err != nil {
+			log.Warn("failed to apply unsealed preconf tx", "err", err, "tx", tx.Hash().Hex())
+			continue
+		}
+		log.Trace("applied unsealed preconf tx", "tx", tx.Hash().Hex(), "nonce", tx.Nonce(), "env.gasPool", c.env.gasPool.Gas(), "receipt.status", receipt.Status)
 	}
 
 	// Metrics
