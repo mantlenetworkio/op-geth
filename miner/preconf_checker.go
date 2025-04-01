@@ -265,19 +265,19 @@ func (c *preconfChecker) precheck() error {
 
 	// Not more than MantleToleranceDuration(default 6s) from the last L2Block.
 	if time.Since(c.envUpdatedAt) > c.minerConfig.MantleToleranceDuration() {
-		log.Trace("envTooOld", "envUpdatedAt", c.envUpdatedAt, "time.Since(envUpdatedAt)", time.Since(c.envUpdatedAt), "tolerance", c.minerConfig.MantleToleranceDuration())
+		log.Trace("envTooOld", "env.header.Number", c.env.header.Number.Uint64(), "envUpdatedAt", c.envUpdatedAt, "time.Since(envUpdatedAt)", time.Since(c.envUpdatedAt), "tolerance", c.minerConfig.MantleToleranceDuration())
 		return ErrEnvTooOld
 	}
 
 	// Not more than EthToleranceDuration(default 1m36s) from the last L1Block.
 	currentL1BlockTime := time.Unix(int64(c.optimismSyncStatus.CurrentL1.Time), 0)
 	if time.Since(currentL1BlockTime) > c.minerConfig.EthToleranceDuration() {
-		log.Trace("currentL1BlockTooOld", "currentL1BlockTime", currentL1BlockTime, "time.Since(currentL1BlockTime)", time.Since(currentL1BlockTime), "tolerance", c.minerConfig.EthToleranceDuration())
+		log.Trace("currentL1BlockTooOld", "currentL1Block.number", c.optimismSyncStatus.CurrentL1.Number, "currentL1BlockTime", currentL1BlockTime, "time.Since(currentL1BlockTime)", time.Since(currentL1BlockTime), "tolerance", c.minerConfig.EthToleranceDuration())
 		return ErrCurrentL1BlockTooOld
 	}
 	headL1BlockTime := time.Unix(int64(c.optimismSyncStatus.HeadL1.Time), 0)
 	if time.Since(headL1BlockTime) > c.minerConfig.EthToleranceDuration() {
-		log.Trace("headL1BlockTooOld", "headL1BlockTime", headL1BlockTime, "time.Since(headL1BlockTime)", time.Since(headL1BlockTime), "tolerance", c.minerConfig.EthToleranceDuration())
+		log.Trace("headL1BlockTooOld", "headL1Block.number", c.optimismSyncStatus.HeadL1.Number, "headL1BlockTime", headL1BlockTime, "time.Since(headL1BlockTime)", time.Since(headL1BlockTime), "tolerance", c.minerConfig.EthToleranceDuration())
 		return ErrHeadL1BlockTooOld
 	}
 
