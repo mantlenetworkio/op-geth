@@ -1349,7 +1349,7 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) {
 				event.Status = core.PreconfStatusFailed
 				event.Reason = "preconf timeout"
 			}
-
+      
 			// send preconf event
 			pool.preconfTxFeed.Send(event)
 

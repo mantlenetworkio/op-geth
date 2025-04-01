@@ -1045,6 +1045,7 @@ func (w *worker) commitTimedTransactions(env *environment, txs []*types.Transact
 FIFO:
 	for i, tx := range txs {
 		unsealedIndex = i
+
 		// Check interruption signal and abort building if it's fired.
 		if interrupt != nil {
 			if signal := atomic.LoadInt32(interrupt); signal != commitInterruptNone {
