@@ -12,8 +12,8 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/tests/preconf/config"
 	"golang.org/x/sync/semaphore"
 )
@@ -35,8 +35,6 @@ func stress(rawurl string) {
 	}
 	defer client.Close()
 
-	publicKey := config.FunderKey.PublicKey
-	fromAddress := crypto.PubkeyToAddress(publicKey)
 	chainID, err := client.NetworkID(ctx)
 	if err != nil {
 		log.Printf("Failed to get chain ID: %v\n", err)
@@ -49,22 +47,14 @@ func stress(rawurl string) {
 		return
 	}
 
-	baseNonce, err := client.PendingNonceAt(ctx, fromAddress)
-	if err != nil {
-		log.Printf("Failed to get base nonce: %v\n", err)
-		return
-	}
-
+	baseNonce := config.GetNonce(ctx, client, config.FundAddr)
 	log.Printf("Starting batched stress test with %d transactions, batch size %d, base nonce %d...\n", config.NumTransactions, config.BatchSize, baseNonce)
 
-	toBalanceBefore, err := client.BalanceAt(ctx, config.Addr2, nil)
-	if err != nil {
-		log.Printf("Failed to get initial To balance: %v\n", err)
-		return
-	}
+	toBalanceBefore := config.GetBalance(ctx, client, config.Addr2)
 	log.Printf("To balance before stress test: %s MNT\n", config.BalanceString(toBalanceBefore))
 
 	var responseTimes []float64
+	var txResult []TxResult
 	var mu sync.Mutex
 
 	for batchStart := 0; batchStart < config.NumTransactions; batchStart += config.BatchSize {
@@ -88,6 +78,7 @@ func stress(rawurl string) {
 				defer sem.Release(1)
 				result := sendRawTransactionWithPreconf(ctx, client, auth, iteration, nonce, &wg)
 				mu.Lock()
+				txResult = append(txResult, result)
 				responseTimes = append(responseTimes, result.ResponseTime)
 				// log.Printf(
 				// 	"Tx %d: Start %.2f ms, End %.2f ms, Response time %.2f ms\n",
@@ -101,7 +92,30 @@ func stress(rawurl string) {
 	}
 
 	// Wait for confirmations (adjust as needed)
-	time.Sleep(15 * time.Second)
+	for _, result := range txResult {
+		// Background confirmation
+		ctx, cancel := context.WithTimeout(ctx, 1*time.Minute)
+		defer cancel()
+		receipt, err := bind.WaitMined(ctx, client, result.Tx)
+		if err != nil {
+			log.Fatalf("Transaction %s not confirmed yet\n", result.TxHash.Hex())
+		}
+		if receipt == nil {
+			log.Fatalf("Transaction %s not mined\n", result.TxHash.Hex())
+		}
+
+		// log.Printf("Transaction %d:%s %d confirmed - Status: %d, Expected Block: %d, Actual Block: %d\n", iteration, txHash.Hex(), tx.Nonce(), receipt.Status, uint64(result.BlockHeight), receipt.BlockNumber.Uint64())
+		if result.PredictedL2BlockNumber.String() != hexutil.EncodeBig(receipt.BlockNumber) {
+			if result.PredictedL2BlockNumber+1 == hexutil.Uint64(receipt.BlockNumber.Uint64()) {
+				log.Printf("TxHash: %s, Block height mismatch: predicted %d != receipt %d\n", result.TxHash, result.PredictedL2BlockNumber, receipt.BlockNumber.Uint64())
+			} else if result.PredictedL2BlockNumber != 0 {
+				log.Fatalf("TxHash: %s, Block height mismatch: predicted %d != receipt %d\n", result.TxHash, result.PredictedL2BlockNumber, receipt.BlockNumber.Uint64())
+			}
+		}
+		if receipt.Status == types.ReceiptStatusFailed {
+			log.Fatalf("TxHash: %s, preconf success but transaction failed\n", result.TxHash)
+		}
+	}
 
 	if len(responseTimes) > 0 {
 		shortest := minFloat(responseTimes)
@@ -137,11 +151,15 @@ func stress(rawurl string) {
 }
 
 type TxResult struct {
-	ResponseTime float64
-	TxHash       common.Hash
-	StartTime    float64
-	EndTime      float64
+	ResponseTime           float64
+	StartTime              float64
+	EndTime                float64
+	Tx                     *types.Transaction
+	TxHash                 common.Hash
+	PredictedL2BlockNumber hexutil.Uint64
 }
+
+var predictedL2BlockNumber hexutil.Uint64
 
 func sendRawTransactionWithPreconf(
 	ctx context.Context,
@@ -183,7 +201,7 @@ func sendRawTransactionWithPreconf(
 
 	if err != nil {
 		log.Printf("Error sending transaction %d: %v, txHash: %s\n", iteration, err, tx.Hash().Hex())
-		return TxResult{ResponseTime: responseTime, StartTime: startTime, EndTime: endTime}
+		return TxResult{ResponseTime: responseTime, StartTime: startTime, EndTime: endTime, Tx: signedTx, TxHash: tx.Hash()}
 	}
 
 	txHash := signedTx.Hash()
@@ -192,29 +210,22 @@ func sendRawTransactionWithPreconf(
 		panic("Transaction hash mismatch")
 	}
 
+	if predictedL2BlockNumber != result.PredictedL2BlockNumber {
+		log.Printf("new predictedL2BlockNumber: %d\n", result.PredictedL2BlockNumber)
+		predictedL2BlockNumber = result.PredictedL2BlockNumber
+	}
+
 	if result.Status == core.PreconfStatusFailed {
-		log.Printf("Transaction %d failed: %s\n", iteration, result.Reason)
+		if result.Reason == miner.ErrEnvBlockNumberAndEngineSyncTargetBlockNumberDistanceTooLarge.Error() {
+			log.Printf("Transaction %d failed: %s, wait for new preconf tx\n", iteration, result.Reason)
+			time.Sleep(config.WaitTime)
+			return TxResult{ResponseTime: responseTime, StartTime: startTime, EndTime: endTime, Tx: signedTx, TxHash: tx.Hash()}
+		}
+		log.Fatalf("Transaction %d failed: %s\n", iteration, result.Reason)
 	}
 	// log.Printf("preconf txHash: %s, nonce: %d\n", txHash.Hex(), tx.Nonce())
 
-	// Background confirmation
-	go func() {
-		for {
-			receipt, err := client.TransactionReceipt(ctx, txHash)
-			if err == nil && receipt != nil {
-				// log.Printf("Transaction %d:%s %d confirmed - Status: %d, Expected Block: %d, Actual Block: %d\n", iteration, txHash.Hex(), tx.Nonce(), receipt.Status, uint64(result.BlockHeight), receipt.BlockNumber.Uint64())
-
-				if result.PredictedL2BlockNumber.String() != hexutil.EncodeBig(receipt.BlockNumber) {
-					log.Printf("TxHash: %s, Block height mismatch: %d != %d, reason: %s\n", result.TxHash, result.PredictedL2BlockNumber, receipt.BlockNumber.Uint64(), result.Reason)
-				}
-
-				break
-			}
-			time.Sleep(1 * time.Second)
-		}
-	}()
-
-	return TxResult{ResponseTime: responseTime, TxHash: txHash, StartTime: startTime, EndTime: endTime}
+	return TxResult{ResponseTime: responseTime, PredictedL2BlockNumber: predictedL2BlockNumber, StartTime: startTime, EndTime: endTime, Tx: signedTx, TxHash: txHash}
 }
 
 // Helper functions

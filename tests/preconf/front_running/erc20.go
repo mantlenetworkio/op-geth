@@ -17,8 +17,40 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/tests/preconf/config"
 )
+
+/**
+// contractAddr is the deployed TestERC20 contract address
+contractAddr := common.HexToAddress("0x5FbDB2315678afecb367f032d93F642f64180aa3")
+// user address
+userAddr := common.HexToAddress("0x918a3880A91308279C06A89415d01ae47d64eC29")
+
+// call getBalance function
+// balanceOf mapping slot is 0 (assuming it's the first variable in the contract)
+slot := big.NewInt(0)
+
+// calculate storage position: keccak256(userAddr, slot)
+key := common.BytesToHash(userAddr.Bytes()) // user address, padded to 32 bytes
+base := common.BigToHash(slot)              // slot 0, converted to 32 bytes
+data := append(key[:], base[:]...)          // concatenate userAddr and slot
+hash := crypto.Keccak256Hash(data)          // calculate keccak256 hash
+
+// get storage value from stateDB
+balanceRaw := statedb.GetState(contractAddr, hash)
+
+// convert return value to big.Int
+balance := new(big.Int).SetBytes(balanceRaw.Bytes())
+fmt.Printf("beforetx %s Balance of %s: %s\n", tx.Hash().Hex(), userAddr.Hex(), balance.String())
+defer func() {
+	balanceRaw := statedb.GetState(contractAddr, hash)
+
+	// convert return value to big.Int
+	balance := new(big.Int).SetBytes(balanceRaw.Bytes())
+	fmt.Printf("after tx %s Balance of %s: %s\n", tx.Hash().Hex(), userAddr.Hex(), balance.String())
+}()
+*/
 
 func ERC20Test() {
 	erc20Test(config.SequencerEndpoint)
@@ -139,6 +171,11 @@ func erc20Test(endpoint string) {
 				log.Printf("paying %d", i)
 			}
 			if err := pay(ctx, client, addr1Auth, i, nonce+uint64(i), transferAmount, &addr1Txs, &addr1PreconfFailedTx); err != nil {
+				if strings.Contains(err.Error(), miner.ErrEnvBlockNumberAndEngineSyncTargetBlockNumberDistanceTooLarge.Error()) {
+					log.Println("so many preconf txs, wait for new preconf tx")
+					time.Sleep(config.WaitTime)
+					continue
+				}
 				if strings.Contains(err.Error(), "transaction preconf failed") {
 					continue
 				}
@@ -194,7 +231,7 @@ func erc20Test(endpoint string) {
 			_, err := bind.WaitMined(ctx, client, tx)
 			if err != nil {
 				if strings.Contains(err.Error(), "context deadline exceeded") {
-					log.Printf("transfer tx replaced by deposit tx, from: %s, nonce: %d", addr3Auth.From.Hex(), tx.Nonce())
+					log.Printf("transfer tx replaced by deposit tx, from: %s, nonce: %d, tx: %s", addr3Auth.From.Hex(), tx.Nonce(), tx.Hash().Hex())
 					continue
 				}
 				log.Fatalf("failed to wait for transfer transaction: %v, tx: %s", err, tx.Hash().Hex())

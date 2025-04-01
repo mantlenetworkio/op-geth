@@ -5,12 +5,14 @@ import (
 	"log"
 	"math/big"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/tests/preconf/config"
 )
 
@@ -82,6 +84,15 @@ func transferTest(endpoint string) {
 				}
 				if strings.Contains(err.Error(), core.ErrNonceTooLow.Error()) { // nonce too low
 					log.Printf("nonce too low, bug? error: %v, tx: %s", err, tx.Hash().Hex())
+					continue
+				}
+				if strings.Contains(err.Error(), core.ErrGasLimitReached.Error()) { // gas limit reached
+					log.Printf("this tx will in the next block? %v", err)
+					continue
+				}
+				if strings.Contains(err.Error(), miner.ErrEnvBlockNumberAndEngineSyncTargetBlockNumberDistanceTooLarge.Error()) { // env block number and engine sync target block number distance too large
+					log.Printf("env block number and engine sync target block number distance too large, wait for new preconf tx: %s", tx.Hash().Hex())
+					time.Sleep(config.WaitTime)
 					continue
 				}
 				log.Fatalf("should be no error: %v", err)

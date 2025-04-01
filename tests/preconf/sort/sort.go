@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/tests/preconf/config"
 )
 
@@ -72,21 +73,28 @@ func sortTest(endpoint string) {
 
 	// Send batch transactions
 	var wg sync.WaitGroup
-	var depositTxs, addr1Txs, addr3Txs []*types.Transaction
+	var addr1Txs, addr3Txs []*types.Transaction
 	wg.Add(3)
 
 	// send deposit tx
 	go func() {
 		defer wg.Done()
+		// addr1 and addr3 send deposit tx to addr2
 		l1client, l1Addr1Auth, err := config.GetL1Auth(ctx, config.Addr1Key)
+		if err != nil {
+			log.Fatalf("failed to get L1 auth: %v", err)
+		}
+		_, l1Addr3Auth, err := config.GetL1Auth(ctx, config.Addr3Key)
 		if err != nil {
 			log.Fatalf("failed to get L1 auth: %v", err)
 		}
 		fundAmount := new(big.Int).Mul(big.NewInt(config.NumTransactions*5), oneMNT)
 		config.FundAccount(ctx, l1client, config.Addr1, fundAmount)
+		config.FundAccount(ctx, l1client, config.Addr3, fundAmount)
 
-		sendBatchDepositTxs(ctx, l1client, l1Addr1Auth, config.Addr2, oneMNT, config.NumTransactions/20+1, &depositTxs)
-		for i, tx := range depositTxs {
+		addr1DepositTxs := sendBatchDepositTxs(ctx, l1client, l1Addr1Auth, config.Addr2, oneMNT, config.NumTransactions/20+1)
+		addr3DepositTxs := sendBatchDepositTxs(ctx, l1client, l1Addr3Auth, config.Addr2, oneMNT, config.NumTransactions/20+1)
+		for i, tx := range append(addr1DepositTxs, addr3DepositTxs...) {
 			ctx, cancel := context.WithTimeout(ctx, 6*config.WaitTime)
 			defer cancel()
 			receipt, err := bind.WaitMined(ctx, l1client, tx)
@@ -113,6 +121,10 @@ func sortTest(endpoint string) {
 			defer cancel()
 			receipt, err := bind.WaitMined(ctx, l2client, tx)
 			if err != nil {
+				if strings.Contains(err.Error(), "context deadline exceeded") {
+					log.Printf("pre-confirmed tx replaced by deposit tx, from: %s, nonce: %d, tx: %s", addr1Auth.From.Hex(), tx.Nonce(), tx.Hash().Hex())
+					continue
+				}
 				log.Fatalf("failed to wait for pre-confirmed tx %d: %v, tx: %s", i, err, tx.Hash().Hex())
 			}
 			if receipt.Status != types.ReceiptStatusSuccessful {
@@ -132,7 +144,7 @@ func sortTest(endpoint string) {
 			receipt, err := bind.WaitMined(ctx, l2client, tx)
 			if err != nil {
 				if strings.Contains(err.Error(), "context deadline exceeded") {
-					log.Printf("transfer tx replaced by deposit tx, from: %s, nonce: %d", addr3Auth.From.Hex(), tx.Nonce())
+					log.Printf("transfer tx replaced by deposit tx, from: %s, nonce: %d, tx: %s", addr3Auth.From.Hex(), tx.Nonce(), tx.Hash().Hex())
 					continue
 				}
 				log.Fatalf("failed to wait for transfer tx %d: %v, tx: %s", i, err, tx.Hash().Hex())
@@ -226,6 +238,12 @@ func sendBatchPreconfTxs(ctx context.Context, client *ethclient.Client, auth *bi
 				log.Printf("preconf tx replaced by deposit tx, from: %s, nonce: %d, tx: %s", auth.From.Hex(), nonce+uint64(i), tx.Hash().Hex())
 				continue
 			}
+			if strings.Contains(err.Error(), miner.ErrEnvBlockNumberAndEngineSyncTargetBlockNumberDistanceTooLarge.Error()) { // env block number and engine sync target block number distance too large
+				log.Printf("env block number and engine sync target block number distance too large, wait for new preconf tx: %s", tx.Hash().Hex())
+				time.Sleep(config.WaitTime)
+				continue
+			}
+
 			log.Fatalf("failed to send mnt with preconf %d: %v, tx: %s", i, err, tx.Hash().Hex())
 		}
 		*txs = append(*txs, tx)
@@ -234,13 +252,14 @@ func sendBatchPreconfTxs(ctx context.Context, client *ethclient.Client, auth *bi
 }
 
 // sendBatchDepositTxs Send batch deposit transactions
-func sendBatchDepositTxs(ctx context.Context, client *ethclient.Client, auth *bind.TransactOpts, to common.Address, amount *big.Int, count int, txs *[]*types.Transaction) {
+func sendBatchDepositTxs(ctx context.Context, client *ethclient.Client, auth *bind.TransactOpts, to common.Address, amount *big.Int, count int) []*types.Transaction {
 	nonce, err := client.PendingNonceAt(ctx, auth.From)
 	if err != nil {
 		log.Printf("failed to get nonce for %s: %v", auth.From.Hex(), err)
-		return
+		return nil
 	}
 
+	var txs []*types.Transaction
 	for i := 0; i < count; i++ {
 		if i%config.PrintMod == 0 {
 			log.Printf("sending DepositTx %d", i)
@@ -250,7 +269,9 @@ func sendBatchDepositTxs(ctx context.Context, client *ethclient.Client, auth *bi
 			log.Printf("failed to send deposit tx %d: %v", i, err)
 			continue
 		}
-		*txs = append(*txs, tx)
+		txs = append(txs, tx)
 		time.Sleep(config.NonceInterval)
 	}
+
+	return txs
 }
