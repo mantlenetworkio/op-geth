@@ -39,10 +39,6 @@ const (
 	RequestTimeout = 5 * time.Second
 )
 
-const (
-	RequestTimeout = 5 * time.Second
-)
-
 type preconfChecker struct {
 	mu sync.RWMutex
 
