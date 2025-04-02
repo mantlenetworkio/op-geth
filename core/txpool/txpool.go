@@ -271,7 +271,7 @@ type TxPool struct {
 	// Preconf Feeds
 	preconfTxRequestFeed event.Feed
 	preconfTxFeed        event.Feed
-	preconfTxs           *preconf.TimedTxSet // Set of preconf transactions
+	preconfTxs           *preconf.FIFOTxSet // Set of preconf transactions
 
 	istanbul bool // Fork indicator whether we are in the istanbul stage.
 	eip2718  bool // Fork indicator whether we are using EIP-2718 type transactions.
@@ -344,7 +344,7 @@ func NewTxPool(config Config, chainconfig *params.ChainConfig, chain blockChain)
 	pool.reset(nil, chain.CurrentBlock())
 
 	// Initialize preconfs
-	pool.preconfTxs = preconf.NewTimedTxSet()
+	pool.preconfTxs = preconf.NewFIFOTxSet()
 	log.Info("preconf", "txpool.config", pool.config.Preconf.String())
 
 	// Start the reorg loop early so it can handle requests generated during journal loading.

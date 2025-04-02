@@ -1030,7 +1030,7 @@ func (w *worker) commitTransactions(env *environment, txs *types.TransactionsByP
 	return nil
 }
 
-func (w *worker) commitTimedTransactions(env *environment, txs []*types.Transaction, interrupt *int32) error {
+func (w *worker) commitFIFOTransactions(env *environment, txs []*types.Transaction, interrupt *int32) error {
 	gasLimit := env.header.GasLimit
 	if env.gasPool == nil {
 		env.gasPool = new(core.GasPool).AddGas(gasLimit)
@@ -1236,7 +1236,7 @@ func (w *worker) fillTransactions(interrupt *int32, env *environment) error {
 	// Fill the block with all available pending transactions.
 	preconfTxs, pending := w.eth.TxPool().PendingPreconfTxs(true)
 	if len(preconfTxs) > 0 {
-		if err := w.commitTimedTransactions(env, preconfTxs, interrupt); err != nil {
+		if err := w.commitFIFOTransactions(env, preconfTxs, interrupt); err != nil {
 			return err
 		}
 	}

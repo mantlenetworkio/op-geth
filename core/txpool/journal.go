@@ -145,7 +145,7 @@ func (journal *journal) rotate(all map[common.Address]types.Transactions, precon
 	}
 	journaled := 0
 
-	// add no preconf txs to the journal
+	// add all txs to the journal
 	for _, txs := range all {
 		for _, tx := range txs {
 			if err = rlp.Encode(replacement, tx); err != nil {
