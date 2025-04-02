@@ -1039,13 +1039,13 @@ func (w *worker) commitFIFOTransactions(env *environment, txs []*types.Transacti
 	}
 	var coalescedLogs []*types.Log
 
-	// unsealedIndex is the index of the first unsealed transaction
-	unsealedIndex := 0
+	// gasLimitReached indicates whether we broke the loop due to gas limit
+	gasLimitReached := false
+	// breakIndex tracks the index where we broke due to gas limit
+	breakIndex := -1
 
 FIFO:
 	for i, tx := range txs {
-		unsealedIndex = i
-
 		// Check interruption signal and abort building if it's fired.
 		if interrupt != nil {
 			if signal := atomic.LoadInt32(interrupt); signal != commitInterruptNone {
@@ -1055,6 +1055,8 @@ FIFO:
 		// If we don't have enough gas for any further transactions then we're done.
 		if env.gasPool.Gas() < params.TxGas {
 			log.Trace("Not enough gas for further transactions", "have", env.gasPool, "want", params.TxGas, "index", i, "tx", tx.Hash().Hex())
+			gasLimitReached = true
+			breakIndex = i
 			break
 		}
 
@@ -1076,6 +1078,8 @@ FIFO:
 		case errors.Is(err, core.ErrGasLimitReached):
 			// Pop the current out-of-gas transaction without shifting in the next from the account
 			log.Trace("Gas limit exceeded for current block", "sender", from, "index", i, "tx", tx.Hash().Hex())
+			gasLimitReached = true
+			breakIndex = i
 			break FIFO
 
 		case errors.Is(err, core.ErrNonceTooLow):
@@ -1117,11 +1121,12 @@ FIFO:
 		w.pendingLogsFeed.Send(cpy)
 	}
 
-	// check if there are any unsealed transactions
+	// Return unprocessed transactions only if we broke due to gas limit
 	unsealedTxs := make([]*types.Transaction, 0)
-	if unsealedIndex+1 != len(txs) { // If unsealedIndex is not the last transaction, add unsealedIndex and subsequent transactions to unsealedTxs
-		unsealedTxs = txs[unsealedIndex:] // From unsealedIndex to the last transaction
-		log.Debug("unsealed transactions", "unsealedIndex", unsealedIndex, "len(tx)", len(txs))
+	if gasLimitReached && breakIndex >= 0 {
+		// Only return transactions from the break point onwards
+		unsealedTxs = txs[breakIndex:]
+		log.Debug("unsealed transactions due to gas limit", "breakIndex", breakIndex, "len(tx)", len(txs))
 	}
 	return unsealedTxs, nil
 }
