@@ -75,6 +75,7 @@ type Backend interface {
 
 	// Transaction pool API
 	SendTx(ctx context.Context, signedTx *types.Transaction) error
+	SendTxWithPreconf(ctx context.Context, signedTx *types.Transaction) (*core.NewPreconfTxEvent, error)
 	GetTransaction(ctx context.Context, txHash common.Hash) (*types.Transaction, common.Hash, uint64, uint64, error)
 	GetPoolTransactions() (types.Transactions, error)
 	GetPoolTransaction(txHash common.Hash) *types.Transaction
@@ -82,6 +83,7 @@ type Backend interface {
 	Stats() (pending int, queued int)
 	TxPoolContent() (map[common.Address]types.Transactions, map[common.Address]types.Transactions)
 	TxPoolContentFrom(addr common.Address) (types.Transactions, types.Transactions)
+	SubscribeNewPreconfTxEvent(chan<- core.NewPreconfTxEvent) event.Subscription
 	SubscribeNewTxsEvent(chan<- core.NewTxsEvent) event.Subscription
 
 	ChainConfig() *params.ChainConfig

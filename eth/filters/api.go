@@ -28,6 +28,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/internal/ethapi"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -170,6 +171,37 @@ func (api *FilterAPI) NewPendingTransactions(ctx context.Context, fullTx *bool) 
 				return
 			case <-notifier.Closed():
 				pendingTxSub.Unsubscribe()
+				return
+			}
+		}
+	}()
+
+	return rpcSub, nil
+}
+
+// NewPreconfTransaction creates a subscription that is triggered each time a
+// preconf transaction enters the transaction pool.
+func (api *FilterAPI) NewPreconfTransaction(ctx context.Context) (*rpc.Subscription, error) {
+	notifier, supported := rpc.NotifierFromContext(ctx)
+	if !supported {
+		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
+	}
+
+	rpcSub := notifier.CreateSubscription()
+
+	go func() {
+		preconfTx := make(chan core.NewPreconfTxEvent, txChanSize)
+		preconfTxSub := api.events.SubscribePreconfTxs(preconfTx)
+
+		for {
+			select {
+			case tx := <-preconfTx:
+				notifier.Notify(rpcSub.ID, tx)
+			case <-rpcSub.Err():
+				preconfTxSub.Unsubscribe()
+				return
+			case <-notifier.Closed():
+				preconfTxSub.Unsubscribe()
 				return
 			}
 		}

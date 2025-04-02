@@ -217,6 +217,7 @@ type Config struct {
 	OverrideOptimism         *bool
 
 	RollupSequencerHTTP          string
+	RollupSequencerWebsocket     string
 	RollupHistoricalRPC          string
 	RollupHistoricalRPCTimeout   time.Duration
 	RollupDisableTxPoolGossip    bool

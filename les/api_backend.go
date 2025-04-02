@@ -197,6 +197,10 @@ func (b *LesApiBackend) SendTx(ctx context.Context, signedTx *types.Transaction)
 	return b.eth.txPool.Add(ctx, signedTx)
 }
 
+func (b *LesApiBackend) SendTxWithPreconf(ctx context.Context, signedTx *types.Transaction) (*core.NewPreconfTxEvent, error) {
+	return nil, errors.New("not implemented")
+}
+
 func (b *LesApiBackend) RemoveTx(txHash common.Hash) {
 	b.eth.txPool.RemoveTx(txHash)
 }
@@ -227,6 +231,10 @@ func (b *LesApiBackend) TxPoolContent() (map[common.Address]types.Transactions, 
 
 func (b *LesApiBackend) TxPoolContentFrom(addr common.Address) (types.Transactions, types.Transactions) {
 	return b.eth.txPool.ContentFrom(addr)
+}
+
+func (b *LesApiBackend) SubscribeNewPreconfTxEvent(ch chan<- core.NewPreconfTxEvent) event.Subscription {
+	return b.eth.txPool.SubscribeNewPreconfTxEvent(ch)
 }
 
 func (b *LesApiBackend) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription {
