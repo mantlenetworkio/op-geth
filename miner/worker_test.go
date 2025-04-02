@@ -39,6 +39,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/preconf"
 )
 
 const (
@@ -69,8 +70,9 @@ var (
 	newTxs     []*types.Transaction
 
 	testConfig = &Config{
-		Recommit: time.Second,
-		GasCeil:  params.GenesisGasLimit,
+		Recommit:      time.Second,
+		GasCeil:       params.GenesisGasLimit,
+		PreconfConfig: &preconf.DefaultMinerConfig,
 	}
 )
 

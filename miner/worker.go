@@ -211,6 +211,11 @@ type worker struct {
 	chainSideCh  chan core.ChainSideEvent
 	chainSideSub event.Subscription
 
+	// Preconf Subscriptions
+	preconfTxRequestCh  chan core.NewPreconfTxRequest
+	preconfTxRequestSub event.Subscription
+	preconfChecker      *preconfChecker
+
 	// Channels
 	newWorkCh          chan *newWorkReq
 	getWorkCh          chan *getWorkReq
@@ -288,6 +293,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		extra:              config.ExtraData,
 		pendingTasks:       make(map[common.Hash]*task),
 		txsCh:              make(chan core.NewTxsEvent, txChanSize),
+		preconfTxRequestCh: make(chan core.NewPreconfTxRequest, txChanSize),
 		chainHeadCh:        make(chan core.ChainHeadEvent, chainHeadChanSize),
 		chainSideCh:        make(chan core.ChainSideEvent, chainSideChanSize),
 		newWorkCh:          make(chan *newWorkReq),
@@ -299,7 +305,9 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		resubmitIntervalCh: make(chan time.Duration),
 		resubmitAdjustCh:   make(chan *intervalAdjust, resubmitAdjustChanSize),
 	}
+	worker.preconfChecker = NewPreconfChecker(worker.chainConfig, worker.chain, config.PreconfConfig)
 	// Subscribe NewTxsEvent for tx pool
+	worker.preconfTxRequestSub = eth.TxPool().SubscribeNewPreconfTxRequestEvent(worker.preconfTxRequestCh)
 	worker.txsSub = eth.TxPool().SubscribeNewTxsEvent(worker.txsCh)
 	// Subscribe events for blockchain
 	worker.chainHeadSub = eth.BlockChain().SubscribeChainHeadEvent(worker.chainHeadCh)
@@ -584,6 +592,7 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 func (w *worker) mainLoop() {
 	defer w.wg.Done()
 	defer w.txsSub.Unsubscribe()
+	defer w.preconfTxRequestSub.Unsubscribe()
 	defer w.chainHeadSub.Unsubscribe()
 	defer w.chainSideSub.Unsubscribe()
 	defer func() {
@@ -643,7 +652,20 @@ func (w *worker) mainLoop() {
 					delete(w.remoteUncles, hash)
 				}
 			}
-
+		case ev := <-w.preconfTxRequestCh:
+			log.Trace("worker received preconf tx request", "tx", ev.Tx.Hash())
+			receipt, err := w.preconfChecker.Preconf(ev.Tx)
+			if err != nil {
+				// Not fatal, just warn to the log
+				log.Warn("preconf failed", "tx", ev.Tx.Hash(), "err", err)
+			}
+			// Prevent panic caused by writing after ev.PreconfResult is closed
+			select {
+			case ev.PreconfResult <- &core.PreconfResponse{Receipt: receipt, Err: err}:
+				log.Trace("worker sent preconf tx response", "tx", ev.Tx.Hash())
+			case <-time.After(time.Second):
+				log.Warn("preconf tx response timeout, preconf result is closed?", "tx", ev.Tx.Hash())
+			}
 		case ev := <-w.txsCh:
 			if w.chainConfig.Optimism != nil && !w.config.RollupComputePendingBlock {
 				continue // don't update the pending-block snapshot if we are not computing the pending block
@@ -686,6 +708,8 @@ func (w *worker) mainLoop() {
 		case <-w.exitCh:
 			return
 		case <-w.txsSub.Err():
+			return
+		case <-w.preconfTxRequestSub.Err():
 			return
 		case <-w.chainHeadSub.Err():
 			return
@@ -1008,6 +1032,105 @@ func (w *worker) commitTransactions(env *environment, txs *types.TransactionsByP
 	return nil
 }
 
+func (w *worker) commitFIFOTransactions(env *environment, txs []*types.Transaction, interrupt *int32) ([]*types.Transaction, error) {
+	gasLimit := env.header.GasLimit
+	if env.gasPool == nil {
+		env.gasPool = new(core.GasPool).AddGas(gasLimit)
+	}
+	var coalescedLogs []*types.Log
+
+	// gasLimitReached indicates whether we broke the loop due to gas limit
+	gasLimitReached := false
+	// breakIndex tracks the index where we broke due to gas limit
+	breakIndex := -1
+
+FIFO:
+	for i, tx := range txs {
+		// Check interruption signal and abort building if it's fired.
+		if interrupt != nil {
+			if signal := atomic.LoadInt32(interrupt); signal != commitInterruptNone {
+				return nil, signalToErr(signal)
+			}
+		}
+		// If we don't have enough gas for any further transactions then we're done.
+		if env.gasPool.Gas() < params.TxGas {
+			log.Trace("Not enough gas for further transactions", "have", env.gasPool, "want", params.TxGas, "index", i, "tx", tx.Hash().Hex())
+			gasLimitReached = true
+			breakIndex = i
+			break
+		}
+
+		// Error may be ignored here. The error has already been checked
+		// during transaction acceptance is the transaction pool.
+		from, _ := types.Sender(env.signer, tx)
+
+		// Check whether the tx is replay protected. If we're not in the EIP155 hf
+		// phase, start ignoring the sender until we do.
+		if tx.Protected() && !w.chainConfig.IsEIP155(env.header.Number) {
+			log.Trace("Ignoring reply protected transaction", "hash", tx.Hash(), "eip155", w.chainConfig.EIP155Block)
+			continue
+		}
+		// Start executing the transaction
+		env.state.SetTxContext(tx.Hash(), env.tcount)
+
+		logs, err := w.commitTransaction(env, tx)
+		switch {
+		case errors.Is(err, core.ErrGasLimitReached):
+			// Pop the current out-of-gas transaction without shifting in the next from the account
+			log.Trace("Gas limit exceeded for current block", "sender", from, "index", i, "tx", tx.Hash().Hex())
+			gasLimitReached = true
+			breakIndex = i
+			break FIFO
+
+		case errors.Is(err, core.ErrNonceTooLow):
+			// New head notification data race between the transaction pool and miner
+			log.Trace("Skipping transaction with low nonce", "sender", from, "nonce", tx.Nonce())
+
+		case errors.Is(err, core.ErrNonceTooHigh):
+			// Reorg notification data race between the transaction pool and miner, skip account =
+			log.Trace("Skipping account with hight nonce", "sender", from, "nonce", tx.Nonce())
+
+		case errors.Is(err, nil):
+			// Everything ok, collect the logs and shift in the next transaction from the same account
+			coalescedLogs = append(coalescedLogs, logs...)
+			env.tcount++
+
+		case errors.Is(err, types.ErrTxTypeNotSupported):
+			// Pop the unsupported transaction without shifting in the next from the account
+			log.Trace("Skipping unsupported transaction type", "sender", from, "type", tx.Type())
+
+		default:
+			// Strange error, discard the transaction and get the next in line (note, the
+			// nonce-too-high clause will prevent us from executing in vain).
+			log.Info("Transaction failed, account skipped", "hash", tx.Hash(), "err", err)
+		}
+	}
+	if !w.isRunning() && len(coalescedLogs) > 0 {
+		// We don't push the pendingLogsEvent while we are sealing. The reason is that
+		// when we are sealing, the worker will regenerate a sealing block every 3 seconds.
+		// In order to avoid pushing the repeated pendingLog, we disable the pending log pushing.
+
+		// make a copy, the state caches the logs and these logs get "upgraded" from pending to mined
+		// logs by filling in the block hash when the block was mined by the local miner. This can
+		// cause a race condition if a log was "upgraded" before the PendingLogsEvent is processed.
+		cpy := make([]*types.Log, len(coalescedLogs))
+		for i, l := range coalescedLogs {
+			cpy[i] = new(types.Log)
+			*cpy[i] = *l
+		}
+		w.pendingLogsFeed.Send(cpy)
+	}
+
+	// Return unprocessed transactions only if we broke due to gas limit
+	unsealedTxs := make([]*types.Transaction, 0)
+	if gasLimitReached && breakIndex >= 0 {
+		// Only return transactions from the break point onwards
+		unsealedTxs = txs[breakIndex:]
+		log.Debug("unsealed transactions due to gas limit", "breakIndex", breakIndex, "len(tx)", len(txs))
+	}
+	return unsealedTxs, nil
+}
+
 // generateParams wraps various of settings for generating sealing task.
 type generateParams struct {
 	timestamp   uint64            // The timstamp for sealing task
@@ -1126,9 +1249,30 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 // into the given sealing block. The transaction selection and ordering strategy can
 // be customized with the plugin in the future.
 func (w *worker) fillTransactions(interrupt *int32, env *environment) error {
+	unsealedPreconfTxsCh := w.preconfChecker.PausePreconf()
+	defer func() { w.preconfChecker.UnpausePreconf(env.copy(), w.eth.TxPool().PreconfReady) }()
+
 	// Split the pending transactions into locals and remotes
 	// Fill the block with all available pending transactions.
-	pending := w.eth.TxPool().Pending(true)
+	preconfTxs, pending := w.eth.TxPool().PendingPreconfTxs(true)
+
+	var unsealedPreconfTxs []*types.Transaction
+	if len(preconfTxs) > 0 {
+		unsealedTxs, err := w.commitFIFOTransactions(env, preconfTxs, interrupt)
+		if err != nil {
+			return err
+		}
+		unsealedPreconfTxs = unsealedTxs
+	}
+	unsealedPreconfTxsCh <- unsealedPreconfTxs
+	// If there are unsealed preconfirmation transactions, we cannot include new transactions
+	// as this could cause other transactions to be packaged before preconfirmation transactions,
+	// potentially causing successfully preconfirmed transactions to actually fail
+	if len(unsealedPreconfTxs) > 0 {
+		log.Debug("Ending fillTransactions due to unsealed preconfirmation transactions", "unsealedPreconfTxs", unsealedPreconfTxs)
+		return nil
+	}
+
 	localTxs, remoteTxs := make(map[common.Address]types.Transactions), pending
 	for _, account := range w.eth.TxPool().Locals() {
 		if txs := remoteTxs[account]; len(txs) > 0 {

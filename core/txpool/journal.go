@@ -130,7 +130,7 @@ func (journal *journal) insert(tx *types.Transaction) error {
 
 // rotate regenerates the transaction journal based on the current contents of
 // the transaction pool.
-func (journal *journal) rotate(all map[common.Address]types.Transactions) error {
+func (journal *journal) rotate(all map[common.Address]types.Transactions, preconfTxs []*types.Transaction) error {
 	// Close the current journal (if any is open)
 	if journal.writer != nil {
 		if err := journal.writer.Close(); err != nil {
@@ -144,6 +144,8 @@ func (journal *journal) rotate(all map[common.Address]types.Transactions) error 
 		return err
 	}
 	journaled := 0
+
+	// add all txs to the journal
 	for _, txs := range all {
 		for _, tx := range txs {
 			if err = rlp.Encode(replacement, tx); err != nil {
@@ -153,6 +155,16 @@ func (journal *journal) rotate(all map[common.Address]types.Transactions) error 
 		}
 		journaled += len(txs)
 	}
+
+	// add preconf txs to the journal
+	for _, tx := range preconfTxs {
+		if err = rlp.Encode(replacement, tx); err != nil {
+			replacement.Close()
+			return err
+		}
+	}
+	journaled += len(preconfTxs)
+
 	replacement.Close()
 
 	// Replace the live journal with the newly generated one
