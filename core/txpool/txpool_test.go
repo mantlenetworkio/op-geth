@@ -2567,7 +2567,7 @@ func TestExtractPreconfTxsFromPending(t *testing.T) {
 				},
 			},
 			signer:     signer,
-			preconfTxs: preconf.NewTimedTxSet(),
+			preconfTxs: preconf.NewFIFOTxSet(),
 		}
 		// Add pre-confirmed transaction
 		pool.preconfTxs.Add(tx1)

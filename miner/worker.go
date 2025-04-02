@@ -1032,7 +1032,7 @@ func (w *worker) commitTransactions(env *environment, txs *types.TransactionsByP
 	return nil
 }
 
-func (w *worker) commitTimedTransactions(env *environment, txs []*types.Transaction, interrupt *int32) ([]*types.Transaction, error) {
+func (w *worker) commitFIFOTransactions(env *environment, txs []*types.Transaction, interrupt *int32) ([]*types.Transaction, error) {
 	gasLimit := env.header.GasLimit
 	if env.gasPool == nil {
 		env.gasPool = new(core.GasPool).AddGas(gasLimit)
@@ -1253,7 +1253,7 @@ func (w *worker) fillTransactions(interrupt *int32, env *environment) error {
 
 	var unsealedPreconfTxs []*types.Transaction
 	if len(preconfTxs) > 0 {
-		unsealedTxs, err := w.commitTimedTransactions(env, preconfTxs, interrupt)
+		unsealedTxs, err := w.commitFIFOTransactions(env, preconfTxs, interrupt)
 		if err != nil {
 			return err
 		}

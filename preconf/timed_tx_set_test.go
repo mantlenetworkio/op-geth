@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestTimedTxSet(t *testing.T) {
-	set := NewTimedTxSet()
+func TestFIFOTxSet(t *testing.T) {
+	set := NewFIFOTxSet()
 
 	// Test transactions
 	tx1 := types.NewTransaction(1, common.HexToAddress("0x1"), nil, 0, nil, nil)
@@ -64,7 +64,7 @@ func newTestTx(key *ecdsa.PrivateKey, nonce uint64) *types.Transaction {
 	return tx
 }
 
-func TestTimedTxSet_Forward(t *testing.T) {
+func TestFIFOTxSet_Forward(t *testing.T) {
 	addr1, err := crypto.HexToECDSA("ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
 	if err != nil {
 		t.Fatalf("failed to convert hex to ecdsa: %v", err)
@@ -76,14 +76,14 @@ func TestTimedTxSet_Forward(t *testing.T) {
 	addr := common.HexToAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266")
 	tests := []struct {
 		name    string
-		setup   func(*TimedTxSet)
+		setup   func(*FIFOTxSet)
 		addr    common.Address
 		nonce   uint64
 		wantTxs int // Expected number of transactions left
 	}{
 		{
 			name: "Remove older nonces",
-			setup: func(s *TimedTxSet) {
+			setup: func(s *FIFOTxSet) {
 				s.Add(newTestTx(addr1, 1))
 				s.Add(newTestTx(addr1, 2))
 				s.Add(newTestTx(addr1, 3))
@@ -94,7 +94,7 @@ func TestTimedTxSet_Forward(t *testing.T) {
 		},
 		{
 			name: "No matching address",
-			setup: func(s *TimedTxSet) {
+			setup: func(s *FIFOTxSet) {
 				s.Add(newTestTx(addr1, 1))
 				s.Add(newTestTx(addr2, 2))
 			},
@@ -104,7 +104,7 @@ func TestTimedTxSet_Forward(t *testing.T) {
 		},
 		{
 			name: "Empty set",
-			setup: func(s *TimedTxSet) {
+			setup: func(s *FIFOTxSet) {
 				// No transactions added
 			},
 			addr:    addr,
@@ -113,7 +113,7 @@ func TestTimedTxSet_Forward(t *testing.T) {
 		},
 		{
 			name: "Remove all transactions",
-			setup: func(s *TimedTxSet) {
+			setup: func(s *FIFOTxSet) {
 				s.Add(newTestTx(addr1, 1))
 				s.Add(newTestTx(addr1, 2))
 			},
@@ -126,8 +126,8 @@ func TestTimedTxSet_Forward(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 
-			// Setup TimedTxSet
-			s := NewTimedTxSet()
+			// Setup FIFOTxSet
+			s := NewFIFOTxSet()
 			tt.setup(s)
 
 			// Execute Forward

@@ -2,44 +2,50 @@ package preconf
 
 import (
 	"sync"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 )
 
-// TimedTxSet is a time-based transaction set
-type TimedTxSet struct {
+// FIFOTxSet represents a transaction set based on First-In-First-Out (FIFO) principle.
+// It maintains a queue of transactions ordered by their reception time, rather than timestamp.
+//
+// Reasons for using FIFO instead of timestamp ordering:
+// 1. Determinism: FIFO provides fully deterministic transaction processing order, which is crucial for blockchain consensus
+// 2. Simplicity: FIFO implementation is simpler, avoiding time sync and clock skew issues
+// 3. Fairness: FIFO ensures transactions are processed in order of reception, avoiding unfairness from time-based priorities
+// 4. Predictability: Transaction processing order depends solely on queue insertion order, making behavior easier to predict and debug
+//
+// This struct is primarily used to manage preconfirmed transactions, ensuring they are processed and packed in order of reception.
+type FIFOTxSet struct {
 	mu      sync.Mutex               // Mutex to ensure thread safety
 	txMap   map[common.Hash]*txEntry // Mapping from hash to transaction entry
-	txQueue []*txEntry               // Time-ordered transaction queue (FIFO)
+	txQueue []*txEntry               // FIFO transaction queue
 }
 
-// txEntry contains the transaction and its added time
+// txEntry contains the transaction
 type txEntry struct {
-	tx        *types.Transaction // Transaction object
-	addedTime time.Time          // Added time
+	tx *types.Transaction // Transaction object
 }
 
-// NewTimedTxSet creates a new TimedTxSet
-func NewTimedTxSet() *TimedTxSet {
-	return &TimedTxSet{
+// NewFIFOTxSet creates a new FIFOTxSet
+func NewFIFOTxSet() *FIFOTxSet {
+	return &FIFOTxSet{
 		txMap:   make(map[common.Hash]*txEntry),
 		txQueue: make([]*txEntry, 0),
 	}
 }
 
 // Add adds a transaction to the set
-// If the transaction already exists, update its time
-func (s *TimedTxSet) Add(tx *types.Transaction) {
+// If the transaction already exists, update its position in the queue
+func (s *FIFOTxSet) Add(tx *types.Transaction) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	hash := tx.Hash()
 	entry := &txEntry{
-		tx:        tx,
-		addedTime: time.Now(),
+		tx: tx,
 	}
 
 	// If the transaction already exists, replace the old entry
@@ -64,7 +70,7 @@ func (s *TimedTxSet) Add(tx *types.Transaction) {
 }
 
 // Contains checks if the transaction is in the set
-func (s *TimedTxSet) Contains(hash common.Hash) bool {
+func (s *FIFOTxSet) Contains(hash common.Hash) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -73,7 +79,7 @@ func (s *TimedTxSet) Contains(hash common.Hash) bool {
 }
 
 // Get returns the transaction for the specified hash, or nil if it doesn't exist
-func (s *TimedTxSet) Get(hash common.Hash) *types.Transaction {
+func (s *FIFOTxSet) Get(hash common.Hash) *types.Transaction {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -84,7 +90,7 @@ func (s *TimedTxSet) Get(hash common.Hash) *types.Transaction {
 }
 
 // Remove removes the transaction for the specified hash
-func (s *TimedTxSet) Remove(hash common.Hash) {
+func (s *FIFOTxSet) Remove(hash common.Hash) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -105,8 +111,8 @@ func (s *TimedTxSet) Remove(hash common.Hash) {
 	}
 }
 
-// Transactions returns an array of transactions in time order (FIFO)
-func (s *TimedTxSet) Transactions() []*types.Transaction {
+// Transactions returns an array of transactions in FIFO order
+func (s *FIFOTxSet) Transactions() []*types.Transaction {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -118,7 +124,7 @@ func (s *TimedTxSet) Transactions() []*types.Transaction {
 }
 
 // Len returns the number of transactions in the set
-func (s *TimedTxSet) Len() int {
+func (s *FIFOTxSet) Len() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -126,7 +132,7 @@ func (s *TimedTxSet) Len() int {
 }
 
 // Clear clears the set
-func (s *TimedTxSet) Clear() {
+func (s *FIFOTxSet) Clear() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -134,7 +140,7 @@ func (s *TimedTxSet) Clear() {
 	s.txQueue = make([]*txEntry, 0)
 }
 
-func (s *TimedTxSet) Forward(addr common.Address, nonce uint64) {
+func (s *FIFOTxSet) Forward(addr common.Address, nonce uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

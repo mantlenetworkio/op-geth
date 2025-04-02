@@ -432,8 +432,10 @@ func (es *EventSystem) SubscribePendingTxs(txs chan []*types.Transaction) *Subsc
 	return es.subscribe(sub)
 }
 
-// SubscribePendingTxs creates a subscription that writes transactions for
-// transactions that enter the transaction pool.
+// SubscribePreconfTxs creates a subscription that writes transactions for
+// pre-confirmed transactions that enter the transaction pool in FIFO order.
+// These transactions are processed in the order they were received, ensuring
+// deterministic execution order for pre-confirmed transactions.
 func (es *EventSystem) SubscribePreconfTxs(preconfTx chan core.NewPreconfTxEvent) *Subscription {
 	sub := &subscription{
 		id:        rpc.NewID(),
