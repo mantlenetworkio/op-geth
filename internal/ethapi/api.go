@@ -2166,7 +2166,7 @@ type PreconfTransactionResult struct {
 	BlockHeight hexutil.Uint64 `json:"blockHeight"`
 }
 
-// SendRawTransaction will add the signed transaction to the transaction pool.
+// SendRawTransactionWithPreconf will add the signed preconf transaction to the transaction pool and return the preconf result.
 // The sender is responsible for signing the transaction and using the correct nonce.
 func (s *TransactionAPI) SendRawTransactionWithPreconf(ctx context.Context, input hexutil.Bytes) (*PreconfTransactionResult, error) {
 	preconfTxCh := make(chan core.NewPreconfTxEvent, 100)
