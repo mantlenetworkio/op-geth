@@ -653,19 +653,8 @@ func (w *worker) mainLoop() {
 				}
 			}
 		case ev := <-w.preconfTxRequestCh:
-			log.Trace("worker received preconf tx request", "tx", ev.Tx.Hash())
-			receipt, err := w.preconfChecker.Preconf(ev.Tx)
-			if err != nil {
-				// Not fatal, just warn to the log
-				log.Warn("preconf failed", "tx", ev.Tx.Hash(), "err", err)
-			}
-			// Prevent panic caused by writing after ev.PreconfResult is closed
-			select {
-			case ev.PreconfResult <- &core.PreconfResponse{Receipt: receipt, Err: err}:
-				log.Trace("worker sent preconf tx response", "tx", ev.Tx.Hash())
-			case <-time.After(time.Second):
-				log.Warn("preconf tx response timeout, preconf result is closed?", "tx", ev.Tx.Hash())
-			}
+			w.preconfChecker.Preconf(ev)
+
 		case ev := <-w.txsCh:
 			if w.chainConfig.Optimism != nil && !w.config.RollupComputePendingBlock {
 				continue // don't update the pending-block snapshot if we are not computing the pending block

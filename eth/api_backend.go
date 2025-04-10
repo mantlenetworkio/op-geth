@@ -353,7 +353,7 @@ func (b *EthAPIBackend) sendTxWithPreconf(ctx context.Context, tx *types.Transac
 			}
 		case <-ctx.Done():
 			log.Trace("preconf tx event not received", "tx", txHash, "err", ctx.Err())
-			return nil, errors.New("preconf tx event not received")
+			return nil, fmt.Errorf("preconf tx event not received, txHash: %s, err: %w", txHash, ctx.Err())
 		}
 	}
 }

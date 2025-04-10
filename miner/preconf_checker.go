@@ -75,7 +75,7 @@ func NewPreconfChecker(chainConfig *params.ChainConfig, chain *core.BlockChain, 
 
 func (c *preconfChecker) loop() {
 	if !c.minerConfig.EnablePreconfChecker {
-		log.Debug("preconf checker is disabled, skip loop")
+		log.Info("preconf checker is disabled, skip loop")
 		return
 	}
 	for {
@@ -222,7 +222,31 @@ func (c *preconfChecker) updateDepositTxs(currentL1, headL1 uint64) {
 	log.Debug("update deposit txs", "current_l1.number", currentL1, "head_l1.number", headL1, "start", start, "end", end, "deposit_txs", len(depositTxs))
 }
 
-func (c *preconfChecker) Preconf(tx *types.Transaction) (*types.Receipt, error) {
+func (c *preconfChecker) Preconf(ev core.NewPreconfTxRequest) {
+	defer func() {
+		// Prevent panic caused by writing after ev.PreconfResult is closed
+		if r := recover(); r != nil {
+			log.Warn("preconf result is closed due to timeout", "tx", ev.Tx.Hash(), "err", r)
+		}
+	}()
+	now := time.Now()
+	log.Info("worker received preconf tx request", "tx", ev.Tx.Hash())
+
+	receipt, err := c.preconf(ev.Tx)
+	if err != nil {
+		// Not fatal, just warn to the log
+		log.Warn("preconf failed", "tx", ev.Tx.Hash(), "err", err)
+	}
+
+	log.Info("worker sent preconf tx response", "tx", ev.Tx.Hash(), "cost", time.Since(now))
+	select {
+	case ev.PreconfResult <- &core.PreconfResponse{Receipt: receipt, Err: err}:
+	case <-time.After(time.Second):
+		log.Warn("preconf tx response timeout, preconf result is closed?", "tx", ev.Tx.Hash())
+	}
+}
+
+func (c *preconfChecker) preconf(tx *types.Transaction) (*types.Receipt, error) {
 	defer preconf.MetricsPreconfExecuteCost(time.Now())
 
 	c.mu.Lock()
@@ -298,7 +322,7 @@ func (c *preconfChecker) precheck() error {
 	// The distance between envblock.number and (engine_sync_target.number or unsafe_l2.number) should not exceed 6.
 	// Here's an explanation for why it's 6: a deposit transaction from L1 includes at least 1(l1.header.number-1 rather than l1.header.number-2) L1 block,
 	// which corresponds to 6 L2 blocks. Therefore, we can have up to 6 blocks in advance to ensure that preconfirmations are not affected by deposit transactions.
-	if envBlockNumber-engineSyncTargetBlockNumber > c.minerConfig.EthToleranceBlock() || envBlockNumber-unsafeL2BlockNumber > 6 {
+	if envBlockNumber-engineSyncTargetBlockNumber > c.minerConfig.PreconfBufferBlock || envBlockNumber-unsafeL2BlockNumber > c.minerConfig.PreconfBufferBlock {
 		// When there are a large number of preconfirmation transactions in the queue, it may cause the future 6 blocks to be
 		// filled with preconfirmation transactions. At this point, stop new preconfirmation transactions from entering,
 		// because there may be unblocked deposit transactions in future blocks, which cannot be predicted at this time.
@@ -356,7 +380,7 @@ func (c *preconfChecker) PausePreconf() chan<- []*types.Transaction {
 	}
 	c.unSealedPreconfTxsCh = make(chan []*types.Transaction, 1) // buffer 1 to avoid worker block
 
-	log.Trace("pause preconf")
+	log.Info("pause preconf")
 	return c.unSealedPreconfTxsCh
 }
 
@@ -364,7 +388,7 @@ func (c *preconfChecker) UnpausePreconf(env *environment, preconfReady func()) {
 	defer c.mu.Unlock()
 	c.env = env
 	c.envUpdatedAt = time.Now()
-	log.Trace("unpause preconf", "env.header.Number", env.header.Number.Int64(), "env.gasPool", env.gasPool.Gas(), "envUpdatedAt", c.envUpdatedAt)
+	log.Info("unpause preconf", "env.header.Number", env.header.Number.Int64(), "env.gasPool", env.gasPool.Gas(), "envUpdatedAt", c.envUpdatedAt)
 	// reset env
 	c.env.header.Number = new(big.Int).Add(c.env.header.Number, common.Big1)
 	c.env.gasPool.SetGas(c.env.header.GasLimit)
@@ -402,4 +426,6 @@ func (c *preconfChecker) UnpausePreconf(env *environment, preconfReady func()) {
 
 	// notify txpool that preconf is ready
 	preconfReady()
+
+	log.Info("ready to preconf", "env.header.Number", env.header.Number.Int64(), "env.gasPool", env.gasPool.Gas(), "envUpdatedAt", c.envUpdatedAt, "deposit_txs", len(c.depositTxs), "unsealed_preconf_txs", len(unsealedPreconfTxs))
 }

@@ -1301,7 +1301,7 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) {
 			Tx:            tx,
 			PreconfResult: result,
 		})
-		log.Trace("txpool sent preconf tx request", "tx", txHash)
+		log.Info("txpool sent preconf tx request", "tx", txHash)
 
 		// avoid race condition
 		tx := tx
@@ -1326,10 +1326,11 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) {
 			// timeout
 			timeout := time.NewTimer(pool.config.Preconf.PreconfTimeout)
 			defer timeout.Stop()
+			now := time.Now()
 			// wait for miner.worker preconf response
 			select {
 			case response := <-result:
-				log.Trace("txpool received preconf tx response", "tx", txHash)
+				log.Trace("txpool received preconf tx response", "tx", txHash, "cost", time.Since(now))
 				if response.Err == nil {
 					event.Status = core.PreconfStatusSuccess
 				} else {
@@ -1347,7 +1348,7 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) {
 				}
 			case <-timeout.C:
 				event.Status = core.PreconfStatusFailed
-				event.Reason = "preconf timeout"
+				event.Reason = fmt.Sprintf("preconf timeout, over %s timeout", time.Since(now))
 			}
 
 			// send preconf event
@@ -1359,14 +1360,14 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) {
 				log.Trace("preconf success", "tx", txHash)
 				if pool.journal != nil {
 					if err := pool.journal.insert(tx); err != nil {
-						log.Warn("Failed to journal preconf success transaction", "tx", txHash, "err", err)
+						log.Error("Failed to journal preconf success transaction", "tx", txHash, "err", err)
 					} else {
 						log.Trace("preconf success transaction journaled", "tx", txHash)
 					}
 				}
 			} else {
 				preconf.PreconfTxFailureMeter.Mark(1)
-				log.Trace("preconf failure", "tx", txHash, "reason", event.Reason)
+				log.Warn("preconf failure", "hash", txHash.Hex(), "reason", event.Reason)
 			}
 		}()
 	}
