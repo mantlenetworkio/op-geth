@@ -225,15 +225,14 @@ func erc20Test(endpoint string) {
 				log.Fatalf("failed to transfer: %v", err)
 			}
 		}
+
+		// wait for 1 minute to make sure all the txs are in the txpool
+		time.Sleep(1 * time.Minute)
 		for _, tx := range addr3Txs {
 			ctx, cancel := context.WithTimeout(ctx, config.WaitTime)
 			defer cancel()
 			_, err := bind.WaitMined(ctx, client, tx)
 			if err != nil {
-				if strings.Contains(err.Error(), "context deadline exceeded") {
-					log.Printf("transfer tx replaced by deposit tx, from: %s, nonce: %d, tx: %s", addr3Auth.From.Hex(), tx.Nonce(), tx.Hash().Hex())
-					continue
-				}
 				log.Fatalf("failed to wait for transfer transaction: %v, tx: %s", err, tx.Hash().Hex())
 			}
 			// if receipt != nil && receipt.Status == types.ReceiptStatusSuccessful {
