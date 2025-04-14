@@ -11,7 +11,7 @@ var DefaultTxPoolConfig = TxPoolConfig{
 	FromPreconfs:   make([]common.Address, 0),
 	ToPreconfs:     make([]common.Address, 0),
 	AllPreconfs:    false,
-	PreconfTimeout: 800 * time.Millisecond,
+	PreconfTimeout: 1 * time.Second,
 }
 
 type TxPoolConfig struct {

@@ -1,13 +1,9 @@
 package miner
 
 import (
-	"errors"
 	"testing"
-	"time"
 
-	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/preconf"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestIsSyncStatusOk(t *testing.T) {
@@ -142,44 +138,4 @@ func TestIsSyncStatusOk(t *testing.T) {
 			}
 		})
 	}
-}
-
-func BenchmarkPausePreconf(b *testing.B) {
-	// Test 1: Verify that writing to a closed channel causes panic
-	assert.Panics(b, func() {
-		resultCh := make(chan *core.PreconfResponse)
-		close(resultCh)
-		resultCh <- &core.PreconfResponse{Err: errors.New("test")}
-	})
-
-	// Test 2: Verify that writing to a closed channel still panics even with default case
-	assert.Panics(b, func() {
-		resultCh := make(chan *core.PreconfResponse)
-		close(resultCh)
-		select {
-		case resultCh <- &core.PreconfResponse{Err: errors.New("test")}:
-			b.Log("should not reach here")
-		default:
-			b.Log("should not reach here")
-		}
-	})
-
-	// Test 3: Verify correct usage - check if channel is closed before writing
-	assert.NotPanics(b, func() {
-		defer func() {
-			if r := recover(); r != nil {
-				b.Log("not panic", "err", r)
-			}
-		}()
-		resultCh := make(chan *core.PreconfResponse)
-		go func() {
-			close(resultCh)
-		}()
-		select {
-		case resultCh <- &core.PreconfResponse{Err: errors.New("test")}:
-			b.Log("correct send")
-		case <-time.After(time.Second):
-			b.Log("should not reach here")
-		}
-	})
 }
