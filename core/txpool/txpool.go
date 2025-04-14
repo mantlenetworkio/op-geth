@@ -1300,6 +1300,9 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) {
 		pool.preconfTxRequestFeed.Send(core.NewPreconfTxRequest{
 			Tx:            tx,
 			PreconfResult: result,
+			ClosePreconfResultFn: func() {
+				close(result)
+			},
 		})
 		log.Info("txpool sent preconf tx request", "tx", txHash)
 
@@ -1307,14 +1310,12 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) {
 		tx := tx
 		// goroutine to avoid blocking
 		go func() {
-			defer close(result)
-
-			// wait for preconf ready, no need to wait again after it's ready, as it only needs to wait once when the service restarts
-			// wait for 10s, if not ready, skip
+			// If preconfReadyCh is not closed, it means this is a preconf tx restored from journal after system restart.
+			// In this case, we don't need to execute preconfirmation again to avoid resource contention with worker.
 			select {
 			case <-pool.preconfReadyCh:
-			case <-time.After(time.Minute):
-				log.Error("preconf txs not ready, skip handle", "tx", txHash)
+			default:
+				log.Info("preconf txs not ready, skip handle", "tx", txHash)
 				return
 			}
 

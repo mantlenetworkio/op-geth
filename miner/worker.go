@@ -653,7 +653,22 @@ func (w *worker) mainLoop() {
 				}
 			}
 		case ev := <-w.preconfTxRequestCh:
-			w.preconfChecker.Preconf(ev)
+			defer ev.ClosePreconfResultFn()
+			now := time.Now()
+			log.Info("worker received preconf tx request", "tx", ev.Tx.Hash())
+
+			receipt, err := w.preconfChecker.Preconf(ev.Tx)
+			if err != nil {
+				// Not fatal, just warn to the log
+				log.Warn("preconf failed", "tx", ev.Tx.Hash(), "err", err)
+			}
+
+			log.Info("worker sent preconf tx response", "tx", ev.Tx.Hash(), "cost", time.Since(now))
+			select {
+			case ev.PreconfResult <- &core.PreconfResponse{Receipt: receipt, Err: err}:
+			case <-time.After(time.Second):
+				log.Warn("preconf tx response timeout, preconf result is closed?", "tx", ev.Tx.Hash())
+			}
 
 		case ev := <-w.txsCh:
 			if w.chainConfig.Optimism != nil && !w.config.RollupComputePendingBlock {
@@ -1244,6 +1259,7 @@ func (w *worker) fillTransactions(interrupt *int32, env *environment) error {
 	// Split the pending transactions into locals and remotes
 	// Fill the block with all available pending transactions.
 	preconfTxs, pending := w.eth.TxPool().PendingPreconfTxs(true)
+	log.Info("find preconf txs to fill into block", "count", len(preconfTxs))
 
 	var unsealedPreconfTxs []*types.Transaction
 	if len(preconfTxs) > 0 {
