@@ -653,7 +653,6 @@ func (w *worker) mainLoop() {
 				}
 			}
 		case ev := <-w.preconfTxRequestCh:
-			defer ev.ClosePreconfResultFn()
 			now := time.Now()
 			log.Info("worker received preconf tx request", "tx", ev.Tx.Hash())
 
@@ -669,6 +668,7 @@ func (w *worker) mainLoop() {
 			case <-time.After(time.Second):
 				log.Warn("preconf tx response timeout, preconf result is closed?", "tx", ev.Tx.Hash())
 			}
+			ev.ClosePreconfResultFn()
 
 		case ev := <-w.txsCh:
 			if w.chainConfig.Optimism != nil && !w.config.RollupComputePendingBlock {
