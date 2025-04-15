@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -206,7 +205,7 @@ func execute(ctx context.Context, call *core.Message, opts *Options, gasLimit ui
 	// other non-fixable conditions
 	result, err := run(ctx, call, opts)
 	if err != nil {
-		if errors.Is(err, core.ErrIntrinsicGas) {
+		if errors.Is(err, core.ErrIntrinsicGas) || errors.Is(err, core.ErrInsufficientGasForL1Cost) {
 			return true, nil, nil // Special case, raise gas limit
 		}
 		return true, nil, err // Bail out
@@ -219,7 +218,7 @@ func execute(ctx context.Context, call *core.Message, opts *Options, gasLimit ui
 func run(ctx context.Context, call *core.Message, opts *Options) (*core.ExecutionResult, error) {
 	// Assemble the call and the call context
 	var (
-		evmContext = core.NewEVMBlockContext(opts.Header, opts.Chain, nil)
+		evmContext = core.NewEVMBlockContext(opts.Header, opts.Chain, nil, opts.Config, opts.State)
 		dirtyState = opts.State.Copy()
 	)
 	if opts.BlockOverrides != nil {
@@ -246,7 +245,7 @@ func run(ctx context.Context, call *core.Message, opts *Options) (*core.Executio
 		evm.Cancel()
 	}()
 	// Execute the call, returning a wrapped error or the result
-	result, err := core.ApplyMessage(evm, call, new(core.GasPool).AddGas(math.MaxUint64))
+	result, err := core.ApplyMessage(evm, call, new(core.GasPool).AddGas(core.DefaultMantleBlockGasLimit))
 	if vmerr := dirtyState.Error(); vmerr != nil {
 		return nil, vmerr
 	}

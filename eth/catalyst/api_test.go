@@ -121,6 +121,7 @@ func TestEth2AssembleBlock(t *testing.T) {
 	ethservice.TxPool().Add([]*types.Transaction{tx}, true)
 	blockParams := engine.PayloadAttributes{
 		Timestamp: blocks[9].Time() + 5,
+		BaseFee:   big.NewInt(params.InitialBaseFee),
 	}
 	// The miner needs to pick up on the txs in the pool, so a few retries might be
 	// needed.
@@ -158,6 +159,7 @@ func TestEth2AssembleBlockWithAnotherBlocksTxs(t *testing.T) {
 	api.eth.TxPool().Add(txs, true)
 	blockParams := engine.PayloadAttributes{
 		Timestamp: blocks[8].Time() + 5,
+		BaseFee:   big.NewInt(params.InitialBaseFee),
 	}
 	// The miner needs to pick up on the txs in the pool, so a few retries might be
 	// needed.
@@ -180,6 +182,7 @@ func TestEth2PrepareAndGetPayload(t *testing.T) {
 	ethservice.TxPool().Add(txs, true)
 	blockParams := engine.PayloadAttributes{
 		Timestamp: blocks[8].Time() + 5,
+		BaseFee:   big.NewInt(params.InitialBaseFee),
 	}
 	fcState := engine.ForkchoiceStateV1{
 		HeadBlockHash:      blocks[8].Hash(),
@@ -198,6 +201,7 @@ func TestEth2PrepareAndGetPayload(t *testing.T) {
 		Random:       blockParams.Random,
 		BeaconRoot:   blockParams.BeaconRoot,
 		Version:      engine.PayloadV1,
+		BaseFee:      big.NewInt(params.InitialBaseFee),
 	}).Id()
 	execData, err := api.getPayload(payloadID, true)
 	if err != nil {
@@ -259,6 +263,7 @@ func TestInvalidPayloadTimestamp(t *testing.T) {
 				Timestamp:             test.time,
 				Random:                crypto.Keccak256Hash([]byte{byte(123)}),
 				SuggestedFeeRecipient: parent.Coinbase,
+				BaseFee:               big.NewInt(params.InitialBaseFee),
 			}
 			fcState := engine.ForkchoiceStateV1{
 				HeadBlockHash:      parent.Hash(),
@@ -301,6 +306,7 @@ func TestEth2NewBlock(t *testing.T) {
 
 		execData, err := assembleWithTransactions(api, parent.Hash(), &engine.PayloadAttributes{
 			Timestamp: parent.Time() + 5,
+			BaseFee:   big.NewInt(params.InitialBaseFee),
 		}, 1)
 		if err != nil {
 			t.Fatalf("Failed to create the executable data, block %d: %v", i, err)
@@ -343,6 +349,7 @@ func TestEth2NewBlock(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		execData, err := assembleBlock(api, parent.Hash(), &engine.PayloadAttributes{
 			Timestamp: parent.Time() + 6,
+			BaseFee:   big.NewInt(params.InitialBaseFee),
 		})
 		if err != nil {
 			t.Fatalf("Failed to create the executable data %v", err)
@@ -603,6 +610,7 @@ func TestNewPayloadOnInvalidChain(t *testing.T) {
 				Timestamp:             parent.Time + 1,
 				Random:                crypto.Keccak256Hash([]byte{byte(i)}),
 				SuggestedFeeRecipient: parent.Coinbase,
+				BaseFee:               big.NewInt(params.InitialBaseFee),
 			}
 			fcState = engine.ForkchoiceStateV1{
 				HeadBlockHash:      parent.Hash(),
@@ -663,6 +671,7 @@ func assembleEnvelope(api *ConsensusAPI, parentHash common.Hash, params *engine.
 		Random:       params.Random,
 		Withdrawals:  params.Withdrawals,
 		BeaconRoot:   params.BeaconRoot,
+		BaseFee:      params.BaseFee,
 	}
 	payload, err := api.eth.Miner().BuildPayload(args, false)
 	if err != nil {
@@ -746,6 +755,7 @@ func getNewEnvelope(t *testing.T, api *ConsensusAPI, parent *types.Header, withd
 		SuggestedFeeRecipient: parent.Coinbase,
 		Withdrawals:           withdrawals,
 		BeaconRoot:            beaconRoot,
+		BaseFee:               big.NewInt(params.InitialBaseFee),
 	}
 
 	envelope, err := assembleEnvelope(api, parent.Hash(), &params)
@@ -901,6 +911,7 @@ func TestSimultaneousNewBlock(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		execData, err := assembleBlock(api, parent.Hash(), &engine.PayloadAttributes{
 			Timestamp: parent.Time() + 5,
+			BaseFee:   big.NewInt(params.InitialBaseFee),
 		})
 		if err != nil {
 			t.Fatalf("Failed to create the executable data %v", err)
@@ -992,6 +1003,7 @@ func TestWithdrawals(t *testing.T) {
 	blockParams := engine.PayloadAttributes{
 		Timestamp:   parent.Time + 5,
 		Withdrawals: make([]*types.Withdrawal, 0),
+		BaseFee:     big.NewInt(params.InitialBaseFee),
 	}
 	fcState := engine.ForkchoiceStateV1{
 		HeadBlockHash: parent.Hash(),
@@ -1013,6 +1025,7 @@ func TestWithdrawals(t *testing.T) {
 		Withdrawals:  blockParams.Withdrawals,
 		BeaconRoot:   blockParams.BeaconRoot,
 		Version:      engine.PayloadV2,
+		BaseFee:      big.NewInt(params.InitialBaseFee),
 	}).Id()
 	execData, err := api.GetPayloadV2(payloadID)
 	if err != nil {
@@ -1046,6 +1059,7 @@ func TestWithdrawals(t *testing.T) {
 				Amount:  33,
 			},
 		},
+		BaseFee: big.NewInt(params.InitialBaseFee),
 	}
 	fcState.HeadBlockHash = execData.ExecutionPayload.BlockHash
 	_, err = api.ForkchoiceUpdatedV2(fcState, &blockParams)
@@ -1062,6 +1076,7 @@ func TestWithdrawals(t *testing.T) {
 		Withdrawals:  blockParams.Withdrawals,
 		BeaconRoot:   blockParams.BeaconRoot,
 		Version:      engine.PayloadV2,
+		BaseFee:      big.NewInt(params.InitialBaseFee),
 	}).Id()
 	execData, err = api.GetPayloadV2(payloadID)
 	if err != nil {
@@ -1116,6 +1131,7 @@ func TestNilWithdrawals(t *testing.T) {
 			blockParams: engine.PayloadAttributes{
 				Timestamp:   parent.Time + 2,
 				Withdrawals: nil,
+				BaseFee:     big.NewInt(params.InitialBaseFee),
 			},
 			wantErr: false,
 		},
@@ -1123,6 +1139,7 @@ func TestNilWithdrawals(t *testing.T) {
 			blockParams: engine.PayloadAttributes{
 				Timestamp:   parent.Time + 2,
 				Withdrawals: make([]*types.Withdrawal, 0),
+				BaseFee:     big.NewInt(params.InitialBaseFee),
 			},
 			wantErr: true,
 		},
@@ -1136,6 +1153,7 @@ func TestNilWithdrawals(t *testing.T) {
 						Amount:  32,
 					},
 				},
+				BaseFee: big.NewInt(params.InitialBaseFee),
 			},
 			wantErr: true,
 		},
@@ -1144,6 +1162,7 @@ func TestNilWithdrawals(t *testing.T) {
 			blockParams: engine.PayloadAttributes{
 				Timestamp:   parent.Time + 5,
 				Withdrawals: nil,
+				BaseFee:     big.NewInt(params.InitialBaseFee),
 			},
 			wantErr: true,
 		},
@@ -1151,6 +1170,7 @@ func TestNilWithdrawals(t *testing.T) {
 			blockParams: engine.PayloadAttributes{
 				Timestamp:   parent.Time + 5,
 				Withdrawals: make([]*types.Withdrawal, 0),
+				BaseFee:     big.NewInt(params.InitialBaseFee),
 			},
 			wantErr: false,
 		},
@@ -1164,6 +1184,7 @@ func TestNilWithdrawals(t *testing.T) {
 						Amount:  32,
 					},
 				},
+				BaseFee: big.NewInt(params.InitialBaseFee),
 			},
 			wantErr: false,
 		},
@@ -1203,6 +1224,7 @@ func TestNilWithdrawals(t *testing.T) {
 			FeeRecipient: test.blockParams.SuggestedFeeRecipient,
 			Random:       test.blockParams.Random,
 			Version:      payloadVersion,
+			BaseFee:      big.NewInt(params.InitialBaseFee),
 		}).Id()
 		execData, err := api.GetPayloadV2(payloadID)
 		if err != nil {
@@ -1560,6 +1582,7 @@ func TestParentBeaconBlockRoot(t *testing.T) {
 		Timestamp:   parent.Time + 5,
 		Withdrawals: make([]*types.Withdrawal, 0),
 		BeaconRoot:  &common.Hash{42},
+		BaseFee:     big.NewInt(params.InitialBaseFee),
 	}
 	fcState := engine.ForkchoiceStateV1{
 		HeadBlockHash: parent.Hash(),
@@ -1581,6 +1604,7 @@ func TestParentBeaconBlockRoot(t *testing.T) {
 		Withdrawals:  blockParams.Withdrawals,
 		BeaconRoot:   blockParams.BeaconRoot,
 		Version:      engine.PayloadV3,
+		BaseFee:      big.NewInt(params.InitialBaseFee),
 	}).Id()
 	execData, err := api.GetPayloadV3(payloadID)
 	if err != nil {
@@ -1645,6 +1669,7 @@ func TestWitnessCreationAndConsumption(t *testing.T) {
 		Timestamp:   blocks[8].Time() + 5,
 		Withdrawals: make([]*types.Withdrawal, 0),
 		BeaconRoot:  &common.Hash{42},
+		BaseFee:     big.NewInt(params.InitialBaseFee),
 	}
 	fcState := engine.ForkchoiceStateV1{
 		HeadBlockHash:      blocks[8].Hash(),
@@ -1663,6 +1688,7 @@ func TestWitnessCreationAndConsumption(t *testing.T) {
 		Withdrawals:  blockParams.Withdrawals,
 		BeaconRoot:   blockParams.BeaconRoot,
 		Version:      engine.PayloadV3,
+		BaseFee:      big.NewInt(params.InitialBaseFee),
 	}).Id()
 	envelope, err := api.getPayload(payloadID, true)
 	if err != nil {

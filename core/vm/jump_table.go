@@ -63,6 +63,9 @@ var (
 	verkleInstructionSet           = newVerkleInstructionSet()
 	pragueInstructionSet           = newPragueInstructionSet()
 	eofInstructionSet              = newEOFInstructionSetForTesting()
+
+	// for mantle base fee upgrade, activate shanghai opcode
+	push0InstructionSet = newPUSH0InstructionSet()
 )
 
 // JumpTable contains the EVM opcodes supported at a given fork.
@@ -99,6 +102,13 @@ func NewEOFInstructionSetForTesting() JumpTable {
 func newEOFInstructionSetForTesting() JumpTable {
 	instructionSet := newPragueInstructionSet()
 	enableEOF(&instructionSet)
+	return validate(instructionSet)
+}
+
+func newPUSH0InstructionSet() JumpTable {
+	instructionSet := newMergeInstructionSet()
+	enable3855(&instructionSet) // PUSH0 instruction
+	enable3860(&instructionSet) // Limit and meter initcode
 	return validate(instructionSet)
 }
 

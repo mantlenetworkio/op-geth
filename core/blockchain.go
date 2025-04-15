@@ -137,6 +137,8 @@ const (
 	//  * Total difficulty has been removed from both the key-value store and the ancient store.
 	//  * The metadata structure of freezer is changed by adding 'flushOffset'
 	BlockChainVersion uint64 = 9
+
+	DefaultMantleBlockGasLimit = 0x4000000000000
 )
 
 // CacheConfig contains the configuration values for the trie database
@@ -299,6 +301,10 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	}
 	log.Info(strings.Repeat("-", 153))
 	log.Info("")
+
+	if chainConfig.IsOptimism() && chainConfig.RegolithTime == nil {
+		log.Warn("Optimism RegolithTime has not been set")
+	}
 
 	bc := &BlockChain{
 		chainConfig:   chainConfig,

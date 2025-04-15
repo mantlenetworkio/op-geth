@@ -18,6 +18,7 @@
 package miner
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"sync"
@@ -30,6 +31,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/eth/tracers"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -40,6 +42,10 @@ type Backend interface {
 	TxPool() *txpool.TxPool
 }
 
+type BackendWithHistoricalState interface {
+	StateAtBlock(ctx context.Context, block *types.Block, reexec uint64, base *state.StateDB, readOnly bool, preferDisk bool) (*state.StateDB, tracers.StateReleaseFunc, error)
+}
+
 // Config is the configuration parameters of mining.
 type Config struct {
 	Etherbase           common.Address `toml:"-"`          // Deprecated
@@ -48,11 +54,15 @@ type Config struct {
 	GasCeil             uint64         // Target gas ceiling for mined blocks.
 	GasPrice            *big.Int       // Minimum gas price for mining a transaction
 	Recommit            time.Duration  // The time interval for miner to re-create mining work.
+
+	RollupComputePendingBlock bool // Compute the pending block from tx-pool, instead of copying the latest-block
+
+	EffectiveGasCeil uint64 // if non-zero, a gas ceiling to apply independent of the header's gaslimit value
 }
 
 // DefaultConfig contains default settings for miner.
 var DefaultConfig = Config{
-	GasCeil:  30_000_000,
+	GasCeil:  core.DefaultMantleBlockGasLimit,
 	GasPrice: big.NewInt(params.GWei / 1000),
 
 	// The default recommit time is chosen as two seconds since
@@ -74,6 +84,8 @@ type Miner struct {
 	chain       *core.BlockChain
 	pending     *pending
 	pendingMu   sync.Mutex // Lock protects the pending block
+
+	backend Backend
 }
 
 // New creates a new miner with provided config.
@@ -85,6 +97,7 @@ func New(eth Backend, config Config, engine consensus.Engine) *Miner {
 		txpool:      eth.TxPool(),
 		chain:       eth.BlockChain(),
 		pending:     &pending{},
+		backend:     eth,
 	}
 }
 
@@ -92,6 +105,18 @@ func New(eth Backend, config Config, engine consensus.Engine) *Miner {
 // and statedb. The returned values can be nil in case the pending block is
 // not initialized.
 func (miner *Miner) Pending() (*types.Block, types.Receipts, *state.StateDB) {
+	if miner.chainConfig.Optimism != nil && !miner.config.RollupComputePendingBlock {
+		// For compatibility when not computing a pending block, we serve the latest block as "pending"
+		headHeader := miner.chain.CurrentHeader()
+		headBlock := miner.chain.GetBlock(headHeader.Hash(), headHeader.Number.Uint64())
+		headReceipts := miner.chain.GetReceiptsByHash(headHeader.Hash())
+		stateDB, err := miner.chain.StateAt(headHeader.Root)
+		if err != nil {
+			return nil, nil, nil
+		}
+
+		return headBlock, headReceipts, stateDB.Copy()
+	}
 	pending := miner.getPending()
 	if pending == nil {
 		return nil, nil, nil

@@ -19,6 +19,7 @@ package eth
 import (
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/common"
 
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -31,7 +32,20 @@ import (
 type ethHandler handler
 
 func (h *ethHandler) Chain() *core.BlockChain { return h.chain }
-func (h *ethHandler) TxPool() eth.TxPool      { return h.txpool }
+
+// NilPool satisfies the TxPool interface but does not return any tx in the
+// pool. It is used to disable transaction gossip.
+type NilPool struct{}
+
+// NilPool Get always returns nil
+func (n NilPool) Get(hash common.Hash) *types.Transaction { return nil }
+
+func (h *ethHandler) TxPool() eth.TxPool {
+	if h.noTxGossip {
+		return &NilPool{}
+	}
+	return h.txpool
+}
 
 // RunPeer is invoked when a peer joins on the `eth` protocol.
 func (h *ethHandler) RunPeer(peer *eth.Peer, hand eth.Handler) error {
@@ -49,6 +63,9 @@ func (h *ethHandler) PeerInfo(id enode.ID) interface{} {
 // AcceptTxs retrieves whether transaction processing is enabled on the node
 // or if inbound transactions should simply be dropped.
 func (h *ethHandler) AcceptTxs() bool {
+	if h.noTxGossip {
+		return false
+	}
 	return h.synced.Load()
 }
 

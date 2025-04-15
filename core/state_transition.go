@@ -18,6 +18,7 @@ package core
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -26,9 +27,32 @@ import (
 	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/crypto/kzg4844"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
+	"golang.org/x/crypto/sha3"
+)
+
+var (
+	BVM_ETH_ADDR     = common.HexToAddress("0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111")
+	LEGACY_ERC20_MNT = common.HexToAddress("0xdEAddEaDdeadDEadDEADDEAddEADDEAddead0000")
+)
+
+// L2ProxyAdmin contract upgrade constants
+var (
+	// L2ProxyAdminAddress is the address of the L2ProxyAdmin contract
+	// predeploy
+	L2ProxyAdminAddress = common.HexToAddress("0x4200000000000000000000000000000000000018")
+
+	// OwnerSlot refers to the storage slot in the L2ProxyAdmin contract that
+	// holds the owner of the contract
+	OwnerSlot = common.BigToHash(big.NewInt(0))
+
+	// NewProxyAdminOwnerAddress is the address that the L2ProxyAdmin contract
+	// will be transferred to
+	NewProxyAdminOwnerAddress = common.HexToHash("0x09734bB3980906Bb217305EA6Bd34256feEAB105")
 )
 
 // ExecutionResult includes all output after executing given evm
@@ -140,6 +164,15 @@ func toWordSize(size uint64) uint64 {
 	return (size + 31) / 32
 }
 
+type RunMode uint8
+
+const (
+	CommitMode RunMode = iota
+	GasEstimationMode
+	GasEstimationWithSkipCheckBalanceMode
+	EthcallMode
+)
+
 // A Message contains the data derived from a single transaction that is relevant to state
 // processing.
 type Message struct {
@@ -164,10 +197,28 @@ type Message struct {
 
 	// When SkipFromEOACheck is true, the message sender is not checked to be an EOA.
 	SkipFromEOACheck bool
+
+	IsSystemTx    bool                // IsSystemTx indicates the message, if also a deposit, does not emit gas usage.
+	IsDepositTx   bool                // IsDepositTx indicates the message is force-included and can persist a mint.
+	Mint          *big.Int            // Mint is the amount to mint before EVM processing, or nil if there is no minting.
+	ETHValue      *big.Int            // ETHValue is the amount to mint BVM_ETH before EVM processing, or nil if there is no minting.
+	ETHTxValue    *big.Int            // ETHTxValue is the amount to be transferred to msg.To before EVM processing, and the transfer will be reverted if EVM failed
+	MetaTxParams  *types.MetaTxParams // MetaTxParams contains necessary parameter to sponsor gas fee for msg.From.
+	RollupDataGas types.RollupGasData // RollupDataGas indicates the rollup cost of the message, 0 if not a rollup or no cost.
+
+	// runMode
+	RunMode RunMode
 }
 
 // TransactionToMessage converts a transaction into a Message.
-func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.Int) (*Message, error) {
+func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.Int, rules *params.Rules) (*Message, error) {
+	if rules == nil {
+		return nil, errors.New("param rules is nil pointer")
+	}
+	metaTxParams, err := types.DecodeAndVerifyMetaTxParams(tx, rules.IsMetaTxV2, rules.IsMetaTxV3, rules.IsMantleEverest)
+	if err != nil {
+		return nil, err
+	}
 	msg := &Message{
 		Nonce:                 tx.Nonce(),
 		GasLimit:              tx.Gas(),
@@ -183,6 +234,14 @@ func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.In
 		SkipFromEOACheck:      false,
 		BlobHashes:            tx.BlobHashes(),
 		BlobGasFeeCap:         tx.BlobGasFeeCap(),
+		IsSystemTx:            tx.IsSystemTx(),
+		IsDepositTx:           tx.IsDepositTx(),
+		Mint:                  tx.Mint(),
+		RollupDataGas:         tx.RollupDataGas(),
+		ETHValue:              tx.ETHValue(),
+		ETHTxValue:            tx.ETHTxValue(),
+		MetaTxParams:          metaTxParams,
+		RunMode:               CommitMode,
 	}
 	// If baseFee provided, set gasPrice to effectiveGasPrice.
 	if baseFee != nil {
@@ -191,7 +250,7 @@ func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.In
 			msg.GasPrice = msg.GasFeeCap
 		}
 	}
-	var err error
+
 	msg.From, err = types.Sender(s, tx)
 	return msg, err
 }
@@ -237,15 +296,18 @@ type stateTransition struct {
 	initialGas   uint64
 	state        vm.StateDB
 	evm          *vm.EVM
+
+	initialSponsorValue *big.Int
 }
 
 // newStateTransition initialises and returns a new state transition object.
 func newStateTransition(evm *vm.EVM, msg *Message, gp *GasPool) *stateTransition {
 	return &stateTransition{
-		gp:    gp,
-		evm:   evm,
-		msg:   msg,
-		state: evm.StateDB,
+		gp:                  gp,
+		evm:                 evm,
+		msg:                 msg,
+		state:               evm.StateDB,
+		initialSponsorValue: big.NewInt(0),
 	}
 }
 
@@ -257,9 +319,48 @@ func (st *stateTransition) to() common.Address {
 	return *st.msg.To
 }
 
-func (st *stateTransition) buyGas() error {
+// CalculateRollupGasDataFromMessage calculate RollupGasData from message.
+func (st *stateTransition) CalculateRollupGasDataFromMessage() {
+	tx := types.NewTx(&types.DynamicFeeTx{
+		Nonce:     st.msg.Nonce,
+		Value:     st.msg.Value,
+		Gas:       st.msg.GasLimit,
+		GasTipCap: st.msg.GasTipCap,
+		GasFeeCap: st.msg.GasFeeCap,
+		Data:      st.msg.Data,
+	})
+
+	st.msg.RollupDataGas = tx.RollupDataGas()
+
+	// add a constant to cover sigs(V,R,S) and other data to make sure that the gasLimit from eth_estimateGas can cover L1 cost
+	// just used for estimateGas and the actual L1 cost depends on users' tx when executing
+	st.msg.RollupDataGas.Ones += 80
+
+	// add a constant to cover meta tx sigs(V,R,S)
+	if st.msg.MetaTxParams != nil {
+		st.msg.RollupDataGas.Ones += 80
+	}
+}
+
+func (st *stateTransition) buyGas(metaTxV3 bool) (*big.Int, error) {
+	if !metaTxV3 {
+		if err := st.applyMetaTransaction(); err != nil {
+			return nil, err
+		}
+	}
+
 	mgval := new(big.Int).SetUint64(st.msg.GasLimit)
 	mgval.Mul(mgval, st.msg.GasPrice)
+
+	var l1Cost *big.Int
+	if st.msg.RunMode == GasEstimationMode || st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode {
+		st.CalculateRollupGasDataFromMessage()
+	}
+
+	if st.evm.Context.L1CostFunc != nil && st.msg.RunMode != EthcallMode {
+		l1Cost = st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupDataGas, st.msg.IsDepositTx, st.msg.To)
+	}
+
 	balanceCheck := new(big.Int).Set(mgval)
 	if st.msg.GasFeeCap != nil {
 		balanceCheck.SetUint64(st.msg.GasLimit)
@@ -279,15 +380,50 @@ func (st *stateTransition) buyGas() error {
 			mgval.Add(mgval, blobFee)
 		}
 	}
-	balanceCheckU256, overflow := uint256.FromBig(balanceCheck)
-	if overflow {
-		return fmt.Errorf("%w: address %v required balance exceeds 256 bits", ErrInsufficientFunds, st.msg.From.Hex())
+
+	if st.msg.RunMode != GasEstimationWithSkipCheckBalanceMode && st.msg.RunMode != EthcallMode {
+		if st.msg.MetaTxParams != nil {
+			pureGasFeeValue := new(big.Int).Sub(balanceCheck, st.msg.Value)
+			sponsorAmount, selfPayAmount := types.CalculateSponsorPercentAmount(st.msg.MetaTxParams, pureGasFeeValue)
+			sponsorAmountU256, overflow := uint256.FromBig(sponsorAmount)
+			if overflow {
+				return nil, fmt.Errorf("%w: address %v required balance exceeds 256 bits", ErrInsufficientFunds, st.msg.MetaTxParams.GasFeeSponsor.Hex())
+			}
+			if have, want := st.state.GetBalance(st.msg.MetaTxParams.GasFeeSponsor), sponsorAmountU256; have.Cmp(want) < 0 {
+				return nil, fmt.Errorf("%w: gas fee sponsor %v have %v want %v", ErrInsufficientFunds, st.msg.MetaTxParams.GasFeeSponsor.Hex(), have, want)
+			}
+
+			selfPayAmount = new(big.Int).Add(selfPayAmount, st.msg.Value)
+			selfPayAmountU256, overflow := uint256.FromBig(selfPayAmount)
+			if overflow {
+				return nil, fmt.Errorf("%w: address %v required balance exceeds 256 bits", ErrInsufficientFunds, st.msg.From.Hex())
+			}
+			if have, want := st.state.GetBalance(st.msg.From), selfPayAmountU256; have.Cmp(want) < 0 {
+				return nil, fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From.Hex(), have, want)
+			}
+
+			if st.msg.MetaTxParams.GasFeeSponsor == st.msg.From {
+				pureGasFeeValueU256, overflow := uint256.FromBig(pureGasFeeValue)
+				if overflow {
+					return nil, fmt.Errorf("%w: address %v required balance exceeds 256 bits", ErrInsufficientFunds, st.msg.MetaTxParams.GasFeeSponsor.Hex())
+				}
+				if have, want := st.state.GetBalance(st.msg.From), pureGasFeeValueU256; have.Cmp(want) < 0 {
+					return nil, fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From.Hex(), have, want)
+				}
+			}
+		} else {
+			balanceCheckU256, overflow := uint256.FromBig(balanceCheck)
+			if overflow {
+				return nil, fmt.Errorf("%w: address %v required balance exceeds 256 bits", ErrInsufficientFunds, st.msg.From.Hex())
+			}
+			if have, want := st.state.GetBalance(st.msg.From), balanceCheckU256; have.Cmp(want) < 0 {
+				return nil, fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From.Hex(), have, want)
+			}
+		}
 	}
-	if have, want := st.state.GetBalance(st.msg.From), balanceCheckU256; have.Cmp(want) < 0 {
-		return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From.Hex(), have, want)
-	}
+
 	if err := st.gp.SubGas(st.msg.GasLimit); err != nil {
-		return err
+		return nil, err
 	}
 
 	if st.evm.Config.Tracer != nil && st.evm.Config.Tracer.OnGasChange != nil {
@@ -296,25 +432,68 @@ func (st *stateTransition) buyGas() error {
 	st.gasRemaining = st.msg.GasLimit
 
 	st.initialGas = st.msg.GasLimit
-	mgvalU256, _ := uint256.FromBig(mgval)
-	st.state.SubBalance(st.msg.From, mgvalU256, tracing.BalanceDecreaseGasBuy)
+	if st.msg.RunMode != GasEstimationWithSkipCheckBalanceMode && st.msg.RunMode != EthcallMode {
+		if st.msg.MetaTxParams != nil {
+			sponsorAmount, selfPayAmount := types.CalculateSponsorPercentAmount(st.msg.MetaTxParams, mgval)
+			st.initialSponsorValue = sponsorAmount
+			sponsorAmountU256, _ := uint256.FromBig(sponsorAmount)
+			st.state.SubBalance(st.msg.MetaTxParams.GasFeeSponsor, sponsorAmountU256, tracing.BalanceDecreaseGasBuy)
+			selfPayAmountU256, _ := uint256.FromBig(selfPayAmount)
+			st.state.SubBalance(st.msg.From, selfPayAmountU256, tracing.BalanceDecreaseGasBuy)
+			log.Debug("BuyGas for metaTx", "v3", metaTxV3,
+				"sponsor", st.msg.MetaTxParams.GasFeeSponsor.String(), "amount", sponsorAmount.String(),
+				"user", st.msg.From.String(), "amount", selfPayAmount.String())
+		} else {
+			mgvalU256, _ := uint256.FromBig(mgval)
+			st.state.SubBalance(st.msg.From, mgvalU256, tracing.BalanceDecreaseGasBuy)
+		}
+	}
+
+	return l1Cost, nil
+}
+
+func (st *stateTransition) applyMetaTransaction() error {
+	if st.msg.MetaTxParams == nil {
+		return nil
+	}
+	if st.msg.MetaTxParams.ExpireHeight < st.evm.Context.BlockNumber.Uint64() {
+		return types.ErrExpiredMetaTx
+	}
+
+	st.msg.Data = st.msg.MetaTxParams.Payload
 	return nil
 }
 
-func (st *stateTransition) preCheck() error {
+func (st *stateTransition) preCheck(metaTxV3 bool) (*big.Int, error) {
+	if st.msg.IsDepositTx {
+		// No fee fields to check, no nonce to check, and no need to check if EOA (L1 already verified it for us)
+		// Gas is free, but no refunds!
+		st.initialGas = st.msg.GasLimit
+		st.gasRemaining += st.msg.GasLimit // Add gas here in order to be able to execute calls.
+		// Don't touch the gas pool for system transactions
+		if st.msg.IsSystemTx {
+			if st.evm.ChainConfig().IsOptimismRegolith(st.evm.Context.Time) {
+				return nil, fmt.Errorf("%w: address %v", ErrSystemTxNotSupported,
+					st.msg.From.Hex())
+			}
+			return common.Big0, nil
+		}
+		return common.Big0, nil // gas used by deposits may not be used by other txs
+	}
+
 	// Only check transactions that are not fake
 	msg := st.msg
 	if !msg.SkipNonceChecks {
 		// Make sure this transaction's nonce is correct.
 		stNonce := st.state.GetNonce(msg.From)
 		if msgNonce := msg.Nonce; stNonce < msgNonce {
-			return fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooHigh,
+			return nil, fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooHigh,
 				msg.From.Hex(), msgNonce, stNonce)
 		} else if stNonce > msgNonce {
-			return fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooLow,
+			return nil, fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooLow,
 				msg.From.Hex(), msgNonce, stNonce)
 		} else if stNonce+1 < stNonce {
-			return fmt.Errorf("%w: address %v, nonce: %d", ErrNonceMax,
+			return nil, fmt.Errorf("%w: address %v, nonce: %d", ErrNonceMax,
 				msg.From.Hex(), stNonce)
 		}
 	}
@@ -323,7 +502,7 @@ func (st *stateTransition) preCheck() error {
 		code := st.state.GetCode(msg.From)
 		_, delegated := types.ParseDelegation(code)
 		if len(code) > 0 && !delegated {
-			return fmt.Errorf("%w: address %v, len(code): %d", ErrSenderNoEOA, msg.From.Hex(), len(code))
+			return nil, fmt.Errorf("%w: address %v, len(code): %d", ErrSenderNoEOA, msg.From.Hex(), len(code))
 		}
 	}
 	// Make sure that transaction gasFeeCap is greater than the baseFee (post london)
@@ -332,21 +511,21 @@ func (st *stateTransition) preCheck() error {
 		skipCheck := st.evm.Config.NoBaseFee && msg.GasFeeCap.BitLen() == 0 && msg.GasTipCap.BitLen() == 0
 		if !skipCheck {
 			if l := msg.GasFeeCap.BitLen(); l > 256 {
-				return fmt.Errorf("%w: address %v, maxFeePerGas bit length: %d", ErrFeeCapVeryHigh,
+				return nil, fmt.Errorf("%w: address %v, maxFeePerGas bit length: %d", ErrFeeCapVeryHigh,
 					msg.From.Hex(), l)
 			}
 			if l := msg.GasTipCap.BitLen(); l > 256 {
-				return fmt.Errorf("%w: address %v, maxPriorityFeePerGas bit length: %d", ErrTipVeryHigh,
+				return nil, fmt.Errorf("%w: address %v, maxPriorityFeePerGas bit length: %d", ErrTipVeryHigh,
 					msg.From.Hex(), l)
 			}
 			if msg.GasFeeCap.Cmp(msg.GasTipCap) < 0 {
-				return fmt.Errorf("%w: address %v, maxPriorityFeePerGas: %s, maxFeePerGas: %s", ErrTipAboveFeeCap,
+				return nil, fmt.Errorf("%w: address %v, maxPriorityFeePerGas: %s, maxFeePerGas: %s", ErrTipAboveFeeCap,
 					msg.From.Hex(), msg.GasTipCap, msg.GasFeeCap)
 			}
 			// This will panic if baseFee is nil, but basefee presence is verified
 			// as part of header validation.
 			if msg.GasFeeCap.Cmp(st.evm.Context.BaseFee) < 0 {
-				return fmt.Errorf("%w: address %v, maxFeePerGas: %s, baseFee: %s", ErrFeeCapTooLow,
+				return nil, fmt.Errorf("%w: address %v, maxFeePerGas: %s, baseFee: %s", ErrFeeCapTooLow,
 					msg.From.Hex(), msg.GasFeeCap, st.evm.Context.BaseFee)
 			}
 		}
@@ -357,14 +536,14 @@ func (st *stateTransition) preCheck() error {
 		// has it as a non-nillable value, so any msg derived from blob transaction has it non-nil.
 		// However, messages created through RPC (eth_call) don't have this restriction.
 		if msg.To == nil {
-			return ErrBlobTxCreate
+			return nil, ErrBlobTxCreate
 		}
 		if len(msg.BlobHashes) == 0 {
-			return ErrMissingBlobHashes
+			return nil, ErrMissingBlobHashes
 		}
 		for i, hash := range msg.BlobHashes {
 			if !kzg4844.IsValidVersionedHash(hash[:]) {
-				return fmt.Errorf("blob %d has invalid hash version", i)
+				return nil, fmt.Errorf("blob %d has invalid hash version", i)
 			}
 		}
 	}
@@ -377,7 +556,7 @@ func (st *stateTransition) preCheck() error {
 				// This will panic if blobBaseFee is nil, but blobBaseFee presence
 				// is verified as part of header validation.
 				if msg.BlobGasFeeCap.Cmp(st.evm.Context.BlobBaseFee) < 0 {
-					return fmt.Errorf("%w: address %v blobGasFeeCap: %v, blobBaseFee: %v", ErrBlobFeeCapTooLow,
+					return nil, fmt.Errorf("%w: address %v blobGasFeeCap: %v, blobBaseFee: %v", ErrBlobFeeCapTooLow,
 						msg.From.Hex(), msg.BlobGasFeeCap, st.evm.Context.BlobBaseFee)
 				}
 			}
@@ -386,13 +565,13 @@ func (st *stateTransition) preCheck() error {
 	// Check that EIP-7702 authorization list signatures are well formed.
 	if msg.SetCodeAuthorizations != nil {
 		if msg.To == nil {
-			return fmt.Errorf("%w (sender %v)", ErrSetCodeTxCreate, msg.From)
+			return nil, fmt.Errorf("%w (sender %v)", ErrSetCodeTxCreate, msg.From)
 		}
 		if len(msg.SetCodeAuthorizations) == 0 {
-			return fmt.Errorf("%w (sender %v)", ErrEmptyAuthList, msg.From)
+			return nil, fmt.Errorf("%w (sender %v)", ErrEmptyAuthList, msg.From)
 		}
 	}
-	return st.buyGas()
+	return st.buyGas(metaTxV3)
 }
 
 // execute will transition the state by applying the current message and
@@ -406,6 +585,71 @@ func (st *stateTransition) preCheck() error {
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *stateTransition) execute() (*ExecutionResult, error) {
+	if mint := st.msg.Mint; mint != nil {
+		mintU256, overflow := uint256.FromBig(mint)
+		if overflow {
+			return nil, fmt.Errorf("mint value exceeds uint256: %d", mintU256)
+		}
+		st.state.AddBalance(st.msg.From, mintU256, tracing.BalanceMint)
+	}
+
+	//Mint BVM_ETH
+	rules := st.evm.ChainConfig().Rules(st.evm.Context.BlockNumber, st.evm.Context.Random != nil, st.evm.Context.Time)
+	//add eth value
+	if ethValue := st.msg.ETHValue; ethValue != nil && ethValue.Cmp(big.NewInt(0)) != 0 {
+		st.mintBVMETH(ethValue, rules)
+	}
+
+	snap := st.state.Snapshot()
+	// Will be reverted if failed
+
+	// Check if the owner of the L2ProxyAdmin contract needs to be upgraded
+	if st.evm.ChainConfig().IsProxyOwnerUpgrade(st.evm.Context.Time) {
+		st.evm.StateDB.SetState(L2ProxyAdminAddress, OwnerSlot, NewProxyAdminOwnerAddress)
+	}
+
+	result, err := st.innerExecute()
+	// Failed deposits must still be included. Unless we cannot produce the block at all due to the gas limit.
+	// On deposit failure, we rewind any state changes from after the minting, and increment the nonce.
+	if err != nil && err != ErrGasLimitReached && st.msg.IsDepositTx {
+		if st.evm.Config.Tracer != nil && st.evm.Config.Tracer.OnEnter != nil {
+			st.evm.Config.Tracer.OnEnter(0, byte(vm.STOP), common.Address{}, common.Address{}, nil, 0, nil)
+		}
+
+		st.state.RevertToSnapshot(snap)
+		// Even though we revert the state changes, always increment the nonce for the next deposit transaction
+		st.state.SetNonce(st.msg.From, st.state.GetNonce(st.msg.From)+1, tracing.NonceChangeEoACall)
+		// Record deposits as using all their gas (matches the gas pool)
+		// System Transactions are special & are not recorded as using any gas (anywhere)
+		// Regolith changes this behaviour so the actual gas used is reported.
+		// In this case the tx is invalid so is recorded as using all gas.
+		gasUsed := st.msg.GasLimit
+		if st.msg.IsSystemTx && !st.evm.ChainConfig().IsRegolith(st.evm.Context.Time) {
+			gasUsed = 0
+		}
+		result = &ExecutionResult{
+			UsedGas:    gasUsed,
+			Err:        fmt.Errorf("failed deposit: %w", err),
+			ReturnData: nil,
+		}
+		err = nil
+	}
+	return result, err
+}
+
+func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
+	rules := st.evm.ChainConfig().Rules(st.evm.Context.BlockNumber, st.evm.Context.Random != nil, st.evm.Context.Time)
+	if ethTxValue := st.msg.ETHTxValue; ethTxValue != nil && ethTxValue.Cmp(big.NewInt(0)) != 0 {
+		err := st.transferBVMETH(ethTxValue, rules)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if st.msg.MetaTxParams != nil && rules.IsMantleEverest {
+		return nil, types.ErrMetaTxDisabled
+	}
+
 	// First check this message satisfies all consensus rules before
 	// applying the message. The rules include these clauses
 	//
@@ -417,13 +661,14 @@ func (st *stateTransition) execute() (*ExecutionResult, error) {
 	// 6. caller has enough balance to cover asset transfer for **topmost** call
 
 	// Check clauses 1-3, buy gas if everything is correct
-	if err := st.preCheck(); err != nil {
+	tokenRatio := st.state.GetState(types.GasOracleAddr, types.TokenRatioSlot).Big().Uint64()
+	l1Cost, err := st.preCheck(rules.IsMetaTxV3)
+	if err != nil {
 		return nil, err
 	}
 
 	var (
 		msg              = st.msg
-		rules            = st.evm.ChainConfig().Rules(st.evm.Context.BlockNumber, st.evm.Context.Random != nil, st.evm.Context.Time)
 		contractCreation = msg.To == nil
 		floorDataGas     uint64
 	)
@@ -432,6 +677,16 @@ func (st *stateTransition) execute() (*ExecutionResult, error) {
 	gas, err := IntrinsicGas(msg.Data, msg.AccessList, msg.SetCodeAuthorizations, contractCreation, rules.IsHomestead, rules.IsIstanbul, rules.IsShanghai)
 	if err != nil {
 		return nil, err
+	}
+	// after calculate intrinsic gas, apply meta tx data
+	if rules.IsMetaTxV3 {
+		if err := st.applyMetaTransaction(); err != nil {
+			return nil, err
+		}
+	}
+
+	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
+		gas = gas * tokenRatio
 	}
 	if st.gasRemaining < gas {
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, gas)
@@ -442,6 +697,9 @@ func (st *stateTransition) execute() (*ExecutionResult, error) {
 		if err != nil {
 			return nil, err
 		}
+		if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
+			floorDataGas = floorDataGas * tokenRatio
+		}
 		if msg.GasLimit < floorDataGas {
 			return nil, fmt.Errorf("%w: have %d, want %d", ErrFloorDataGas, msg.GasLimit, floorDataGas)
 		}
@@ -450,6 +708,20 @@ func (st *stateTransition) execute() (*ExecutionResult, error) {
 		t.OnGasChange(st.gasRemaining, st.gasRemaining-gas, tracing.GasChangeTxIntrinsicGas)
 	}
 	st.gasRemaining -= gas
+
+	var l1Gas uint64
+	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
+		if st.msg.GasPrice.Cmp(common.Big0) > 0 && l1Cost != nil {
+			l1Gas = new(big.Int).Div(l1Cost, st.msg.GasPrice).Uint64()
+		}
+		if st.gasRemaining < l1Gas {
+			return nil, fmt.Errorf("%w: have %d, want %d", ErrInsufficientGasForL1Cost, st.gasRemaining, l1Gas)
+		}
+		st.gasRemaining -= l1Gas
+		if tokenRatio > 0 {
+			st.gasRemaining = st.gasRemaining / tokenRatio
+		}
+	}
 
 	if rules.IsEIP4762 {
 		st.evm.AccessEvents.AddTxOrigin(msg.From)
@@ -509,20 +781,52 @@ func (st *stateTransition) execute() (*ExecutionResult, error) {
 		ret, st.gasRemaining, vmerr = st.evm.Call(msg.From, st.to(), msg.Data, st.gasRemaining, value)
 	}
 
-	// Compute refund counter, capped to a refund quotient.
-	gasRefund := st.calcRefund()
-	st.gasRemaining += gasRefund
-	if rules.IsPrague {
-		// After EIP-7623: Data-heavy transactions pay the floor gas.
-		if st.gasUsed() < floorDataGas {
-			prev := st.gasRemaining
-			st.gasRemaining = st.initialGas - floorDataGas
-			if t := st.evm.Config.Tracer; t != nil && t.OnGasChange != nil {
-				t.OnGasChange(prev, st.gasRemaining, tracing.GasChangeTxDataFloor)
+	// if deposit: skip refunds, skip tipping coinbase
+	// Regolith changes this behaviour to report the actual gasUsed instead of always reporting all gas used.
+	if st.msg.IsDepositTx && !rules.IsOptimismRegolith {
+		// Record deposits as using all their gas (matches the gas pool)
+		// System Transactions are special & are not recorded as using any gas (anywhere)
+		gasUsed := st.msg.GasLimit
+		if st.msg.IsSystemTx {
+			gasUsed = 0
+		}
+		return &ExecutionResult{
+			UsedGas:    gasUsed,
+			Err:        vmerr,
+			ReturnData: ret,
+		}, nil
+	}
+
+	var gasRefund uint64
+	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
+		// Compute refund counter, capped to a refund quotient.
+		gasRefund = st.calcRefund()
+		st.gasRemaining += gasRefund
+		st.gasRemaining = st.gasRemaining * tokenRatio
+		if rules.IsPrague {
+			// After EIP-7623: Data-heavy transactions pay the floor gas.
+			if st.gasUsed() < floorDataGas {
+				prev := st.gasRemaining
+				st.gasRemaining = st.initialGas - floorDataGas
+				if t := st.evm.Config.Tracer; t != nil && t.OnGasChange != nil {
+					t.OnGasChange(prev, st.gasRemaining, tracing.GasChangeTxDataFloor)
+				}
 			}
 		}
+		st.returnGas(rules.IsMetaTxV3)
 	}
-	st.returnGas()
+
+	// Note for deposit tx there is no ETH refunded for unused gas, but that's taken care of by the fact that gasPrice
+	// is always 0 for deposit tx. So calling refundGas will ensure the gasUsed accounting is correct without actually
+	// changing the sender's balance
+	if st.msg.IsDepositTx && rules.IsOptimismRegolith {
+		// Skip coinbase payments for deposit tx in Regolith
+		return &ExecutionResult{
+			UsedGas:    st.gasUsed(),
+			Err:        vmerr,
+			ReturnData: ret,
+		}, nil
+	}
 
 	effectiveTip := msg.GasPrice
 	if rules.IsLondon {
@@ -548,9 +852,22 @@ func (st *stateTransition) execute() (*ExecutionResult, error) {
 		}
 	}
 
+	// Check that we are post bedrock to enable op-geth to be able to create pseudo pre-bedrock blocks (these are pre-bedrock, but don't follow l2 geth rules)
+	// Note optimismConfig will not be nil if rules.IsOptimismBedrock is true
+	if optimismConfig := st.evm.ChainConfig().Optimism; optimismConfig != nil && rules.IsOptimismBedrock {
+		feeU256, overflow := uint256.FromBig(new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.evm.Context.BaseFee))
+		if overflow {
+			return nil, fmt.Errorf("base fee value exceeds uint256: %d", feeU256)
+		}
+		st.state.AddBalance(params.OptimismBaseFeeRecipient, feeU256, tracing.BalanceMint)
+		//if cost := st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupDataGas, st.msg.IsDepositTx); cost != nil {
+		//	st.state.AddBalance(params.OptimismL1FeeRecipient, cost)
+		//}
+	}
+
 	return &ExecutionResult{
 		UsedGas:     st.gasUsed(),
-		RefundedGas: gasRefund,
+		RefundedGas: gasRefund * tokenRatio,
 		Err:         vmerr,
 		ReturnData:  ret,
 	}, nil
@@ -635,10 +952,23 @@ func (st *stateTransition) calcRefund() uint64 {
 
 // returnGas returns ETH for remaining gas,
 // exchanged at the original rate.
-func (st *stateTransition) returnGas() {
-	remaining := uint256.NewInt(st.gasRemaining)
-	remaining.Mul(remaining, uint256.MustFromBig(st.msg.GasPrice))
-	st.state.AddBalance(st.msg.From, remaining, tracing.BalanceIncreaseGasReturn)
+func (st *stateTransition) returnGas(metaTxV3 bool) {
+	if st.msg.MetaTxParams != nil {
+		remainingBigInt := new(big.Int).Mul(new(big.Int).SetUint64(st.gasRemaining), st.msg.GasPrice)
+		sponsorRefundAmount, selfRefundAmount := types.CalculateSponsorPercentAmount(st.msg.MetaTxParams, remainingBigInt)
+		sponsorRefundAmountU256, _ := uint256.FromBig(sponsorRefundAmount)
+		st.state.AddBalance(st.msg.MetaTxParams.GasFeeSponsor, sponsorRefundAmountU256, tracing.BalanceIncreaseGasReturn)
+		selfRefundAmountU256, _ := uint256.FromBig(selfRefundAmount)
+		st.state.AddBalance(st.msg.From, selfRefundAmountU256, tracing.BalanceIncreaseGasReturn)
+		if metaTxV3 {
+			actualSponsorValue := new(big.Int).Sub(st.initialSponsorValue, sponsorRefundAmount)
+			st.generateMetaTxSponsorEvent(st.msg.MetaTxParams.GasFeeSponsor, st.msg.From, actualSponsorValue)
+		}
+	} else {
+		remaining := uint256.NewInt(st.gasRemaining)
+		remaining.Mul(remaining, uint256.MustFromBig(st.msg.GasPrice))
+		st.state.AddBalance(st.msg.From, remaining, tracing.BalanceIncreaseGasReturn)
+	}
 
 	if st.evm.Config.Tracer != nil && st.evm.Config.Tracer.OnGasChange != nil && st.gasRemaining > 0 {
 		st.evm.Config.Tracer.OnGasChange(st.gasRemaining, 0, tracing.GasChangeTxLeftOverReturned)
@@ -657,4 +987,147 @@ func (st *stateTransition) gasUsed() uint64 {
 // blobGasUsed returns the amount of blob gas used by the message.
 func (st *stateTransition) blobGasUsed() uint64 {
 	return uint64(len(st.msg.BlobHashes) * params.BlobTxBlobGasPerBlob)
+}
+
+func (st *stateTransition) mintBVMETH(ethValue *big.Int, rules params.Rules) {
+	if !rules.IsMantleBVMETHMintUpgrade {
+		var key common.Hash
+		var ethRecipient common.Address
+		if st.msg.To != nil {
+			ethRecipient = *st.msg.To
+		} else {
+			ethRecipient = crypto.CreateAddress(st.msg.From, st.evm.StateDB.GetNonce(st.msg.From))
+		}
+		key = getBVMETHBalanceKey(ethRecipient)
+		value := st.state.GetState(BVM_ETH_ADDR, key)
+		bal := value.Big()
+		bal = bal.Add(bal, ethValue)
+		st.state.SetState(BVM_ETH_ADDR, key, common.BigToHash(bal))
+
+		st.addBVMETHTotalSupply(ethValue)
+		st.generateBVMETHMintEvent(ethRecipient, ethValue)
+		return
+	}
+	key := getBVMETHBalanceKey(st.msg.From)
+	value := st.state.GetState(BVM_ETH_ADDR, key)
+	bal := value.Big()
+	bal = bal.Add(bal, ethValue)
+	st.state.SetState(BVM_ETH_ADDR, key, common.BigToHash(bal))
+
+	st.addBVMETHTotalSupply(ethValue)
+	st.generateBVMETHMintEvent(st.msg.From, ethValue)
+}
+
+func (st *stateTransition) addBVMETHTotalSupply(ethValue *big.Int) {
+	key := getBVMETHTotalSupplyKey()
+	value := st.state.GetState(BVM_ETH_ADDR, key)
+	bal := value.Big()
+	bal = bal.Add(bal, ethValue)
+	st.state.SetState(BVM_ETH_ADDR, key, common.BigToHash(bal))
+}
+
+func (st *stateTransition) transferBVMETH(ethValue *big.Int, rules params.Rules) error {
+	if !rules.IsMantleBVMETHMintUpgrade {
+		return nil
+	}
+	var ethRecipient common.Address
+	if st.msg.To != nil {
+		ethRecipient = *st.msg.To
+	} else {
+		ethRecipient = crypto.CreateAddress(st.msg.From, st.evm.StateDB.GetNonce(st.msg.From))
+	}
+	if ethRecipient == st.msg.From {
+		return nil
+	}
+
+	fromKey := getBVMETHBalanceKey(st.msg.From)
+	toKey := getBVMETHBalanceKey(ethRecipient)
+
+	fromBalanceValue := st.state.GetState(BVM_ETH_ADDR, fromKey)
+	toBalanceValue := st.state.GetState(BVM_ETH_ADDR, toKey)
+
+	fromBalance := fromBalanceValue.Big()
+	toBalance := toBalanceValue.Big()
+
+	if fromBalance.Cmp(ethValue) < 0 {
+		return ErrEthTxValueTooLarge
+	}
+
+	fromBalance = new(big.Int).Sub(fromBalance, ethValue)
+	toBalance = new(big.Int).Add(toBalance, ethValue)
+
+	st.state.SetState(BVM_ETH_ADDR, fromKey, common.BigToHash(fromBalance))
+	st.state.SetState(BVM_ETH_ADDR, toKey, common.BigToHash(toBalance))
+
+	st.generateBVMETHTransferEvent(st.msg.From, ethRecipient, ethValue)
+	return nil
+}
+
+func getBVMETHBalanceKey(addr common.Address) common.Hash {
+	position := common.Big0
+	hasher := sha3.NewLegacyKeccak256()
+	hasher.Write(common.LeftPadBytes(addr.Bytes(), 32))
+	hasher.Write(common.LeftPadBytes(position.Bytes(), 32))
+	digest := hasher.Sum(nil)
+	return common.BytesToHash(digest)
+}
+
+func getBVMETHTotalSupplyKey() common.Hash {
+	return common.BytesToHash(common.Big2.Bytes())
+}
+
+func (st *stateTransition) generateBVMETHMintEvent(mintAddress common.Address, mintValue *big.Int) {
+	// keccak("Mint(address,uint256)") = "0x0f6798a560793a54c3bcfe86a93cde1e73087d944c0ea20544137d4121396885"
+	methodHash := common.HexToHash("0x0f6798a560793a54c3bcfe86a93cde1e73087d944c0ea20544137d4121396885")
+	topics := make([]common.Hash, 2)
+	topics[0] = methodHash
+	topics[1] = mintAddress.Hash()
+	//data means the mint amount in MINT EVENT.
+	d := common.HexToHash(common.Bytes2Hex(mintValue.Bytes())).Bytes()
+	st.evm.StateDB.AddLog(&types.Log{
+		Address: BVM_ETH_ADDR,
+		Topics:  topics,
+		Data:    d,
+		// This is a non-consensus field, but assigned here because
+		// core/state doesn't know the current block number.
+		BlockNumber: st.evm.Context.BlockNumber.Uint64(),
+	})
+}
+
+func (st *stateTransition) generateBVMETHTransferEvent(from, to common.Address, amount *big.Int) {
+	// keccak("Transfer(address,address,uint256)") = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+	methodHash := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+	topics := make([]common.Hash, 3)
+	topics[0] = methodHash
+	topics[1] = from.Hash()
+	topics[2] = to.Hash()
+	//data means the transfer amount in Transfer EVENT.
+	data := common.HexToHash(common.Bytes2Hex(amount.Bytes())).Bytes()
+	st.evm.StateDB.AddLog(&types.Log{
+		Address: BVM_ETH_ADDR,
+		Topics:  topics,
+		Data:    data,
+		// This is a non-consensus field, but assigned here because
+		// core/state doesn't know the current block number.
+		BlockNumber: st.evm.Context.BlockNumber.Uint64(),
+	})
+}
+
+func (st *stateTransition) generateMetaTxSponsorEvent(sponsor, txSender common.Address, actualSponsorAmount *big.Int) {
+	// keccak("MetaTxSponsor(address,address,uint256)") = "0xe57e5af44e0b977ac446043abcb6b8958c04a1004c91d7342e2870761b21af95"
+	methodHash := common.HexToHash("0xe57e5af44e0b977ac446043abcb6b8958c04a1004c91d7342e2870761b21af95")
+	topics := make([]common.Hash, 3)
+	topics[0] = methodHash
+	topics[1] = sponsor.Hash()
+	topics[2] = txSender.Hash()
+	//data means the sponsor amount in MetaTxSponsor EVENT.
+	d := common.HexToHash(common.Bytes2Hex(actualSponsorAmount.Bytes())).Bytes()
+	st.evm.StateDB.AddLog(&types.Log{
+		Address: LEGACY_ERC20_MNT,
+		Topics:  topics,
+		Data:    d,
+		// This is a non-consensus field, but assigned here because
+		// core/state doesn't know the current block number.
+		BlockNumber: st.evm.Context.BlockNumber.Uint64(),
+	})
 }

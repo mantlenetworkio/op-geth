@@ -25,6 +25,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core"
@@ -38,6 +39,7 @@ import (
 	"github.com/ethereum/go-ethereum/eth/tracers"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
 )
@@ -46,6 +48,7 @@ import (
 type EthAPIBackend struct {
 	extRPCEnabled       bool
 	allowUnprotectedTxs bool
+	disableTxPool       bool
 	eth                 *Ethereum
 	gpo                 *gasprice.Oracle
 }
@@ -250,7 +253,7 @@ func (b *EthAPIBackend) GetEVM(ctx context.Context, state *state.StateDB, header
 	if blockCtx != nil {
 		context = *blockCtx
 	} else {
-		context = core.NewEVMBlockContext(header, b.eth.BlockChain(), nil)
+		context = core.NewEVMBlockContext(header, b.eth.BlockChain(), nil, b.eth.blockchain.Config(), state)
 	}
 	return vm.NewEVM(context, state, b.ChainConfig(), *vmConfig)
 }
@@ -272,20 +275,39 @@ func (b *EthAPIBackend) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscri
 }
 
 func (b *EthAPIBackend) SendTx(ctx context.Context, signedTx *types.Transaction) error {
+	if b.ChainConfig().IsOptimism() && signedTx.Type() == types.BlobTxType {
+		return types.ErrTxTypeNotSupported
+	}
+
 	locals := b.eth.localTxTracker
 	if locals != nil {
 		if err := locals.Track(signedTx); err != nil {
 			return err
 		}
 	}
-	// No error will be returned to user if the transaction fails stateful
-	// validation (e.g., no available slot), as the locally submitted transactions
-	// may be resubmitted later via the local tracker.
-	err := b.eth.txPool.Add([]*types.Transaction{signedTx}, false)[0]
-	if err != nil && locals == nil {
-		return err
+
+	if b.eth.seqRPCService != nil {
+		data, err := signedTx.MarshalBinary()
+		if err != nil {
+			return err
+		}
+		if err := b.eth.seqRPCService.CallContext(ctx, nil, "eth_sendRawTransaction", hexutil.Encode(data)); err != nil {
+			return err
+		}
+		if b.disableTxPool {
+			return nil
+		}
+		// Retain tx in local tx pool after forwarding, for local RPC usage.
+		if err := b.eth.txPool.Add([]*types.Transaction{signedTx}, false)[0]; err != nil {
+			log.Warn("successfully sent tx to sequencer, but failed to persist in local tx pool", "err", err, "tx", signedTx.Hash())
+		}
+		return nil
 	}
-	return nil
+	if b.disableTxPool {
+		return nil
+	}
+
+	return b.eth.txPool.Add([]*types.Transaction{signedTx}, false)[0]
 }
 
 func (b *EthAPIBackend) GetPoolTransactions() (types.Transactions, error) {
@@ -360,7 +382,7 @@ func (b *EthAPIBackend) SyncProgress() ethereum.SyncProgress {
 }
 
 func (b *EthAPIBackend) SuggestGasTipCap(ctx context.Context) (*big.Int, error) {
-	return b.gpo.SuggestTipCap(ctx)
+	return big.NewInt(0), nil
 }
 
 func (b *EthAPIBackend) FeeHistory(ctx context.Context, blockCount uint64, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (firstBlock *big.Int, reward [][]*big.Int, baseFee []*big.Int, gasUsedRatio []float64, baseFeePerBlobGas []*big.Int, blobGasUsedRatio []float64, err error) {
@@ -427,4 +449,12 @@ func (b *EthAPIBackend) StateAtBlock(ctx context.Context, block *types.Block, re
 
 func (b *EthAPIBackend) StateAtTransaction(ctx context.Context, block *types.Block, txIndex int, reexec uint64) (*types.Transaction, vm.BlockContext, *state.StateDB, tracers.StateReleaseFunc, error) {
 	return b.eth.stateAtTransaction(ctx, block, txIndex, reexec)
+}
+
+func (b *EthAPIBackend) HistoricalRPCService() *rpc.Client {
+	return b.eth.historicalRPCService
+}
+
+func (b *EthAPIBackend) Genesis() *types.Block {
+	return b.eth.blockchain.Genesis()
 }

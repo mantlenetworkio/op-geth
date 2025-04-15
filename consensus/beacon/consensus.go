@@ -470,6 +470,10 @@ func (beacon *Beacon) InnerEngine() consensus.Engine {
 	return beacon.ethone
 }
 
+func (beacon *Beacon) SwapInner(inner consensus.Engine) {
+	beacon.ethone = inner
+}
+
 // SetThreads updates the mining threads. Delegate the call
 // to the eth1 engine if it's threaded.
 func (beacon *Beacon) SetThreads(threads int) {

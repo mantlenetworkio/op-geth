@@ -18,7 +18,6 @@ package eip1559
 
 import (
 	"errors"
-	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -36,19 +35,17 @@ func VerifyEIP1559Header(config *params.ChainConfig, parent, header *types.Heade
 	if !config.IsLondon(parent.Number) {
 		parentGasLimit = parent.GasLimit * config.ElasticityMultiplier()
 	}
-	if err := misc.VerifyGaslimit(parentGasLimit, header.GasLimit); err != nil {
-		return err
+	if config.Optimism == nil { // gasLimit can adjust instantly in optimism
+		if err := misc.VerifyGaslimit(parentGasLimit, header.GasLimit); err != nil {
+			return err
+		}
 	}
+
 	// Verify the header is not malformed
 	if header.BaseFee == nil {
 		return errors.New("header is missing baseFee")
 	}
-	// Verify the baseFee is correct based on the parent header.
-	expectedBaseFee := CalcBaseFee(config, parent)
-	if header.BaseFee.Cmp(expectedBaseFee) != 0 {
-		return fmt.Errorf("invalid baseFee: have %s, want %s, parentBaseFee %s, parentGasUsed %d",
-			header.BaseFee, expectedBaseFee, parent.BaseFee, parent.GasUsed)
-	}
+
 	return nil
 }
 
@@ -57,6 +54,10 @@ func CalcBaseFee(config *params.ChainConfig, parent *types.Header) *big.Int {
 	// If the current block is the first EIP-1559 block, return the InitialBaseFee.
 	if !config.IsLondon(parent.Number) {
 		return new(big.Int).SetUint64(params.InitialBaseFee)
+	}
+
+	if config.IsMantleBaseFee(parent.Time) {
+		return new(big.Int).Set(parent.BaseFee)
 	}
 
 	parentGasTarget := parent.GasLimit / config.ElasticityMultiplier()

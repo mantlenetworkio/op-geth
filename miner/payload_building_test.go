@@ -156,6 +156,7 @@ func TestBuildPayload(t *testing.T) {
 		Timestamp:    timestamp,
 		Random:       common.Hash{},
 		FeeRecipient: recipient,
+		BaseFee:      big.NewInt(1e9),
 	}
 	payload, err := w.buildPayload(args, false)
 	if err != nil {

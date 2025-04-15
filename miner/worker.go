@@ -17,8 +17,10 @@
 package miner
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/eth/tracers"
 	"math/big"
 	"sync/atomic"
 	"time"
@@ -91,6 +93,10 @@ type generateParams struct {
 	withdrawals types.Withdrawals // List of withdrawals to include in block (shanghai field)
 	beaconRoot  *common.Hash      // The beacon root (cancun field).
 	noTxs       bool              // Flag whether an empty block without any transaction is expected
+
+	txs      []*types.Transaction // Optimism addition: txs forced into the block via engine API
+	gasLimit *uint64              // Optimism addition: override gas limit of the block to build
+	baseFee  *big.Int             // Optimism addition: override base fee of the block to build
 }
 
 // generateWork generates a sealing block based on the given parameters.
@@ -99,6 +105,31 @@ func (miner *Miner) generateWork(params *generateParams, witness bool) *newPaylo
 	if err != nil {
 		return &newPayloadResult{err: err}
 	}
+
+	if work.gasPool == nil {
+		gasLimit := work.header.GasLimit
+
+		// If we're building blocks with mempool transactions, we need to ensure that the
+		// gas limit is not higher than the effective gas limit. We must still accept any
+		// explicitly selected transactions with gas usage up to the block header's limit.
+		if !params.noTxs {
+			effectiveGasLimit := miner.config.EffectiveGasCeil
+			if effectiveGasLimit != 0 && effectiveGasLimit < gasLimit {
+				gasLimit = effectiveGasLimit
+			}
+		}
+		work.gasPool = new(core.GasPool).AddGas(gasLimit)
+	}
+
+	for _, tx := range params.txs {
+		from, _ := types.Sender(work.signer, tx)
+		work.state.SetTxContext(tx.Hash(), work.tcount)
+		err = miner.commitTransaction(work, tx)
+		if err != nil {
+			return &newPayloadResult{err: fmt.Errorf("failed to force-include tx: %s type: %d sender: %s nonce: %d, err: %w", tx.Hash(), tx.Type(), from, tx.Nonce(), err)}
+		}
+	}
+
 	if !params.noTxs {
 		interrupt := new(atomic.Int32)
 		timer := time.AfterFunc(miner.config.Recommit, func() {
@@ -185,7 +216,7 @@ func (miner *Miner) prepareWork(genParams *generateParams, witness bool) (*envir
 		Coinbase:   genParams.coinbase,
 	}
 	// Set the extra field.
-	if len(miner.config.ExtraData) != 0 {
+	if len(miner.config.ExtraData) != 0 && miner.chainConfig.Optimism == nil {
 		header.Extra = miner.config.ExtraData
 	}
 	// Set the randomness field from the beacon chain if it's available.
@@ -195,10 +226,25 @@ func (miner *Miner) prepareWork(genParams *generateParams, witness bool) (*envir
 	// Set baseFee and GasLimit if we are on an EIP-1559 chain
 	if miner.chainConfig.IsLondon(header.Number) {
 		header.BaseFee = eip1559.CalcBaseFee(miner.chainConfig, parent)
+		if miner.chainConfig.IsMantleBaseFee(header.Time) {
+			header.BaseFee = genParams.baseFee
+		}
+		if genParams.baseFee == nil {
+			header.BaseFee = eip1559.CalcBaseFee(miner.chainConfig, parent)
+			log.Debug("header base fee from eip1559 calculator", "baseFee", header.BaseFee.String())
+		} else {
+			log.Debug("header base fee from catalyst generation parameters", "baseFee", header.BaseFee.String())
+		}
 		if !miner.chainConfig.IsLondon(parent.Number) {
 			parentGasLimit := parent.GasLimit * miner.chainConfig.ElasticityMultiplier()
 			header.GasLimit = core.CalcGasLimit(parentGasLimit, miner.config.GasCeil)
 		}
+	}
+	if genParams.gasLimit != nil { // override gas limit if specified
+		header.GasLimit = *genParams.gasLimit
+	} else if miner.chain.Config().Optimism != nil && miner.config.GasCeil != 0 {
+		// configure the gas limit of pending blocks with the miner gas limit config when using optimism
+		header.GasLimit = miner.config.GasCeil
 	}
 	// Run the consensus preparation with the default or customized consensus engine.
 	// Note that the `header.Time` may be changed.
@@ -237,9 +283,19 @@ func (miner *Miner) prepareWork(genParams *generateParams, witness bool) (*envir
 func (miner *Miner) makeEnv(parent *types.Header, header *types.Header, coinbase common.Address, witness bool) (*environment, error) {
 	// Retrieve the parent state to execute on top.
 	state, err := miner.chain.StateAt(parent.Root)
+	if err != nil && miner.chainConfig.Optimism != nil { // Allow the miner to reorg its own chain arbitrarily deep
+		if historicalBackend, ok := miner.backend.(BackendWithHistoricalState); ok {
+			var release tracers.StateReleaseFunc
+			parentBlock := miner.backend.BlockChain().GetBlockByHash(parent.Hash())
+			state, release, err = historicalBackend.StateAtBlock(context.Background(), parentBlock, ^uint64(0), nil, false, false)
+			state = state.Copy()
+			release()
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
+
 	if witness {
 		bundle, err := stateless.NewWitness(header, miner.chain)
 		if err != nil {
@@ -254,7 +310,7 @@ func (miner *Miner) makeEnv(parent *types.Header, header *types.Header, coinbase
 		coinbase: coinbase,
 		header:   header,
 		witness:  state.Witness(),
-		evm:      vm.NewEVM(core.NewEVMBlockContext(header, miner.chain, &coinbase), state, miner.chainConfig, vm.Config{}),
+		evm:      vm.NewEVM(core.NewEVMBlockContext(header, miner.chain, &coinbase, miner.chainConfig, state), state, miner.chainConfig, vm.Config{}),
 	}, nil
 }
 
