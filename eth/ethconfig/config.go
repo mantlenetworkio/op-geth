@@ -19,6 +19,7 @@ package ethconfig
 
 import (
 	"fmt"
+	"math/big"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -64,10 +65,10 @@ var Defaults = Config{
 	Miner:              miner.DefaultConfig,
 	TxPool:             legacypool.DefaultConfig,
 	BlobPool:           blobpool.DefaultConfig,
-	RPCGasCap:          50000000,
+	RPCGasCap:          core.DefaultMantleBlockGasLimit,
 	RPCEVMTimeout:      5 * time.Second,
 	GPO:                FullNodeGPO,
-	RPCTxFeeCap:        1, // 1 ether
+	RPCTxFeeCap:        5000, // 5000 mnt
 }
 
 //go:generate go run github.com/fjl/gencodec -type Config -formats toml -out gen_config.go
@@ -161,6 +162,16 @@ type Config struct {
 
 	// OverrideVerkle (TODO: remove after the fork)
 	OverrideVerkle *uint64 `toml:",omitempty"`
+
+	OverrideOptimismBedrock  *big.Int
+	OverrideOptimismRegolith *uint64 `toml:",omitempty"`
+	OverrideOptimism         *bool
+
+	RollupSequencerHTTP          string
+	RollupHistoricalRPC          string
+	RollupHistoricalRPCTimeout   time.Duration
+	RollupDisableTxPoolGossip    bool
+	RollupDisableTxPoolAdmission bool
 }
 
 // CreateConsensusEngine creates a consensus engine for the given chain config.

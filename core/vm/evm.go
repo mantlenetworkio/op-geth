@@ -55,6 +55,8 @@ type BlockContext struct {
 	Transfer TransferFunc
 	// GetHash returns the hash corresponding to n
 	GetHash GetHashFunc
+	// L1CostFunc returns the L1 cost of the rollup message, the function may be nil, or return nil
+	L1CostFunc types.L1CostFunc
 
 	// Block information
 	Coinbase    common.Address // Provides information for COINBASE

@@ -155,3 +155,22 @@ func TestTimestampCompatError(t *testing.T) {
 	require.Equal(t, newTimestampCompatError(errWhat, newUint64(0), newUint64(1681338455)).Error(),
 		"mismatching Shanghai fork timestamp in database (have timestamp 0, want timestamp 1681338455, rewindto timestamp 0)")
 }
+
+func TestConfigRulesRegolith(t *testing.T) {
+	c := &ChainConfig{
+		RegolithTime: newUint64(500),
+		Optimism:     &OptimismConfig{},
+	}
+	var stamp uint64
+	if r := c.Rules(big.NewInt(0), true, stamp); r.IsOptimismRegolith {
+		t.Errorf("expected %v to not be regolith", stamp)
+	}
+	stamp = 500
+	if r := c.Rules(big.NewInt(0), true, stamp); !r.IsOptimismRegolith {
+		t.Errorf("expected %v to be regolith", stamp)
+	}
+	stamp = math.MaxInt64
+	if r := c.Rules(big.NewInt(0), true, stamp); !r.IsOptimismRegolith {
+		t.Errorf("expected %v to be regolith", stamp)
+	}
+}

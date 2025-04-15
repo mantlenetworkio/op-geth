@@ -30,6 +30,7 @@
 /geth*.zip.sig
 /geth*.zip.asc
 
+vendor
 
 # travis
 profile.tmp

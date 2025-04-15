@@ -67,11 +67,14 @@ type testBlockChain struct {
 	gasLimit      atomic.Uint64
 	statedb       *state.StateDB
 	chainHeadFeed *event.Feed
+	basefee       *big.Int
 }
 
 func newTestBlockChain(config *params.ChainConfig, gasLimit uint64, statedb *state.StateDB, chainHeadFeed *event.Feed) *testBlockChain {
 	bc := testBlockChain{config: config, statedb: statedb, chainHeadFeed: new(event.Feed)}
 	bc.gasLimit.Store(gasLimit)
+	// Set a basefee of 1, avoiding nil pointer dereferences
+	bc.basefee = big.NewInt(1)
 	return &bc
 }
 
@@ -84,6 +87,7 @@ func (bc *testBlockChain) CurrentBlock() *types.Header {
 		Number:     new(big.Int),
 		Difficulty: common.Big0,
 		GasLimit:   bc.gasLimit.Load(),
+		BaseFee:    bc.basefee,
 	}
 }
 
@@ -391,6 +395,9 @@ func TestInvalidTransactions(t *testing.T) {
 
 	tx := transaction(0, 100, key)
 	from, _ := deriveSender(tx)
+
+	// set fake token ratio to 1
+	pool.currentState.SetState(types.GasOracleAddr, types.TokenRatioSlot, common.BigToHash(big.NewInt(1)))
 
 	// Intrinsic gas too low
 	testAddBalance(pool, from, big.NewInt(1))

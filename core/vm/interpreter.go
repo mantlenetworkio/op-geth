@@ -113,6 +113,8 @@ func NewEVMInterpreter(evm *EVM) *EVMInterpreter {
 		table = &pragueInstructionSet
 	case evm.chainRules.IsCancun:
 		table = &cancunInstructionSet
+	case evm.chainRules.IsMantleBaseFee:
+		table = &push0InstructionSet
 	case evm.chainRules.IsShanghai:
 		table = &shanghaiInstructionSet
 	case evm.chainRules.IsMerge:

@@ -260,6 +260,11 @@ func (e *GenesisMismatchError) Error() string {
 type ChainOverrides struct {
 	OverridePrague *uint64
 	OverrideVerkle *uint64
+
+	// optimism
+	OverrideOptimismBedrock  *big.Int
+	OverrideOptimismRegolith *uint64
+	OverrideOptimism         *bool
 }
 
 // apply applies the chain overrides on the supplied chain config.
@@ -273,6 +278,40 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 	if o.OverrideVerkle != nil {
 		cfg.VerkleTime = o.OverrideVerkle
 	}
+
+	// optimism
+	if o.OverrideOptimismBedrock != nil {
+		cfg.BedrockBlock = o.OverrideOptimismBedrock
+	}
+	if o.OverrideOptimismRegolith != nil {
+		cfg.RegolithTime = o.OverrideOptimismRegolith
+	}
+	if o.OverrideOptimism != nil {
+		if *o.OverrideOptimism {
+			cfg.Optimism = &params.OptimismConfig{
+				EIP1559Elasticity:  10,
+				EIP1559Denominator: 50,
+			}
+		}
+	}
+
+	// mantle
+	mantleUpgradeChainConfig := params.GetUpgradeConfigForMantle(cfg.ChainID)
+	if mantleUpgradeChainConfig != nil {
+		cfg.BaseFeeTime = mantleUpgradeChainConfig.BaseFeeTime
+		cfg.BVMETHMintUpgradeTime = mantleUpgradeChainConfig.BVMETHMintUpgradeTime
+		cfg.MetaTxV2UpgradeTime = mantleUpgradeChainConfig.MetaTxV2UpgradeTime
+		cfg.MetaTxV3UpgradeTime = mantleUpgradeChainConfig.MetaTxV3UpgradeTime
+		cfg.ProxyOwnerUpgradeTime = mantleUpgradeChainConfig.ProxyOwnerUpgradeTime
+		cfg.MantleEverestTime = mantleUpgradeChainConfig.MantleEverestTime
+		cfg.MantleSkadiTime = mantleUpgradeChainConfig.MantleSkadiTime
+
+		// active standard EVM version (shanghai/cancun/prague)  in mantle skadi time
+		cfg.ShanghaiTime = mantleUpgradeChainConfig.MantleSkadiTime
+		cfg.CancunTime = mantleUpgradeChainConfig.MantleSkadiTime
+		cfg.PragueTime = mantleUpgradeChainConfig.MantleSkadiTime
+	}
+
 	return cfg.CheckConfigForkOrder()
 }
 

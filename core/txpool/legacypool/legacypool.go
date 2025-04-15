@@ -142,6 +142,10 @@ type Config struct {
 	Journal   string           // Journal of local transactions to survive node restarts
 	Rejournal time.Duration    // Time interval to regenerate the local transaction journal
 
+	// OP-Stack: JournalRemote controls whether journaling includes remote transactions or not.
+	// When true, all transactions loaded from the journal are treated as remote.
+	JournalRemote bool
+
 	PriceLimit uint64 // Minimum gas price to enforce for acceptance into the pool
 	PriceBump  uint64 // Minimum price bump percentage to replace an already existing transaction (nonce)
 
@@ -151,6 +155,8 @@ type Config struct {
 	GlobalQueue  uint64 // Maximum number of non-executable transaction slots for all accounts
 
 	Lifetime time.Duration // Maximum amount of time non-executable transaction are queued
+
+	EffectiveGasCeil uint64 // OP-Stack: if non-zero, a gas ceiling to enforce independent of the header's gaslimit value
 }
 
 // DefaultConfig contains the default configurations for the transaction pool.
@@ -158,7 +164,7 @@ var DefaultConfig = Config{
 	Journal:   "transactions.rlp",
 	Rejournal: time.Hour,
 
-	PriceLimit: 1,
+	PriceLimit: 0,
 	PriceBump:  10,
 
 	AccountSlots: 16,
@@ -173,7 +179,7 @@ var DefaultConfig = Config{
 // unreasonable or unworkable.
 func (config *Config) sanitize() Config {
 	conf := *config
-	if conf.PriceLimit < 1 {
+	if conf.PriceLimit < 0 {
 		log.Warn("Sanitizing invalid txpool price limit", "provided", conf.PriceLimit, "updated", DefaultConfig.PriceLimit)
 		conf.PriceLimit = DefaultConfig.PriceLimit
 	}
@@ -254,6 +260,8 @@ type LegacyPool struct {
 	initDoneCh      chan struct{}  // is closed once the pool is initialized (for tests)
 
 	changesSinceReorg int // A counter for how many drops we've performed in-between reorg.
+
+	l1CostFn txpool.L1CostFunc // To apply L1 costs as rollup, optional field, may be nil.
 }
 
 type txpoolResetRequest struct {
@@ -571,8 +579,9 @@ func (pool *LegacyPool) ValidateTxBasics(tx *types.Transaction) error {
 			1<<types.AccessListTxType |
 			1<<types.DynamicFeeTxType |
 			1<<types.SetCodeTxType,
-		MaxSize: txMaxSize,
-		MinTip:  pool.gasTip.Load().ToBig(),
+		MaxSize:          txMaxSize,
+		MinTip:           pool.gasTip.Load().ToBig(),
+		EffectiveGasCeil: pool.config.EffectiveGasCeil,
 	}
 	return txpool.ValidateTransaction(tx, pool.currentHead.Load(), pool.signer, opts)
 }
@@ -581,7 +590,8 @@ func (pool *LegacyPool) ValidateTxBasics(tx *types.Transaction) error {
 // rules and adheres to some heuristic limits of the local node (price and size).
 func (pool *LegacyPool) validateTx(tx *types.Transaction) error {
 	opts := &txpool.ValidationOptionsWithState{
-		State: pool.currentState,
+		State:  pool.currentState,
+		Config: pool.chainconfig,
 
 		FirstNonceGap:    nil, // Pool allows arbitrary arrival order, don't invalidate nonce gaps
 		UsedAndLeftSlots: nil, // Pool has own mechanism to limit the number of transactions
@@ -594,13 +604,20 @@ func (pool *LegacyPool) validateTx(tx *types.Transaction) error {
 		ExistingCost: func(addr common.Address, nonce uint64) *big.Int {
 			if list := pool.pending[addr]; list != nil {
 				if tx := list.txs.Get(nonce); tx != nil {
-					return tx.Cost()
+					cost := tx.Cost()
+					if pool.l1CostFn != nil {
+						if l1Cost := pool.l1CostFn(tx.RollupDataGas(), tx.IsDepositTx(), tx.To()); l1Cost != nil { // add rollup cost
+							cost = cost.Add(cost, l1Cost)
+						}
+					}
+					return cost
 				}
 			}
 			return nil
 		},
+		L1CostFn: pool.l1CostFn,
 	}
-	if err := txpool.ValidateTransactionWithState(tx, pool.signer, opts); err != nil {
+	if err := txpool.ValidateTransactionWithState(tx, pool.currentHead.Load(), pool.signer, opts); err != nil {
 		return err
 	}
 	return pool.validateAuth(tx)
@@ -1397,6 +1414,16 @@ func (pool *LegacyPool) reset(oldHead, newHead *types.Header) {
 						return
 					}
 				}
+				// Do not insert deposit txs back into the pool
+				// (validateTx would still catch it if not filtered, but no need to re-inject in the first place).
+				j := 0
+				for _, tx := range discarded {
+					if tx.Type() != types.DepositTxType {
+						discarded[j] = tx
+						j++
+					}
+				}
+				discarded = discarded[:j]
 				lost := make([]*types.Transaction, 0, len(discarded))
 				for _, tx := range types.TxDifference(discarded, included) {
 					if pool.Filter(tx) {
@@ -1420,6 +1447,12 @@ func (pool *LegacyPool) reset(oldHead, newHead *types.Header) {
 	pool.currentState = statedb
 	pool.pendingNonces = newNoncer(statedb)
 
+	if costFn := types.NewL1CostFunc(pool.chainconfig, statedb); costFn != nil {
+		pool.l1CostFn = func(dataGas types.RollupGasData, isDepositTx bool, to *common.Address) *big.Int {
+			return costFn(newHead.Number.Uint64(), newHead.Time, dataGas, isDepositTx, to)
+		}
+	}
+
 	// Inject any transactions discarded due to reorgs
 	log.Debug("Reinjecting stale transactions", "count", len(reinject))
 	core.SenderCacher().Recover(pool.signer, reinject)
@@ -1434,7 +1467,7 @@ func (pool *LegacyPool) promoteExecutables(accounts []common.Address) []*types.T
 	var promoted []*types.Transaction
 
 	// Iterate over all accounts and promote any executable transactions
-	gasLimit := pool.currentHead.Load().GasLimit
+	gasLimit := txpool.EffectiveGasLimit(pool.chainconfig, pool.currentHead.Load().GasLimit, pool.config.EffectiveGasCeil)
 	for _, addr := range accounts {
 		list := pool.queue[addr]
 		if list == nil {
@@ -1623,7 +1656,7 @@ func (pool *LegacyPool) truncateQueue() {
 // to trigger a re-heap is this function
 func (pool *LegacyPool) demoteUnexecutables() {
 	// Iterate over all accounts and demote any non-executable transactions
-	gasLimit := pool.currentHead.Load().GasLimit
+	gasLimit := txpool.EffectiveGasLimit(pool.chainconfig, pool.currentHead.Load().GasLimit, pool.config.EffectiveGasCeil)
 	for addr, list := range pool.pending {
 		nonce := pool.currentState.GetNonce(addr)
 
