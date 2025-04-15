@@ -1296,7 +1296,7 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) {
 		}
 
 		// send preconf request event
-		result := make(chan *core.PreconfResponse)
+		result := make(chan *core.PreconfResponse, 1) // buffer 1 to avoid worker blocking
 		pool.preconfTxRequestFeed.Send(core.NewPreconfTxRequest{
 			Tx:            tx,
 			PreconfResult: result,
