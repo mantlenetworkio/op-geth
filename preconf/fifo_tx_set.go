@@ -174,5 +174,5 @@ func (s *FIFOTxSet) Forward(addr common.Address, nonce uint64) {
 	}
 	s.txQueue = s.txQueue[:i]
 
-	log.Info("preconf forward", "duration", time.Since(now))
+	log.Debug("preconf forward", "duration", time.Since(now))
 }

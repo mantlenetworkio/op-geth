@@ -1303,7 +1303,7 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) {
 				close(result)
 			},
 		})
-		log.Info("txpool sent preconf tx request", "tx", txHash)
+		log.Debug("txpool sent preconf tx request", "tx", txHash)
 
 		// avoid race condition
 		tx := tx

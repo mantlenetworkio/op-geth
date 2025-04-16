@@ -356,7 +356,7 @@ func (c *preconfChecker) PausePreconf() chan<- []*types.Transaction {
 	}
 	c.unSealedPreconfTxsCh = make(chan []*types.Transaction, 1) // buffer 1 to avoid worker block
 
-	log.Info("pause preconf")
+	log.Debug("pause preconf")
 	return c.unSealedPreconfTxsCh
 }
 
@@ -364,7 +364,7 @@ func (c *preconfChecker) UnpausePreconf(env *environment, preconfReady func()) {
 	defer c.mu.Unlock()
 	c.env = env
 	c.envUpdatedAt = time.Now()
-	log.Info("unpause preconf", "env.header.Number", env.header.Number.Int64(), "env.gasPool", env.gasPool.Gas(), "envUpdatedAt", c.envUpdatedAt)
+	log.Debug("unpause preconf", "env.header.Number", env.header.Number.Int64(), "env.gasPool", env.gasPool.Gas(), "envUpdatedAt", c.envUpdatedAt)
 	// reset env
 	c.env.header.Number = new(big.Int).Add(c.env.header.Number, common.Big1)
 	c.env.gasPool.SetGas(c.env.header.GasLimit)
