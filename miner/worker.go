@@ -661,10 +661,11 @@ func (w *worker) mainLoop() {
 				// Not fatal, just warn to the log
 				log.Warn("preconf failed", "tx", ev.Tx.Hash(), "err", err)
 			}
+			log.Trace("worker preconf tx executed", "tx", ev.Tx.Hash(), "duration", time.Since(now))
 
 			select {
 			case ev.PreconfResult <- &core.PreconfResponse{Receipt: receipt, Err: err}:
-				log.Info("worker sent preconf tx response", "tx", ev.Tx.Hash(), "cost", time.Since(now))
+				log.Info("worker sent preconf tx response", "tx", ev.Tx.Hash(), "duration", time.Since(now))
 			case <-time.After(time.Second):
 				log.Warn("preconf tx response timeout, preconf result is closed?", "tx", ev.Tx.Hash())
 			}

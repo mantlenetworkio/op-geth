@@ -48,6 +48,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/preconf"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
 )
@@ -2161,6 +2162,8 @@ func (s *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil.B
 // SendRawTransactionWithPreconf will add the signed preconf transaction to the transaction pool and return the preconf result.
 // The sender is responsible for signing the transaction and using the correct nonce.
 func (s *TransactionAPI) SendRawTransactionWithPreconf(ctx context.Context, input hexutil.Bytes) (*core.NewPreconfTxEvent, error) {
+	defer preconf.MetricsPreconfAPIHandleCost(time.Now())
+
 	tx := new(types.Transaction)
 	if err := tx.UnmarshalBinary(input); err != nil {
 		return nil, err
@@ -2178,6 +2181,7 @@ func (s *TransactionAPI) SendRawTransactionWithPreconf(ctx context.Context, inpu
 	}
 
 	now := time.Now()
+	log.Trace("ethapi sendRawTransactionWithPreconf", "tx", tx.Hash())
 
 	// Send the transaction with preconf
 	result, err := s.b.SendTxWithPreconf(ctx, tx)
@@ -2196,7 +2200,7 @@ func (s *TransactionAPI) SendRawTransactionWithPreconf(ctx context.Context, inpu
 		addr := crypto.CreateAddress(from, tx.Nonce())
 		log.Info("Submitted preconf contract creation", "hash", tx.Hash().Hex(), "from", from, "nonce", tx.Nonce(), "contract", addr.Hex(), "value", tx.Value())
 	} else {
-		log.Info("Submitted preconf transaction", "hash", tx.Hash().Hex(), "from", from, "nonce", tx.Nonce(), "recipient", tx.To(), "value", tx.Value(), "cost", time.Since(now))
+		log.Info("Submitted preconf transaction", "hash", tx.Hash().Hex(), "from", from, "nonce", tx.Nonce(), "recipient", tx.To(), "value", tx.Value(), "duration", time.Since(now))
 	}
 
 	return result, nil

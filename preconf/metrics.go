@@ -28,8 +28,11 @@ var (
 	PreconfTxFailureMeter = metrics.NewRegisteredMeter("preconf/tx/failure", nil)
 
 	// Pre-confirm processing time
-	PreconfTxPoolHandleTimer = metrics.NewRegisteredTimer("preconf/txpool/handle", nil)
-	PreconfMinerExecuteTimer = metrics.NewRegisteredTimer("preconf/execute", nil)
+	PreconfTxPoolHandleTimer  = metrics.NewRegisteredTimer("preconf/txpool/handle", nil)
+	PreconfTxPoolForwardTimer = metrics.NewRegisteredTimer("preconf/txpool/forward", nil)
+	PreconfTxPoolFilterTimer  = metrics.NewRegisteredTimer("preconf/txpool/filter", nil)
+	PreconfMinerExecuteTimer  = metrics.NewRegisteredTimer("preconf/execute", nil)
+	PreconfAPIHandleTimer     = metrics.NewRegisteredTimer("preconf/api/handle", nil)
 )
 
 // OpNode status update
@@ -67,8 +70,20 @@ func MetricsPreconfTxPoolHandleCost(start time.Time) {
 	PreconfTxPoolHandleTimer.Update(time.Since(start))
 }
 
+func MetricsPreconfTxPoolForwardCost(start time.Time) {
+	PreconfTxPoolForwardTimer.Update(time.Since(start))
+}
+
+func MetricsPreconfTxPoolFilterCost(start time.Time) {
+	PreconfTxPoolFilterTimer.Update(time.Since(start))
+}
+
 func MetricsPreconfExecuteCost(start time.Time) {
 	PreconfMinerExecuteTimer.Update(time.Since(start))
+}
+
+func MetricsPreconfAPIHandleCost(start time.Time) {
+	PreconfAPIHandleTimer.Update(time.Since(start))
 }
 
 // Pending pre-confirm transaction counter
