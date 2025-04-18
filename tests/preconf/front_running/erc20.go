@@ -225,6 +225,9 @@ func erc20Test(endpoint string) {
 				log.Fatalf("failed to transfer: %v", err)
 			}
 		}
+
+		// wait for 2 minute to make sure all the txs are in the txpool
+		time.Sleep(2 * time.Minute)
 		for _, tx := range addr3Txs {
 			ctx, cancel := context.WithTimeout(ctx, config.WaitTime)
 			defer cancel()

@@ -2557,6 +2557,10 @@ func TestExtractPreconfTxsFromPending(t *testing.T) {
 	tx4 := types.NewTransaction(0, addr3, big.NewInt(400), 21000, big.NewInt(1), nil)
 	tx4, _ = types.SignTx(tx4, signer, key3)
 
+	from1, _ := types.Sender(signer, tx1)
+	from2, _ := types.Sender(signer, tx2)
+	from3, _ := types.Sender(signer, tx3)
+	from4, _ := types.Sender(signer, tx4)
 	// Create a test TxPool
 	createTxPool := func() *TxPool {
 		pool := &TxPool{
@@ -2570,7 +2574,7 @@ func TestExtractPreconfTxsFromPending(t *testing.T) {
 			preconfTxs: preconf.NewFIFOTxSet(),
 		}
 		// Add pre-confirmed transaction
-		pool.preconfTxs.Add(tx1)
+		pool.preconfTxs.Add(from1, tx1)
 		return pool
 	}
 
@@ -2636,9 +2640,9 @@ func TestExtractPreconfTxsFromPending(t *testing.T) {
 		pool.config.Preconf.AllPreconfs = true
 
 		// Add all transactions to the pre-confirmed set
-		pool.preconfTxs.Add(tx2)
-		pool.preconfTxs.Add(tx3)
-		pool.preconfTxs.Add(tx4)
+		pool.preconfTxs.Add(from2, tx2)
+		pool.preconfTxs.Add(from3, tx3)
+		pool.preconfTxs.Add(from4, tx4)
 
 		pending := make(map[common.Address]types.Transactions)
 		pending[addr1] = types.Transactions{tx1, tx2}

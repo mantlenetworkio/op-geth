@@ -198,16 +198,14 @@ func sendRawTransactionWithPreconf(
 	err = client.SendTransactionWithPreconf(ctx, signedTx, &result)
 	endTime := float64(time.Now().UnixNano()) / 1e6
 	responseTime := endTime - startTime
+	txHash := signedTx.Hash()
 
 	if err != nil {
-		log.Printf("Error sending transaction %d: %v, txHash: %s\n", iteration, err, tx.Hash().Hex())
-		return TxResult{ResponseTime: responseTime, StartTime: startTime, EndTime: endTime, Tx: signedTx, TxHash: tx.Hash()}
+		log.Fatalf("Error sending transaction %d: %v, txHash: %s\n", iteration, err, txHash.Hex())
 	}
 
-	txHash := signedTx.Hash()
 	if result.TxHash != txHash {
-		log.Printf("Transaction hash mismatch: %v != %v\n", result.TxHash, txHash)
-		panic("Transaction hash mismatch")
+		log.Fatalf("Transaction hash mismatch: %v != %v\n", result.TxHash, txHash)
 	}
 
 	if predictedL2BlockNumber != result.PredictedL2BlockNumber {
@@ -219,9 +217,9 @@ func sendRawTransactionWithPreconf(
 		if result.Reason == miner.ErrEnvBlockNumberAndEngineSyncTargetBlockNumberDistanceTooLarge.Error() {
 			log.Printf("Transaction %d failed: %s, wait for new preconf tx\n", iteration, result.Reason)
 			time.Sleep(config.WaitTime)
-			return TxResult{ResponseTime: responseTime, StartTime: startTime, EndTime: endTime, Tx: signedTx, TxHash: tx.Hash()}
+			return TxResult{ResponseTime: responseTime, StartTime: startTime, EndTime: endTime, Tx: signedTx, TxHash: txHash}
 		}
-		log.Fatalf("Transaction %d failed: %s\n", iteration, result.Reason)
+		log.Fatalf("Transaction %d failed, txHash: %s, reason: %s\n", iteration, txHash.Hex(), result.Reason)
 	}
 	// log.Printf("preconf txHash: %s, nonce: %d\n", txHash.Hex(), tx.Nonce())
 

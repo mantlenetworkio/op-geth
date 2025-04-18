@@ -17,9 +17,11 @@ func TestFIFOTxSet(t *testing.T) {
 	// Test transactions
 	tx1 := types.NewTransaction(1, common.HexToAddress("0x1"), nil, 0, nil, nil)
 	tx2 := types.NewTransaction(2, common.HexToAddress("0x2"), nil, 0, nil, nil)
+	from1, _ := types.Sender(types.LatestSignerForChainID(common.Big1), tx1)
+	from2, _ := types.Sender(types.LatestSignerForChainID(common.Big1), tx2)
 
 	// Test Add and Contains
-	set.Add(tx1)
+	set.Add(from1, tx1)
 	if !set.Contains(tx1.Hash()) {
 		t.Errorf("Expected tx1 to be in set")
 	}
@@ -29,7 +31,7 @@ func TestFIFOTxSet(t *testing.T) {
 
 	// Test time order
 	time.Sleep(1 * time.Millisecond) // Ensure time difference
-	set.Add(tx2)
+	set.Add(from2, tx2)
 	txs := set.Transactions()
 	if len(txs) != 2 || txs[0].Hash() != tx1.Hash() || txs[1].Hash() != tx2.Hash() {
 		t.Errorf("Transactions not in FIFO order: %v", txs)
@@ -84,9 +86,9 @@ func TestFIFOTxSet_Forward(t *testing.T) {
 		{
 			name: "Remove older nonces",
 			setup: func(s *FIFOTxSet) {
-				s.Add(newTestTx(addr1, 1))
-				s.Add(newTestTx(addr1, 2))
-				s.Add(newTestTx(addr1, 3))
+				s.Add(crypto.PubkeyToAddress(addr1.PublicKey), newTestTx(addr1, 1))
+				s.Add(crypto.PubkeyToAddress(addr1.PublicKey), newTestTx(addr1, 2))
+				s.Add(crypto.PubkeyToAddress(addr1.PublicKey), newTestTx(addr1, 3))
 			},
 			addr:    addr,
 			nonce:   3,
@@ -95,8 +97,8 @@ func TestFIFOTxSet_Forward(t *testing.T) {
 		{
 			name: "No matching address",
 			setup: func(s *FIFOTxSet) {
-				s.Add(newTestTx(addr1, 1))
-				s.Add(newTestTx(addr2, 2))
+				s.Add(crypto.PubkeyToAddress(addr1.PublicKey), newTestTx(addr1, 1))
+				s.Add(crypto.PubkeyToAddress(addr2.PublicKey), newTestTx(addr2, 2))
 			},
 			addr:    common.HexToAddress("0x3"),
 			nonce:   5,
@@ -114,8 +116,8 @@ func TestFIFOTxSet_Forward(t *testing.T) {
 		{
 			name: "Remove all transactions",
 			setup: func(s *FIFOTxSet) {
-				s.Add(newTestTx(addr1, 1))
-				s.Add(newTestTx(addr1, 2))
+				s.Add(crypto.PubkeyToAddress(addr1.PublicKey), newTestTx(addr1, 1))
+				s.Add(crypto.PubkeyToAddress(addr1.PublicKey), newTestTx(addr1, 2))
 			},
 			addr:    addr,
 			nonce:   10,

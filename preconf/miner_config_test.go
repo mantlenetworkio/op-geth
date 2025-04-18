@@ -13,8 +13,13 @@ func TestMinerConfig_String(t *testing.T) {
 		ToleranceBlock:   5,
 	}
 
-	expected := "EnablePreconfChecker: false, OptimismNodeHTTP: http://test-optimism:8545, L1RPCHTTP: http://test-l1:8545, L1DepositAddress: 0x1234567890abcdef1234567890abcdef12345678, ToleranceBlock: 5, MantleToleranceDuration: 10s, EthToleranceDuration: 2m0s, EthToleranceBlock: 8"
+	expected := "EnablePreconfChecker: false, OptimismNodeHTTP: http://test-optimism:8545, L1RPCHTTP: http://test-l1:8545, L1DepositAddress: 0x1234567890abcdef1234567890abcdef12345678, ToleranceBlock: 5, MantleToleranceDuration: 10s, EthToleranceDuration: 2m0s, EthToleranceBlock: 8, PreconfBufferBlock: 0"
 	if got := config.String(); got != expected {
+		t.Errorf("MinerConfig.String() = %v, want %v", got, expected)
+	}
+
+	expected = "EnablePreconfChecker: false, OptimismNodeHTTP: http://localhost:7545, L1RPCHTTP: http://localhost:8545, L1DepositAddress: 0xa513E6E4b8f2a923D98304ec87F64353C4D5C853, ToleranceBlock: 3, MantleToleranceDuration: 6s, EthToleranceDuration: 1m36s, EthToleranceBlock: 6, PreconfBufferBlock: 6"
+	if got := DefaultMinerConfig.String(); got != expected {
 		t.Errorf("MinerConfig.String() = %v, want %v", got, expected)
 	}
 }
