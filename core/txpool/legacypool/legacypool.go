@@ -19,6 +19,7 @@ package legacypool
 
 import (
 	"errors"
+	"fmt"
 	"maps"
 	"math"
 	"math/big"
@@ -451,6 +452,7 @@ func (pool *LegacyPool) SubscribeNewPreconfTxRequestEvent(ch chan<- core.NewPrec
 
 // PendingPreconfTxs retrieves the preconf transactions and the pending transactions.
 func (pool *LegacyPool) PendingPreconfTxs(filter txpool.PendingFilter) ([]*types.Transaction, map[common.Address][]*txpool.LazyTransaction) {
+	defer preconf.MetricsPreconfTxPoolFilterCost(time.Now())
 	// If only blob transactions are requested, this pool is unsuitable as it
 	// contains none, don't even bother.
 	if filter.OnlyBlobTxs {
@@ -489,36 +491,36 @@ func (pool *LegacyPool) extractPreconfTxsFromPending(pending map[common.Address]
 
 	// removes the preconf transaction from the pending map, maintaining the order.
 	preconfTxs := make([]*types.Transaction, 0)
-	for _, preconfTx := range pool.preconfTxs.Transactions() {
-		from, _ := types.Sender(pool.signer, preconfTx)
+	for _, preconfTx := range pool.preconfTxs.TxEntries() {
+		preconfTxHash := preconfTx.Tx.Hash()
 
 		// Get the slice of transactions for the target address
-		txs, exists := pending[from]
+		txs, exists := pending[preconfTx.From]
 
 		// If the transaction isn't in pending map but it's expected to be there,
 		// show the error log.
 		if !exists || len(txs) == 0 {
-			log.Error("Missing transaction in pending map, please report the issue", "hash", preconfTx.Hash())
-			pool.preconfTxs.Remove(preconfTx.Hash()) // remove it prevent log always print
+			log.Error("Missing transaction in pending map, please report the issue", "hash", preconfTxHash)
+			pool.preconfTxs.Remove(preconfTxHash) // remove it prevent log always print
 			continue
 		}
 
 		// Create a new slice to hold the transactions that are not deleted
 		var newTxs []*txpool.LazyTransaction
 		for _, tx := range txs {
-			if tx.Tx.Hash() != preconfTx.Hash() {
+			if tx.Tx.Hash() != preconfTxHash {
 				newTxs = append(newTxs, tx) // Only keep the transactions that are not to be deleted
 			}
 		}
 
 		// Update the slice in the map
 		if len(newTxs) == 0 {
-			delete(pending, from) // If the slice is empty, delete the entry for that address
+			delete(pending, preconfTx.From) // If the slice is empty, delete the entry for that address
 		} else {
-			pending[from] = newTxs // Replace with the new slice
+			pending[preconfTx.From] = newTxs // Replace with the new slice
 		}
 
-		preconfTxs = append(preconfTxs, preconfTx)
+		preconfTxs = append(preconfTxs, preconfTx.Tx)
 	}
 	return preconfTxs
 }
@@ -542,15 +544,13 @@ func (pool *LegacyPool) addPreconfTx(tx *types.Transaction) {
 		return
 	}
 
-	pool.preconfTxs.Add(tx)
+	pool.preconfTxs.Add(from, tx)
 
 	// handle preconf txs
 	pool.handlePreconfTxs([]*types.Transaction{tx})
 }
 
 func (pool *LegacyPool) handlePreconfTxs(news []*types.Transaction) {
-	defer preconf.MetricsPreconfTxPoolHandleCost(time.Now())
-
 	for _, tx := range news {
 		txHash := tx.Hash()
 		if !pool.preconfTxs.Contains(txHash) {
@@ -559,25 +559,28 @@ func (pool *LegacyPool) handlePreconfTxs(news []*types.Transaction) {
 		}
 
 		// send preconf request event
-		result := make(chan *core.PreconfResponse)
+		result := make(chan *core.PreconfResponse, 1) // buffer 1 to avoid worker blocking
 		pool.preconfTxRequestFeed.Send(core.NewPreconfTxRequest{
 			Tx:            tx,
 			PreconfResult: result,
+			ClosePreconfResultFn: func() {
+				close(result)
+			},
 		})
-		log.Trace("txpool sent preconf tx request", "tx", txHash)
+		log.Debug("txpool sent preconf tx request", "tx", txHash)
 
 		// avoid race condition
 		// tx := tx
 		// goroutine to avoid blocking
 		go func() {
-			defer close(result)
+			defer preconf.MetricsPreconfTxPoolHandleCost(time.Now())
 
-			// wait for preconf ready, no need to wait again after it's ready, as it only needs to wait once when the service restarts
-			// wait for 10s, if not ready, skip
+			// If preconfReadyCh is not closed, it means this is a preconf tx restored from journal after system restart.
+			// In this case, we don't need to execute preconfirmation again to avoid resource contention with worker.
 			select {
 			case <-pool.preconfReadyCh:
-			case <-time.After(time.Minute):
-				log.Error("preconf txs not ready, skip handle", "tx", txHash)
+			default:
+				log.Warn("preconf txs not ready, skip handle", "tx", txHash)
 				return
 			}
 
@@ -589,10 +592,11 @@ func (pool *LegacyPool) handlePreconfTxs(news []*types.Transaction) {
 			// timeout
 			timeout := time.NewTimer(pool.config.Preconf.PreconfTimeout)
 			defer timeout.Stop()
+			now := time.Now()
 			// wait for miner.worker preconf response
 			select {
 			case response := <-result:
-				log.Trace("txpool received preconf tx response", "tx", txHash)
+				log.Trace("txpool received preconf tx response", "tx", txHash, "duration", time.Since(now))
 				if response.Err == nil {
 					event.Status = core.PreconfStatusSuccess
 				} else {
@@ -610,7 +614,7 @@ func (pool *LegacyPool) handlePreconfTxs(news []*types.Transaction) {
 				}
 			case <-timeout.C:
 				event.Status = core.PreconfStatusFailed
-				event.Reason = "preconf timeout"
+				event.Reason = fmt.Sprintf("preconf timeout, over %s timeout", time.Since(now))
 			}
 
 			// send preconf event
@@ -623,7 +627,7 @@ func (pool *LegacyPool) handlePreconfTxs(news []*types.Transaction) {
 				// TODO: add preconf success tx to journal
 				// if pool.journal != nil {
 				// 	if err := pool.journal.insert(tx); err != nil {
-				// 		log.Warn("Failed to journal preconf success transaction", "tx", txHash, "err", err)
+				// 		log.Error("Failed to journal preconf success transaction", "tx", txHash, "err", err)
 				// 	} else {
 				// 		log.Trace("preconf success transaction journaled", "tx", txHash)
 				// 	}
