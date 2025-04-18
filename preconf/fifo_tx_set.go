@@ -2,6 +2,7 @@ package preconf
 
 import (
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -20,32 +21,34 @@ import (
 // This struct is primarily used to manage preconfirmed transactions, ensuring they are processed and packed in order of reception.
 type FIFOTxSet struct {
 	mu      sync.Mutex               // Mutex to ensure thread safety
-	txMap   map[common.Hash]*txEntry // Mapping from hash to transaction entry
-	txQueue []*txEntry               // FIFO transaction queue
+	txMap   map[common.Hash]*TxEntry // Mapping from hash to transaction entry
+	txQueue []*TxEntry               // FIFO transaction queue
 }
 
-// txEntry contains the transaction
-type txEntry struct {
-	tx *types.Transaction // Transaction object
+// TxEntry contains the transaction
+type TxEntry struct {
+	Tx   *types.Transaction // Transaction object
+	From common.Address     // Sender address
 }
 
 // NewFIFOTxSet creates a new FIFOTxSet
 func NewFIFOTxSet() *FIFOTxSet {
 	return &FIFOTxSet{
-		txMap:   make(map[common.Hash]*txEntry),
-		txQueue: make([]*txEntry, 0),
+		txMap:   make(map[common.Hash]*TxEntry),
+		txQueue: make([]*TxEntry, 0),
 	}
 }
 
 // Add adds a transaction to the set
 // If the transaction already exists, update its position in the queue
-func (s *FIFOTxSet) Add(tx *types.Transaction) {
+func (s *FIFOTxSet) Add(from common.Address, tx *types.Transaction) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	hash := tx.Hash()
-	entry := &txEntry{
-		tx: tx,
+	entry := &TxEntry{
+		Tx:   tx,
+		From: from,
 	}
 
 	// If the transaction already exists, replace the old entry
@@ -84,7 +87,7 @@ func (s *FIFOTxSet) Get(hash common.Hash) *types.Transaction {
 	defer s.mu.Unlock()
 
 	if entry, exists := s.txMap[hash]; exists {
-		return entry.tx
+		return entry.Tx
 	}
 	return nil
 }
@@ -118,8 +121,18 @@ func (s *FIFOTxSet) Transactions() []*types.Transaction {
 
 	result := make([]*types.Transaction, len(s.txQueue))
 	for i, entry := range s.txQueue {
-		result[i] = entry.tx
+		result[i] = entry.Tx
 	}
+	return result
+}
+
+// TxEntries returns an array of transactions in FIFO order
+func (s *FIFOTxSet) TxEntries() []*TxEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result := make([]*TxEntry, len(s.txQueue))
+	copy(result, s.txQueue)
 	return result
 }
 
@@ -136,41 +149,30 @@ func (s *FIFOTxSet) Clear() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.txMap = make(map[common.Hash]*txEntry)
-	s.txQueue = make([]*txEntry, 0)
+	s.txMap = make(map[common.Hash]*TxEntry)
+	s.txQueue = make([]*TxEntry, 0)
 }
 
 func (s *FIFOTxSet) Forward(addr common.Address, nonce uint64) {
+	defer MetricsPreconfTxPoolForwardCost(time.Now())
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Iterate over the list to be deleted
-	var toHashRemove []common.Hash
+	now := time.Now()
 
+	i := 0
 	for _, entry := range s.txQueue {
-		from, _ := types.Sender(types.LatestSignerForChainID(entry.tx.ChainId()), entry.tx)
-		if from == addr && entry.tx.Nonce() < nonce {
-			toHashRemove = append(toHashRemove, entry.tx.Hash())
-			log.Trace("preconf removed by forward", "tx", entry.tx.Hash(), "nonce", nonce, "tx.nonce", entry.tx.Nonce())
-		}
-	}
-
-	// Process the transactions to be deleted
-	for _, hash := range toHashRemove {
-		// Remove from the queue
-		for i, e := range s.txQueue {
-			if e.tx.Hash() == hash {
-				s.txQueue = append(s.txQueue[:i], s.txQueue[i+1:]...)
-				break
-			}
-		}
-
-		// Remove from the map
-		if _, exists := s.txMap[hash]; exists {
-			delete(s.txMap, hash)
-
-			// Metrics update
+		if entry.From == addr && entry.Tx.Nonce() < nonce {
+			// Remove from txMap
+			delete(s.txMap, entry.Tx.Hash())
 			MetricsPendingPreconfDec(1)
+			log.Trace("preconf removed by forward", "tx", entry.Tx.Hash(), "nonce", nonce, "tx.nonce", entry.Tx.Nonce())
+			continue // Skip appending to txQueue
 		}
+		s.txQueue[i] = entry
+		i++
 	}
+	s.txQueue = s.txQueue[:i]
+
+	log.Debug("preconf forward", "duration", time.Since(now))
 }

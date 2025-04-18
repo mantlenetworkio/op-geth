@@ -37,8 +37,9 @@ type NewPreconfTxEvent struct {
 
 // NewPreconfTxRequestEvent is posted when a preconf transaction request enters the transaction pool.
 type NewPreconfTxRequest struct {
-	Tx            *types.Transaction
-	PreconfResult chan<- *PreconfResponse
+	Tx                   *types.Transaction
+	PreconfResult        chan<- *PreconfResponse
+	ClosePreconfResultFn func()
 }
 
 type PreconfResponse struct {

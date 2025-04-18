@@ -22,7 +22,7 @@ import (
 
 // Configuration
 const (
-	NumTransactions     = 1000
+	NumTransactions     = 10000
 	L1RpcEndpoint       = "http://127.0.0.1:8545"
 	SequencerEndpoint   = "http://127.0.0.1:9545"
 	L2RpcEndpoint       = "http://127.0.0.1:10545"

@@ -561,6 +561,7 @@ func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *environment) 
 	// Split the pending transactions into locals and remotes
 	// Fill the block with all available pending transactions.
 	preconfTxs, pendingPlainTxs := miner.txpool.PendingPreconfTxs(filter)
+	log.Debug("find preconf txs to fill into block", "count", len(preconfTxs))
 	var unsealedPreconfTxs []*types.Transaction
 	if len(preconfTxs) > 0 {
 		unsealedTxs, err := miner.commitFIFOTransactions(env, preconfTxs, interrupt)

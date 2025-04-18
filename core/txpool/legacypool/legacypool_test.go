@@ -2752,6 +2752,10 @@ func TestExtractPreconfTxsFromPending(t *testing.T) {
 		GasFeeCap: uint256.MustFromBig(tx4t.GasFeeCap()),
 		GasTipCap: uint256.MustFromBig(tx4t.GasTipCap()),
 	}
+	from1, _ := types.Sender(signer, tx1.Tx)
+	from2, _ := types.Sender(signer, tx2.Tx)
+	from3, _ := types.Sender(signer, tx3.Tx)
+	from4, _ := types.Sender(signer, tx4.Tx)
 	// Create a test TxPool
 	createTxPool := func() *LegacyPool {
 		pool := &LegacyPool{
@@ -2765,7 +2769,7 @@ func TestExtractPreconfTxsFromPending(t *testing.T) {
 			preconfTxs: preconf.NewFIFOTxSet(),
 		}
 		// Add pre-confirmed transaction
-		pool.preconfTxs.Add(tx1t)
+		pool.preconfTxs.Add(from1, tx1.Tx)
 		return pool
 	}
 
@@ -2831,9 +2835,9 @@ func TestExtractPreconfTxsFromPending(t *testing.T) {
 		pool.config.Preconf.AllPreconfs = true
 
 		// Add all transactions to the pre-confirmed set
-		pool.preconfTxs.Add(tx2t)
-		pool.preconfTxs.Add(tx3t)
-		pool.preconfTxs.Add(tx4t)
+		pool.preconfTxs.Add(from2, tx2.Tx)
+		pool.preconfTxs.Add(from3, tx3.Tx)
+		pool.preconfTxs.Add(from4, tx4.Tx)
 
 		pending := make(map[common.Address][]*txpool.LazyTransaction)
 		pending[addr1] = []*txpool.LazyTransaction{tx1, tx2}
