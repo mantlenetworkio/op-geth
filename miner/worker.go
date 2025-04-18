@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/eth/tracers"
 	"math/big"
 	"sync/atomic"
 	"time"
@@ -34,6 +33,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/eth/tracers"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
@@ -62,6 +62,50 @@ type environment struct {
 	blobs    int
 
 	witness *stateless.Witness
+}
+
+// copy creates a deep copy of environment.
+func (env *environment) copy(chain core.ChainContext) *environment {
+	cpy := &environment{
+		signer:   env.signer,
+		state:    env.state.Copy(),
+		tcount:   env.tcount,
+		coinbase: env.coinbase,
+
+		header:   types.CopyHeader(env.header),
+		receipts: copyReceipts(env.receipts),
+		blobs:    env.blobs,
+
+		witness: env.witness,
+	}
+	if env.gasPool != nil {
+		gasPool := *env.gasPool
+		cpy.gasPool = &gasPool
+	}
+	if env.evm != nil {
+		blockCtx := core.NewEVMBlockContext(cpy.header, chain, nil, env.evm.ChainConfig(), cpy.state)
+		cpy.evm = vm.NewEVM(blockCtx, cpy.state, env.evm.ChainConfig(), env.evm.Config)
+	}
+	// The content of txs and uncles are immutable, unnecessary
+	// to do the expensive deep copy for them.
+	cpy.txs = make([]*types.Transaction, len(env.txs))
+	copy(cpy.txs, env.txs)
+
+	// copy the sidecars
+	cpy.sidecars = make([]*types.BlobTxSidecar, len(env.sidecars))
+	copy(cpy.sidecars, env.sidecars)
+
+	return cpy
+}
+
+// copyReceipts makes a deep copy of the given receipts.
+func copyReceipts(receipts []*types.Receipt) []*types.Receipt {
+	result := make([]*types.Receipt, len(receipts))
+	for i, l := range receipts {
+		cpy := *l
+		result[i] = &cpy
+	}
+	return result
 }
 
 const (
@@ -481,6 +525,11 @@ func (miner *Miner) commitTransactions(env *environment, plainTxs, blobTxs *tran
 // into the given sealing block. The transaction selection and ordering strategy can
 // be customized with the plugin in the future.
 func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *environment) error {
+	unsealedPreconfTxsCh := miner.preconfChecker.PausePreconf()
+	defer func() {
+		miner.preconfChecker.UnpausePreconf(env.copy(miner.backend.BlockChain()), miner.txpool.PreconfReady)
+	}()
+
 	miner.confMu.RLock()
 	tip := miner.config.GasPrice
 	prio := miner.prio
@@ -497,7 +546,26 @@ func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *environment) 
 		filter.BlobFee = uint256.MustFromBig(eip4844.CalcBlobFee(miner.chainConfig, env.header))
 	}
 	filter.OnlyPlainTxs, filter.OnlyBlobTxs = true, false
-	pendingPlainTxs := miner.txpool.Pending(filter)
+
+	// Split the pending transactions into locals and remotes
+	// Fill the block with all available pending transactions.
+	preconfTxs, pendingPlainTxs := miner.txpool.PendingPreconfTxs(filter)
+	var unsealedPreconfTxs []*types.Transaction
+	if len(preconfTxs) > 0 {
+		unsealedTxs, err := miner.commitFIFOTransactions(env, preconfTxs, interrupt)
+		if err != nil {
+			return err
+		}
+		unsealedPreconfTxs = unsealedTxs
+	}
+	unsealedPreconfTxsCh <- unsealedPreconfTxs
+	// If there are unsealed preconfirmation transactions, we cannot include new transactions
+	// as this could cause other transactions to be packaged before preconfirmation transactions,
+	// potentially causing successfully preconfirmed transactions to actually fail
+	if len(unsealedPreconfTxs) > 0 {
+		log.Debug("Ending fillTransactions due to unsealed preconfirmation transactions", "unsealedPreconfTxs", unsealedPreconfTxs)
+		return nil
+	}
 
 	filter.OnlyPlainTxs, filter.OnlyBlobTxs = false, true
 	pendingBlobTxs := miner.txpool.Pending(filter)
@@ -534,6 +602,79 @@ func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *environment) 
 		}
 	}
 	return nil
+}
+
+func (miner *Miner) commitFIFOTransactions(env *environment, txs []*types.Transaction, interrupt *atomic.Int32) ([]*types.Transaction, error) {
+	gasLimit := env.header.GasLimit
+	if env.gasPool == nil {
+		env.gasPool = new(core.GasPool).AddGas(gasLimit)
+	}
+
+	// gasLimitReached indicates whether we broke the loop due to gas limit
+	gasLimitReached := false
+	// breakIndex tracks the index where we broke due to gas limit
+	breakIndex := -1
+
+FIFO:
+	for i, tx := range txs {
+		// Check interruption signal and abort building if it's fired.
+		if interrupt != nil {
+			if signal := interrupt.Load(); signal != commitInterruptNone {
+				return nil, signalToErr(signal)
+			}
+		}
+		// If we don't have enough gas for any further transactions then we're done.
+		if env.gasPool.Gas() < params.TxGas {
+			log.Trace("Not enough gas for further transactions", "have", env.gasPool, "want", params.TxGas, "index", i, "tx", tx.Hash().Hex())
+			gasLimitReached = true
+			breakIndex = i
+			break
+		}
+
+		// Error may be ignored here. The error has already been checked
+		// during transaction acceptance is the transaction pool.
+		from, _ := types.Sender(env.signer, tx)
+
+		// Check whether the tx is replay protected. If we're not in the EIP155 hf
+		// phase, start ignoring the sender until we do.
+		if tx.Protected() && !miner.chainConfig.IsEIP155(env.header.Number) {
+			log.Trace("Ignoring reply protected transaction", "hash", tx.Hash(), "eip155", miner.chainConfig.EIP155Block)
+			continue
+		}
+		// Start executing the transaction
+		env.state.SetTxContext(tx.Hash(), env.tcount)
+
+		err := miner.commitTransaction(env, tx)
+		switch {
+		case errors.Is(err, core.ErrGasLimitReached):
+			// Pop the current out-of-gas transaction without shifting in the next from the account
+			log.Trace("Gas limit exceeded for current block", "sender", from, "index", i, "tx", tx.Hash().Hex())
+			gasLimitReached = true
+			breakIndex = i
+			break FIFO
+
+		case errors.Is(err, core.ErrNonceTooLow):
+			// New head notification data race between the transaction pool and miner
+			log.Trace("Skipping transaction with low nonce", "hash", tx.Hash(), "sender", from, "nonce", tx.Nonce())
+
+		case errors.Is(err, nil):
+			// Everything ok
+
+		default:
+			// Transaction is regarded as invalid, drop all consecutive transactions from
+			// the same sender because of `nonce-too-high` clause.
+			log.Debug("Transaction failed, account skipped", "hash", tx.Hash(), "err", err)
+		}
+	}
+
+	// Return unprocessed transactions only if we broke due to gas limit
+	unsealedTxs := make([]*types.Transaction, 0)
+	if gasLimitReached && breakIndex >= 0 {
+		// Only return transactions from the break point onwards
+		unsealedTxs = txs[breakIndex:]
+		log.Debug("unsealed transactions due to gas limit", "breakIndex", breakIndex, "len(tx)", len(txs))
+	}
+	return unsealedTxs, nil
 }
 
 // totalFees computes total consumed miner fees in Wei. Block transactions and receipts have to have the same order.
