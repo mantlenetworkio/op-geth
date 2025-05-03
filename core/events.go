@@ -17,20 +17,26 @@
 package core
 
 import (
+	"sync"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
+type PreconfStatus string
+
 const (
-	PreconfStatusSuccess = "success"
-	PreconfStatusFailed  = "failed"
+	PreconfStatusSuccess PreconfStatus = "success"
+	PreconfStatusFailed  PreconfStatus = "failed"
+	PreconfStatusTimeout PreconfStatus = "timeout"
+	PreconfStatusWaiting PreconfStatus = "waiting"
 )
 
 // NewPreconfTxsEvent is posted when a preconf transaction enters the transaction pool.
 type NewPreconfTxEvent struct {
 	TxHash                 common.Hash    `json:"txHash"`
-	Status                 string         `json:"status"`      // "success" | "failed"
+	Status                 PreconfStatus  `json:"status"`
 	Reason                 string         `json:"reason"`      // "optional failure message"
 	PredictedL2BlockNumber hexutil.Uint64 `json:"blockHeight"` // "predicted L2 block number"
 }
@@ -38,6 +44,8 @@ type NewPreconfTxEvent struct {
 // NewPreconfTxRequestEvent is posted when a preconf transaction request enters the transaction pool.
 type NewPreconfTxRequest struct {
 	Tx                   *types.Transaction
+	Mu                   sync.Mutex
+	Status               PreconfStatus
 	PreconfResult        chan<- *PreconfResponse
 	ClosePreconfResultFn func()
 }

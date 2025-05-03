@@ -487,7 +487,7 @@ func (pool *TxPool) SubscribeNewPreconfTxEvent(ch chan<- core.NewPreconfTxEvent)
 
 // SubscribeNewPreconfTxRequest registers a subscription of NewPreconfTxRequest and
 // starts sending event to the given channel.
-func (pool *TxPool) SubscribeNewPreconfTxRequestEvent(ch chan<- core.NewPreconfTxRequest) event.Subscription {
+func (pool *TxPool) SubscribeNewPreconfTxRequestEvent(ch chan<- *core.NewPreconfTxRequest) event.Subscription {
 	return pool.scope.Track(pool.preconfTxRequestFeed.Subscribe(ch))
 }
 
@@ -625,6 +625,14 @@ func (pool *TxPool) Locals() []common.Address {
 	return pool.locals.flatten()
 }
 
+func (pool *TxPool) CleanTimeoutPreconfTxs() int {
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+
+	removed := pool.preconfTxs.CleanTimeout()
+	return removed
+}
+
 // PendingPreconfTxs retrieves the preconf transactions and the pending transactions.
 func (pool *TxPool) PendingPreconfTxs(enforceTips bool) ([]*types.Transaction, map[common.Address]types.Transactions) {
 	defer preconf.MetricsPreconfTxPoolFilterCost(time.Now())
@@ -706,7 +714,9 @@ func (pool *TxPool) extractPreconfTxsFromPending(pending map[common.Address]type
 			pending[preconfTx.From] = newTxs // Replace with the new slice
 		}
 
-		preconfTxs = append(preconfTxs, preconfTx.Tx)
+		if preconfTx.Status == core.PreconfStatusSuccess || preconfTx.Status == core.PreconfStatusFailed {
+			preconfTxs = append(preconfTxs, preconfTx.Tx)
+		}
 	}
 	return preconfTxs
 }
@@ -1296,13 +1306,15 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) {
 
 		// send preconf request event
 		result := make(chan *core.PreconfResponse, 1) // buffer 1 to avoid worker blocking
-		pool.preconfTxRequestFeed.Send(core.NewPreconfTxRequest{
+		preconfTxRequest := &core.NewPreconfTxRequest{
 			Tx:            tx,
 			PreconfResult: result,
+			Status:        core.PreconfStatusWaiting,
 			ClosePreconfResultFn: func() {
 				close(result)
 			},
-		})
+		}
+		pool.preconfTxRequestFeed.Send(preconfTxRequest)
 		log.Debug("txpool sent preconf tx request", "tx", txHash)
 
 		// avoid race condition
@@ -1349,8 +1361,12 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) {
 					event.PredictedL2BlockNumber = hexutil.Uint64(response.Receipt.BlockNumber.Uint64())
 				}
 			case <-timeout.C:
-				event.Status = core.PreconfStatusFailed
 				event.Reason = fmt.Sprintf("preconf timeout, over %s timeout", time.Since(now))
+				preconfTxRequest.Mu.Lock()
+				preconfTxRequest.Status = core.PreconfStatusTimeout
+				pool.preconfTxs.SetStatus(txHash, core.PreconfStatusTimeout)
+				preconfTxRequest.Mu.Unlock()
+				event.Status = core.PreconfStatusFailed
 			}
 
 			// send preconf event

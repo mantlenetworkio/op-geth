@@ -61,6 +61,11 @@ type preconfChecker struct {
 	unSealedPreconfTxsCh chan []*types.Transaction
 }
 
+type updateDepositTxsHeader struct {
+	currentL1 uint64
+	headL1    uint64
+}
+
 func NewPreconfChecker(chainConfig *params.ChainConfig, chain *core.BlockChain, minerConfig *preconf.MinerConfig) *preconfChecker {
 	checker := &preconfChecker{
 		chainConfig:  chainConfig,
@@ -151,43 +156,51 @@ func (c *preconfChecker) GetDepositTxs(start, end uint64) ([]*types.Transaction,
 }
 
 func (c *preconfChecker) UpdateOptimismSyncStatus(newOptimismSyncStatus *preconf.OptimismSyncStatus) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	status, statusOk, header := func() (*preconf.OptimismSyncStatus, bool, *updateDepositTxsHeader) {
+		c.mu.Lock()
+		defer c.mu.Unlock()
 
-	// Initialization
-	if c.optimismSyncStatus == nil {
-		c.optimismSyncStatus = newOptimismSyncStatus
-		c.optimismSyncStatusOk = true
-		c.updateDepositTxs(newOptimismSyncStatus.UnsafeL2.L1Origin.Number, newOptimismSyncStatus.HeadL1.Number)
-		return
-	}
-
-	log.Debug("update optimism sync status",
-		"current_l1.number", c.optimismSyncStatus.CurrentL1.Number,
-		"head_l1.number", c.optimismSyncStatus.HeadL1.Number,
-		"unsafe_l2.l1_origin.number", c.optimismSyncStatus.UnsafeL2.L1Origin.Number,
-		"unsafe_l2.number", c.optimismSyncStatus.UnsafeL2.Number,
-		"engine_sync_target.number", c.optimismSyncStatus.EngineSyncTarget.Number,
-		"new_current_l1.number", newOptimismSyncStatus.CurrentL1.Number,
-		"new_head_l1.number", newOptimismSyncStatus.HeadL1.Number,
-		"new_unsafe_l2.l1_origin.number", newOptimismSyncStatus.UnsafeL2.L1Origin.Number,
-		"new_unsafe_l2.number", newOptimismSyncStatus.UnsafeL2.Number,
-		"new_engine_sync_target.number", newOptimismSyncStatus.EngineSyncTarget.Number,
-	)
-
-	// check optimism sync status
-	if c.isSyncStatusOk(newOptimismSyncStatus) {
-		// if l1 block changes, update depositTxs
-		if c.optimismSyncStatus.UnsafeL2.L1Origin.Number != newOptimismSyncStatus.UnsafeL2.L1Origin.Number ||
-			c.optimismSyncStatus.HeadL1.Number != newOptimismSyncStatus.HeadL1.Number {
-			c.updateDepositTxs(newOptimismSyncStatus.UnsafeL2.L1Origin.Number, newOptimismSyncStatus.HeadL1.Number)
+		// Initialization
+		if c.optimismSyncStatus == nil {
+			return newOptimismSyncStatus, true, &updateDepositTxsHeader{newOptimismSyncStatus.UnsafeL2.L1Origin.Number, newOptimismSyncStatus.HeadL1.Number}
 		}
-		c.optimismSyncStatus = newOptimismSyncStatus
-		c.optimismSyncStatusOk = true
-	} else {
-		c.optimismSyncStatusOk = false
-		log.Error("optimism sync status is not ok, l1 reorg?", "old", c.optimismSyncStatus, "new", newOptimismSyncStatus)
+
+		log.Debug("update optimism sync status",
+			"current_l1.number", c.optimismSyncStatus.CurrentL1.Number,
+			"head_l1.number", c.optimismSyncStatus.HeadL1.Number,
+			"unsafe_l2.l1_origin.number", c.optimismSyncStatus.UnsafeL2.L1Origin.Number,
+			"unsafe_l2.number", c.optimismSyncStatus.UnsafeL2.Number,
+			"engine_sync_target.number", c.optimismSyncStatus.EngineSyncTarget.Number,
+			"new_current_l1.number", newOptimismSyncStatus.CurrentL1.Number,
+			"new_head_l1.number", newOptimismSyncStatus.HeadL1.Number,
+			"new_unsafe_l2.l1_origin.number", newOptimismSyncStatus.UnsafeL2.L1Origin.Number,
+			"new_unsafe_l2.number", newOptimismSyncStatus.UnsafeL2.Number,
+			"new_engine_sync_target.number", newOptimismSyncStatus.EngineSyncTarget.Number,
+		)
+
+		// check optimism sync status
+		if c.isSyncStatusOk(newOptimismSyncStatus) {
+			// if l1 block changes, update depositTxs
+			if c.optimismSyncStatus.UnsafeL2.L1Origin.Number != newOptimismSyncStatus.UnsafeL2.L1Origin.Number ||
+				c.optimismSyncStatus.HeadL1.Number != newOptimismSyncStatus.HeadL1.Number {
+				return newOptimismSyncStatus, true, &updateDepositTxsHeader{newOptimismSyncStatus.UnsafeL2.L1Origin.Number, newOptimismSyncStatus.HeadL1.Number}
+			}
+			return newOptimismSyncStatus, true, nil
+		} else {
+			log.Error("optimism sync status is not ok, l1 reorg?", "old", c.optimismSyncStatus, "new", newOptimismSyncStatus)
+			return c.optimismSyncStatus, false, nil
+		}
+	}()
+
+	// two step lock to reduce lock time
+	if header != nil {
+		c.updateDepositTxs(header.currentL1, header.headL1)
 	}
+
+	c.mu.Lock()
+	c.optimismSyncStatus = status
+	c.optimismSyncStatusOk = statusOk
+	c.mu.Unlock()
 }
 
 // check optimism sync status
@@ -217,6 +230,8 @@ func (c *preconfChecker) updateDepositTxs(currentL1, headL1 uint64) {
 		preconf.MetricsL1Deposit(false, 0)
 		return
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.depositTxs = depositTxs
 	preconf.MetricsL1Deposit(true, len(depositTxs))
 	log.Debug("update deposit txs", "current_l1.number", currentL1, "head_l1.number", headL1, "start", start, "end", end, "deposit_txs", len(depositTxs))

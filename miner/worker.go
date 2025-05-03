@@ -212,7 +212,7 @@ type worker struct {
 	chainSideSub event.Subscription
 
 	// Preconf Subscriptions
-	preconfTxRequestCh  chan core.NewPreconfTxRequest
+	preconfTxRequestCh  chan *core.NewPreconfTxRequest
 	preconfTxRequestSub event.Subscription
 	preconfChecker      *preconfChecker
 
@@ -293,7 +293,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		extra:              config.ExtraData,
 		pendingTasks:       make(map[common.Hash]*task),
 		txsCh:              make(chan core.NewTxsEvent, txChanSize),
-		preconfTxRequestCh: make(chan core.NewPreconfTxRequest, txChanSize),
+		preconfTxRequestCh: make(chan *core.NewPreconfTxRequest, txChanSize),
 		chainHeadCh:        make(chan core.ChainHeadEvent, chainHeadChanSize),
 		chainSideCh:        make(chan core.ChainSideEvent, chainSideChanSize),
 		newWorkCh:          make(chan *newWorkReq),
@@ -655,6 +655,15 @@ func (w *worker) mainLoop() {
 		case ev := <-w.preconfTxRequestCh:
 			now := time.Now()
 			log.Debug("worker received preconf tx request", "tx", ev.Tx.Hash())
+
+			ev.Mu.Lock()
+			status := ev.Status
+			ev.Mu.Unlock()
+			if status == core.PreconfStatusTimeout {
+				log.Warn("preconf tx request timeout", "tx", ev.Tx.Hash())
+				ev.ClosePreconfResultFn()
+				continue
+			}
 
 			receipt, err := w.preconfChecker.Preconf(ev.Tx)
 			if err != nil {
@@ -1254,8 +1263,10 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 // into the given sealing block. The transaction selection and ordering strategy can
 // be customized with the plugin in the future.
 func (w *worker) fillTransactions(interrupt *int32, env *environment) error {
-	unsealedPreconfTxsCh := w.preconfChecker.PausePreconf()
+	unSealedPreconfTxsCh := w.preconfChecker.PausePreconf()
 	defer func() { w.preconfChecker.UnpausePreconf(env.copy(), w.eth.TxPool().PreconfReady) }()
+
+	_ = w.eth.TxPool().CleanTimeoutPreconfTxs()
 
 	// Split the pending transactions into locals and remotes
 	// Fill the block with all available pending transactions.
@@ -1270,7 +1281,7 @@ func (w *worker) fillTransactions(interrupt *int32, env *environment) error {
 		}
 		unsealedPreconfTxs = unsealedTxs
 	}
-	unsealedPreconfTxsCh <- unsealedPreconfTxs
+	unSealedPreconfTxsCh <- unsealedPreconfTxs
 	// If there are unsealed preconfirmation transactions, we cannot include new transactions
 	// as this could cause other transactions to be packaged before preconfirmation transactions,
 	// potentially causing successfully preconfirmed transactions to actually fail
