@@ -194,7 +194,7 @@ func (s *FIFOTxSet) CleanTimeout() int {
 	defer s.mu.Unlock()
 
 	removed := 0
-	newTxQueue := make([]*TxEntry, len(s.txQueue))
+	newTxQueue := make([]*TxEntry, 0, len(s.txQueue))
 	for _, entry := range s.txQueue {
 		if entry.Status == core.PreconfStatusTimeout {
 			delete(s.txMap, entry.Tx.Hash())

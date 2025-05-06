@@ -44,10 +44,22 @@ type NewPreconfTxEvent struct {
 // NewPreconfTxRequestEvent is posted when a preconf transaction request enters the transaction pool.
 type NewPreconfTxRequest struct {
 	Tx                   *types.Transaction
-	Mu                   sync.Mutex
+	mu                   sync.Mutex
 	Status               PreconfStatus
 	PreconfResult        chan<- *PreconfResponse
 	ClosePreconfResultFn func()
+}
+
+func (e *NewPreconfTxRequest) GetStatus() PreconfStatus {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.Status
+}
+
+func (e *NewPreconfTxRequest) SetStatus(status PreconfStatus) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.Status = status
 }
 
 type PreconfResponse struct {

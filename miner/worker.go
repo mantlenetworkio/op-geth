@@ -656,9 +656,7 @@ func (w *worker) mainLoop() {
 			now := time.Now()
 			log.Debug("worker received preconf tx request", "tx", ev.Tx.Hash())
 
-			ev.Mu.Lock()
-			status := ev.Status
-			ev.Mu.Unlock()
+			status := ev.GetStatus()
 			if status == core.PreconfStatusTimeout {
 				log.Warn("preconf tx request timeout", "tx", ev.Tx.Hash())
 				ev.ClosePreconfResultFn()
@@ -1265,8 +1263,6 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 func (w *worker) fillTransactions(interrupt *int32, env *environment) error {
 	unSealedPreconfTxsCh := w.preconfChecker.PausePreconf()
 	defer func() { w.preconfChecker.UnpausePreconf(env.copy(), w.eth.TxPool().PreconfReady) }()
-
-	_ = w.eth.TxPool().CleanTimeoutPreconfTxs()
 
 	// Split the pending transactions into locals and remotes
 	// Fill the block with all available pending transactions.

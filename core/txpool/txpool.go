@@ -625,10 +625,7 @@ func (pool *TxPool) Locals() []common.Address {
 	return pool.locals.flatten()
 }
 
-func (pool *TxPool) CleanTimeoutPreconfTxs() int {
-	pool.mu.Lock()
-	defer pool.mu.Unlock()
-
+func (pool *TxPool) cleanTimeoutPreconfTxs() int {
 	removed := pool.preconfTxs.CleanTimeout()
 	return removed
 }
@@ -714,10 +711,13 @@ func (pool *TxPool) extractPreconfTxsFromPending(pending map[common.Address]type
 			pending[preconfTx.From] = newTxs // Replace with the new slice
 		}
 
+		// preconf error tx will still be sealed to the block
 		if preconfTx.Status == core.PreconfStatusSuccess || preconfTx.Status == core.PreconfStatusFailed {
 			preconfTxs = append(preconfTxs, preconfTx.Tx)
 		}
 	}
+
+	_ = pool.cleanTimeoutPreconfTxs()
 	return preconfTxs
 }
 
@@ -1314,29 +1314,35 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) {
 				close(result)
 			},
 		}
-		pool.preconfTxRequestFeed.Send(preconfTxRequest)
 		log.Debug("txpool sent preconf tx request", "tx", txHash)
 
-		// avoid race condition
-		tx := tx
 		// goroutine to avoid blocking
 		go func() {
 			defer preconf.MetricsPreconfTxPoolHandleCost(time.Now())
+			tx := preconfTxRequest.Tx
+
+			// default preconf event
+			event := core.NewPreconfTxEvent{
+				TxHash:                 txHash,
+				PredictedL2BlockNumber: hexutil.Uint64(0),
+				Status:                 core.PreconfStatusWaiting,
+			}
 
 			// If preconfReadyCh is not closed, it means this is a preconf tx restored from journal after system restart.
 			// In this case, we don't need to execute preconfirmation again to avoid resource contention with worker.
 			select {
 			case <-pool.preconfReadyCh:
 			default:
+				preconf.PreconfTxFailureMeter.Mark(1)
+				event.Status = core.PreconfStatusFailed
+				event.Reason = "preconf txs not ready"
+				pool.preconfTxFeed.Send(event)
 				log.Info("preconf txs not ready, skip handle", "tx", txHash)
 				return
 			}
 
-			// default preconf event
-			event := core.NewPreconfTxEvent{
-				TxHash:                 txHash,
-				PredictedL2BlockNumber: hexutil.Uint64(0),
-			}
+			pool.preconfTxRequestFeed.Send(preconfTxRequest)
+
 			// timeout
 			timeout := time.NewTimer(pool.config.Preconf.PreconfTimeout)
 			defer timeout.Stop()
@@ -1360,13 +1366,13 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) {
 					}
 					event.PredictedL2BlockNumber = hexutil.Uint64(response.Receipt.BlockNumber.Uint64())
 				}
+				preconfTxRequest.SetStatus(event.Status)
+				pool.preconfTxs.SetStatus(txHash, event.Status)
 			case <-timeout.C:
 				event.Reason = fmt.Sprintf("preconf timeout, over %s timeout", time.Since(now))
-				preconfTxRequest.Mu.Lock()
-				preconfTxRequest.Status = core.PreconfStatusTimeout
+				preconfTxRequest.SetStatus(core.PreconfStatusTimeout)
 				pool.preconfTxs.SetStatus(txHash, core.PreconfStatusTimeout)
-				preconfTxRequest.Mu.Unlock()
-				event.Status = core.PreconfStatusFailed
+				event.Status = core.PreconfStatusTimeout
 			}
 
 			// send preconf event

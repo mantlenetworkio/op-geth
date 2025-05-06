@@ -364,6 +364,7 @@ func (c *preconfChecker) applyTx(env *environment, tx *types.Transaction) (*type
 
 func (c *preconfChecker) PausePreconf() chan<- []*types.Transaction {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	// close old channel to avoid resource leak
 	if c.unSealedPreconfTxsCh != nil {
@@ -376,14 +377,17 @@ func (c *preconfChecker) PausePreconf() chan<- []*types.Transaction {
 }
 
 func (c *preconfChecker) UnpausePreconf(env *environment, preconfReady func()) {
+	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.env = env
 	c.envUpdatedAt = time.Now()
-	log.Debug("unpause preconf", "env.header.Number", env.header.Number.Int64(), "env.gasPool", env.gasPool.Gas(), "envUpdatedAt", c.envUpdatedAt)
 	// reset env
+	log.Debug("unpause preconf", "env.header.Number", env.header.Number.Int64(), "env.gasPool", c.env.gasPool, "envUpdatedAt", c.envUpdatedAt)
 	c.env.header.Number = new(big.Int).Add(c.env.header.Number, common.Big1)
-	c.env.gasPool.SetGas(c.env.header.GasLimit)
-	log.Trace("reset env", "env.header.Number", c.env.header.Number.Int64(), "env.gasPool", c.env.gasPool.Gas())
+	if c.env.gasPool != nil {
+		c.env.gasPool.SetGas(c.env.header.GasLimit)
+		log.Trace("reset env", "env.header.Number", c.env.header.Number.Int64(), "env.gasPool", c.env.gasPool)
+	}
 
 	// Load deposit txs
 	log.Trace("apply deposit txs", "deposit_txs", len(c.depositTxs))
@@ -418,5 +422,5 @@ func (c *preconfChecker) UnpausePreconf(env *environment, preconfReady func()) {
 	// notify txpool that preconf is ready
 	preconfReady()
 
-	log.Info("ready to preconf", "env.header.Number", env.header.Number.Int64(), "env.gasPool", env.gasPool.Gas(), "envUpdatedAt", c.envUpdatedAt, "deposit_txs", len(c.depositTxs), "unsealed_preconf_txs", len(unsealedPreconfTxs))
+	log.Info("ready to preconf", "env.header.Number", env.header.Number.Int64(), "env.gasPool", env.gasPool, "envUpdatedAt", c.envUpdatedAt, "deposit_txs", len(c.depositTxs), "unsealed_preconf_txs", len(unsealedPreconfTxs))
 }

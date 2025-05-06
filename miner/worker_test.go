@@ -65,9 +65,16 @@ var (
 	testUserKey, _  = crypto.GenerateKey()
 	testUserAddress = crypto.PubkeyToAddress(testUserKey.PublicKey)
 
+	testPreconfKey, _  = crypto.GenerateKey()
+	testPreconfAddress = crypto.PubkeyToAddress(testPreconfKey.PublicKey)
+	testPreconfFunds   = big.NewInt(1000000000000000000)
+
+	preconfTo = common.HexToAddress("0x1234567890123456789012345678901234567890")
+
 	// Test transactions
 	pendingTxs []*types.Transaction
 	newTxs     []*types.Transaction
+	preconfTxs []*types.Transaction
 
 	testConfig = &Config{
 		Recommit:      time.Second,
@@ -107,6 +114,22 @@ func init() {
 		GasPrice: big.NewInt(params.InitialBaseFee),
 	})
 	newTxs = append(newTxs, tx2)
+
+	tx3 := types.MustSignNewTx(testPreconfKey, signer, &types.LegacyTx{
+		Nonce:    0,
+		To:       &preconfTo,
+		Value:    big.NewInt(1000),
+		Gas:      params.TxGas,
+		GasPrice: big.NewInt(params.InitialBaseFee),
+	})
+	tx4 := types.MustSignNewTx(testPreconfKey, signer, &types.LegacyTx{
+		Nonce:    1,
+		To:       &preconfTo,
+		Value:    big.NewInt(1000),
+		Gas:      params.TxGas,
+		GasPrice: big.NewInt(params.InitialBaseFee),
+	})
+	preconfTxs = append(preconfTxs, tx3, tx4)
 }
 
 // testWorkerBackend implements worker.Backend interfaces and wraps all information needed during the testing.
@@ -121,7 +144,7 @@ type testWorkerBackend struct {
 func newTestWorkerBackend(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine, db ethdb.Database, n int) *testWorkerBackend {
 	var gspec = &core.Genesis{
 		Config: chainConfig,
-		Alloc:  core.GenesisAlloc{testBankAddress: {Balance: testBankFunds}},
+		Alloc:  core.GenesisAlloc{testBankAddress: {Balance: testBankFunds}, testPreconfAddress: {Balance: testPreconfFunds}},
 	}
 	switch e := engine.(type) {
 	case *clique.Clique:
@@ -205,6 +228,13 @@ func (b *testWorkerBackend) newRandomTx(creation bool) *types.Transaction {
 func newTestWorker(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine, db ethdb.Database, blocks int) (*worker, *testWorkerBackend) {
 	backend := newTestWorkerBackend(t, chainConfig, engine, db, blocks)
 	backend.txPool.AddLocals(pendingTxs)
+	w := newWorker(testConfig, chainConfig, engine, backend, new(event.TypeMux), nil, false)
+	w.setEtherbase(testBankAddress)
+	return w, backend
+}
+
+func newPreconfTestWorker(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine, db ethdb.Database, blocks int) (*worker, *testWorkerBackend) {
+	backend := newTestWorkerBackend(t, chainConfig, engine, db, blocks)
 	w := newWorker(testConfig, chainConfig, engine, backend, new(event.TypeMux), nil, false)
 	w.setEtherbase(testBankAddress)
 	return w, backend
