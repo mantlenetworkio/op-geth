@@ -64,8 +64,10 @@ func testBuildPayloadWithPreconf(t *testing.T, cfg *preconf.TxPoolConfig, txs []
 	sub := b.txPool.SubscribeNewPreconfTxEvent(preconfTxCh)
 	defer sub.Unsubscribe()
 
-	b.txPool.AddLocals(txs)
-	time.Sleep(10 * time.Millisecond)
+	for _, tx := range txs {
+		b.txPool.AddLocals([]*types.Transaction{tx})
+		time.Sleep(2 * time.Millisecond)
+	}
 
 	args.NoTxPool = false
 	payload, err := w.buildPayload(args)
@@ -103,7 +105,7 @@ func testBuildPayloadWithPreconf(t *testing.T, cfg *preconf.TxPoolConfig, txs []
 		preconfTxSet[preconfTx.Hash()] = struct{}{}
 	}
 
-	preconfTxs := 0
+	receivedPreconfTxs := make([]core.NewPreconfTxEvent, 0, expectPreconfTxs)
 	for i := 0; i < expectPreconfTxs; i++ {
 		select {
 		case ret := <-preconfTxCh:
@@ -111,14 +113,34 @@ func testBuildPayloadWithPreconf(t *testing.T, cfg *preconf.TxPoolConfig, txs []
 				if ret.Status != core.PreconfStatusSuccess && ret.Status != expectStatus {
 					t.Fatalf("Expected %v status %s, but got %s", ret.TxHash, expectStatus, ret.Status)
 				}
-				preconfTxs++
+				receivedPreconfTxs = append(receivedPreconfTxs, ret)
 			}
 		case <-time.After(10 * time.Millisecond):
 			t.Fatal("Preconf txs should not be ready")
 		}
 	}
-	if preconfTxs != expectPreconfTxs {
-		t.Fatalf("Expected %d success txs, but got %d", expectPreconfTxs, preconfTxs)
+	if len(receivedPreconfTxs) != expectPreconfTxs {
+		t.Fatalf("Expected %d success txs, but got %d", expectPreconfTxs, len(receivedPreconfTxs))
+	}
+
+	// Check that the same transactions appear in the same order in both collections
+	if expectPreconfTxs > 0 {
+		// Build an index map of tx hashes by position in the txs array
+		txsOrder := make(map[common.Hash]int)
+		for i, tx := range payload.full.Transactions() {
+			txHash := tx.Hash()
+			if _, exists := preconfTxSet[txHash]; exists {
+				txsOrder[txHash] = i
+			}
+		}
+
+		// Verify preconf txs order
+		for i := 0; i < len(receivedPreconfTxs); i++ {
+			if txsOrder[receivedPreconfTxs[i].TxHash] != i {
+				t.Fatalf("Transaction order mismatch: tx %v came before %v in receivedPreconfTxs, but after in txs",
+					receivedPreconfTxs[i].TxHash, receivedPreconfTxs[i+1].TxHash)
+			}
+		}
 	}
 }
 
@@ -140,7 +162,7 @@ func TestPreconfMixSuccess(t *testing.T) {
 	testBuildPayloadWithPreconf(t, cfg, txs, len(txs), len(preconfTxs), core.PreconfStatusSuccess, true)
 }
 
-func TestPreconfNonceTooLowFailed(t *testing.T) {
+func TestPreconfNonceTooHighFailed(t *testing.T) {
 	cfg := &preconf.TxPoolConfig{
 		FromPreconfs:   []common.Address{testPreconfAddress},
 		ToPreconfs:     []common.Address{preconfTo},
@@ -150,11 +172,21 @@ func TestPreconfNonceTooLowFailed(t *testing.T) {
 	testBuildPayloadWithPreconf(t, cfg, txs, 1, 0, core.PreconfStatusFailed, true)
 }
 
+func TestPreconfNonceTooLowFailed(t *testing.T) {
+	cfg := &preconf.TxPoolConfig{
+		FromPreconfs:   []common.Address{testPreconfAddress},
+		ToPreconfs:     []common.Address{preconfTo},
+		PreconfTimeout: 400 * time.Millisecond,
+	}
+	txs := []*types.Transaction{pendingTxs[0], preconfTxs[0], preconfTxs[1], preconfTxs[0]}
+	testBuildPayloadWithPreconf(t, cfg, txs, 3, 2, core.PreconfStatusFailed, true)
+}
+
 func TestPreconfTimeoutFailed(t *testing.T) {
 	cfg := &preconf.TxPoolConfig{
 		FromPreconfs:   []common.Address{testPreconfAddress},
 		ToPreconfs:     []common.Address{preconfTo},
-		PreconfTimeout: 0,
+		PreconfTimeout: time.Nanosecond,
 	}
 	testBuildPayloadWithPreconf(t, cfg, preconfTxs, 0, 0, core.PreconfStatusTimeout, true)
 }

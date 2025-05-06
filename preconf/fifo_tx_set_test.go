@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/assert"
@@ -137,6 +138,164 @@ func TestFIFOTxSet_Forward(t *testing.T) {
 
 			// Verify results
 			assert.Equal(t, tt.wantTxs, s.Len(), "unexpected number of transactions")
+		})
+	}
+}
+
+func TestFIFOTxSet_SetStatus(t *testing.T) {
+	// Create a new FIFOTxSet
+	set := NewFIFOTxSet()
+
+	// Create test transactions
+	tx1 := types.NewTransaction(1, common.HexToAddress("0x1"), nil, 0, nil, nil)
+	tx2 := types.NewTransaction(2, common.HexToAddress("0x2"), nil, 0, nil, nil)
+	from1, _ := types.Sender(types.LatestSignerForChainID(common.Big1), tx1)
+	from2, _ := types.Sender(types.LatestSignerForChainID(common.Big1), tx2)
+
+	// Add transactions to the set
+	set.Add(from1, tx1)
+	set.Add(from2, tx2)
+
+	tests := []struct {
+		name           string
+		hash           common.Hash
+		status         core.PreconfStatus
+		expectedResult int
+	}{
+		{
+			name:           "Set status for existing transaction",
+			hash:           tx1.Hash(),
+			status:         core.PreconfStatusSuccess,
+			expectedResult: 1, // Should return 1 for successful status update
+		},
+		{
+			name:           "Set status for non-existing transaction",
+			hash:           common.HexToHash("0xdead"),
+			status:         core.PreconfStatusSuccess,
+			expectedResult: 0, // Should return 0 if transaction doesn't exist
+		},
+		{
+			name:           "Set timeout status for existing transaction",
+			hash:           tx2.Hash(),
+			status:         core.PreconfStatusTimeout,
+			expectedResult: 1, // Should return 1 for successful status update
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := set.SetStatus(tt.hash, tt.status)
+			assert.Equal(t, tt.expectedResult, result, "unexpected result from SetStatus")
+
+			// Verify the status was set correctly if the transaction exists
+			if tt.expectedResult == 1 {
+				entry, exists := set.txMap[tt.hash]
+				assert.True(t, exists, "transaction should exist in the map")
+				assert.Equal(t, tt.status, entry.Status, "status should be updated correctly")
+			}
+		})
+	}
+}
+
+func TestFIFOTxSet_CleanTimeout(t *testing.T) {
+	tests := []struct {
+		name              string
+		setup             func(*FIFOTxSet)
+		expectedRemoved   int
+		expectedRemaining int
+	}{
+		{
+			name: "No timeout transactions",
+			setup: func(s *FIFOTxSet) {
+				// Add transactions without timeout status
+				tx1 := types.NewTransaction(1, common.HexToAddress("0x1"), nil, 0, nil, nil)
+				tx2 := types.NewTransaction(2, common.HexToAddress("0x2"), nil, 0, nil, nil)
+				from, _ := types.Sender(types.LatestSignerForChainID(common.Big1), tx1)
+
+				s.Add(from, tx1)
+				s.Add(from, tx2)
+
+				// Set some non-timeout statuses
+				s.SetStatus(tx1.Hash(), core.PreconfStatusSuccess)
+				s.SetStatus(tx2.Hash(), core.PreconfStatusFailed)
+			},
+			expectedRemoved:   0,
+			expectedRemaining: 2,
+		},
+		{
+			name: "All timeout transactions",
+			setup: func(s *FIFOTxSet) {
+				// Add transactions with timeout status
+				tx1 := types.NewTransaction(1, common.HexToAddress("0x1"), nil, 0, nil, nil)
+				tx2 := types.NewTransaction(2, common.HexToAddress("0x2"), nil, 0, nil, nil)
+				from, _ := types.Sender(types.LatestSignerForChainID(common.Big1), tx1)
+
+				s.Add(from, tx1)
+				s.Add(from, tx2)
+
+				// Set timeout status for all
+				s.SetStatus(tx1.Hash(), core.PreconfStatusTimeout)
+				s.SetStatus(tx2.Hash(), core.PreconfStatusTimeout)
+			},
+			expectedRemoved:   2,
+			expectedRemaining: 0,
+		},
+		{
+			name: "Mixed status transactions",
+			setup: func(s *FIFOTxSet) {
+				// Add a mix of transactions with different statuses
+				tx1 := types.NewTransaction(1, common.HexToAddress("0x1"), nil, 0, nil, nil)
+				tx2 := types.NewTransaction(2, common.HexToAddress("0x2"), nil, 0, nil, nil)
+				tx3 := types.NewTransaction(3, common.HexToAddress("0x3"), nil, 0, nil, nil)
+				tx4 := types.NewTransaction(4, common.HexToAddress("0x4"), nil, 0, nil, nil)
+				from, _ := types.Sender(types.LatestSignerForChainID(common.Big1), tx1)
+
+				s.Add(from, tx1)
+				s.Add(from, tx2)
+				s.Add(from, tx3)
+				s.Add(from, tx4)
+
+				// Set different statuses
+				s.SetStatus(tx1.Hash(), core.PreconfStatusSuccess)
+				s.SetStatus(tx2.Hash(), core.PreconfStatusTimeout)
+				s.SetStatus(tx3.Hash(), core.PreconfStatusFailed)
+				s.SetStatus(tx4.Hash(), core.PreconfStatusTimeout)
+			},
+			expectedRemoved:   2,
+			expectedRemaining: 2,
+		},
+		{
+			name: "Empty set",
+			setup: func(s *FIFOTxSet) {
+				// No transactions added
+			},
+			expectedRemoved:   0,
+			expectedRemaining: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup FIFOTxSet
+			s := NewFIFOTxSet()
+			tt.setup(s)
+
+			// Remember initial length
+			initialLen := s.Len()
+
+			// Execute CleanTimeout
+			removed := s.CleanTimeout()
+
+			// Verify results
+			assert.Equal(t, tt.expectedRemoved, removed, "unexpected number of removed transactions")
+			assert.Equal(t, tt.expectedRemaining, s.Len(), "unexpected number of remaining transactions")
+			assert.Equal(t, initialLen-removed, s.Len(), "inconsistent removal count")
+
+			// Verify all remaining transactions don't have timeout status
+			for _, entry := range s.TxEntries() {
+				assert.NotEqual(t, core.PreconfStatusTimeout, entry.Status,
+					"transaction with timeout status should have been removed")
+			}
 		})
 	}
 }
