@@ -2,6 +2,7 @@ package miner
 
 import (
 	"math/big"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,7 +16,7 @@ import (
 	"github.com/ethereum/go-ethereum/preconf"
 )
 
-func testBuildPayloadWithPreconf(t *testing.T, cfg *preconf.TxPoolConfig, txs []*types.Transaction, expectTxs, expectPreconfTxs int, expectStatus core.PreconfStatus, init bool) {
+func testBuildPayloadWithPreconf(t *testing.T, cfg *preconf.TxPoolConfig, txs []*types.Transaction, expectTxs, expectPreconfTxs int, expectStatus core.PreconfStatus, init bool) time.Duration {
 	var (
 		db        = rawdb.NewMemoryDatabase()
 		recipient = common.HexToAddress("0xdeadbeef")
@@ -59,6 +60,8 @@ func testBuildPayloadWithPreconf(t *testing.T, cfg *preconf.TxPoolConfig, txs []
 		w.preconfChecker.UnpausePreconf(env, w.eth.TxPool().PreconfReady)
 	}
 
+	start := time.Now()
+
 	preconfTxCh := make(chan core.NewPreconfTxEvent, 100)
 	defer close(preconfTxCh)
 	sub := b.txPool.SubscribeNewPreconfTxEvent(preconfTxCh)
@@ -74,7 +77,6 @@ func testBuildPayloadWithPreconf(t *testing.T, cfg *preconf.TxPoolConfig, txs []
 	if err != nil {
 		t.Fatalf("Failed to build payload %v", err)
 	}
-
 	verify := func(outer *engine.ExecutionPayloadEnvelope, txs int, timestamp uint64) {
 		payload := outer.ExecutionPayload
 		if payload.ParentHash != b.chain.CurrentBlock().Hash() {
@@ -142,6 +144,8 @@ func testBuildPayloadWithPreconf(t *testing.T, cfg *preconf.TxPoolConfig, txs []
 			}
 		}
 	}
+
+	return time.Since(start)
 }
 
 func TestPreconfSuccess(t *testing.T) {
@@ -199,4 +203,25 @@ func TestPreconfBeforeInitFailed(t *testing.T) {
 	}
 	txs := []*types.Transaction{pendingTxs[0], preconfTxs[0]}
 	testBuildPayloadWithPreconf(t, cfg, txs, 1, 0, core.PreconfStatusFailed, false)
+}
+
+func TestPreconfWithL1SyncStatusDelay(t *testing.T) {
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		TestUpdateOptimismSyncStatusDelay(t)
+		wg.Done()
+	}()
+	time.Sleep(10 * time.Millisecond)
+	cfg := &preconf.TxPoolConfig{
+		FromPreconfs:   []common.Address{testPreconfAddress},
+		ToPreconfs:     []common.Address{preconfTo},
+		PreconfTimeout: 400 * time.Millisecond,
+	}
+	txs := []*types.Transaction{pendingTxs[0], preconfTxs[0], newTxs[0], preconfTxs[1]}
+	elapsed := testBuildPayloadWithPreconf(t, cfg, txs, len(txs), len(preconfTxs), core.PreconfStatusSuccess, true)
+	if elapsed > 100*time.Second {
+		t.Fatalf("TestPreconfWithL1SyncStatusDelay took %v", elapsed)
+	}
+	wg.Wait()
 }

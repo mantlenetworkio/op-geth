@@ -1360,6 +1360,7 @@ func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) {
 				if response.Receipt != nil {
 					if response.Receipt.Status == types.ReceiptStatusSuccessful {
 						event.Status = core.PreconfStatusSuccess
+						event.Receipt = core.PreconfTxReceipt{Logs: response.Receipt.Logs}
 					} else {
 						event.Status = core.PreconfStatusFailed
 						event.Reason = vm.ErrExecutionReverted.Error()

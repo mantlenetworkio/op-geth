@@ -33,12 +33,17 @@ const (
 	PreconfStatusWaiting PreconfStatus = "waiting"
 )
 
+type PreconfTxReceipt struct {
+	Logs []*types.Log `json:"logs"`
+}
+
 // NewPreconfTxsEvent is posted when a preconf transaction enters the transaction pool.
 type NewPreconfTxEvent struct {
-	TxHash                 common.Hash    `json:"txHash"`
-	Status                 PreconfStatus  `json:"status"`
-	Reason                 string         `json:"reason"`      // "optional failure message"
-	PredictedL2BlockNumber hexutil.Uint64 `json:"blockHeight"` // "predicted L2 block number"
+	TxHash                 common.Hash      `json:"txHash"`
+	Status                 PreconfStatus    `json:"status"`
+	Reason                 string           `json:"reason"`      // "optional failure message"
+	PredictedL2BlockNumber hexutil.Uint64   `json:"blockHeight"` // "predicted L2 block number"
+	Receipt                PreconfTxReceipt `json:"receipt"`
 }
 
 // NewPreconfTxRequestEvent is posted when a preconf transaction request enters the transaction pool.

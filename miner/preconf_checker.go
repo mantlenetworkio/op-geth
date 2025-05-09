@@ -48,7 +48,7 @@ type preconfChecker struct {
 
 	// clients
 	opnodeClient *http.Client
-	l1ethclient  *ethclient.Client
+	l1ethclient  ethereum.LogFilterer
 
 	env          *environment
 	envUpdatedAt time.Time
@@ -194,13 +194,21 @@ func (c *preconfChecker) UpdateOptimismSyncStatus(newOptimismSyncStatus *preconf
 
 	// two step lock to reduce lock time
 	if header != nil {
-		c.updateDepositTxs(header.currentL1, header.headL1)
+		if err := c.updateDepositTxs(header.currentL1, header.headL1); err != nil {
+			log.Error("failed to update deposit txs", "err", err)
+			c.mu.Lock()
+			c.optimismSyncStatusOk = false
+			c.mu.Unlock()
+			return
+		}
 	}
 
 	c.mu.Lock()
 	c.optimismSyncStatus = status
 	c.optimismSyncStatusOk = statusOk
 	c.mu.Unlock()
+
+	log.Debug("update optimism sync status", "status", status, "statusOk", statusOk)
 }
 
 // check optimism sync status
@@ -221,20 +229,21 @@ func (c *preconfChecker) isSyncStatusOk(newStatus *preconf.OptimismSyncStatus) b
 // update depositTxs
 // We cannot use `newOptimismSyncStatus.CurrentL1.Number` because it may not have been successfully derived yet, which could cause us to
 // miss the deposit transactions for this block. Therefore, we can only use `newOptimismSyncStatus.UnsafeL2.L1Origin.Number`
-func (c *preconfChecker) updateDepositTxs(currentL1, headL1 uint64) {
+func (c *preconfChecker) updateDepositTxs(currentL1, headL1 uint64) error {
 	start, end := currentL1+1, headL1-1
 	depositTxs, err := c.GetDepositTxs(start, end)
 	if err != nil {
 		c.depositTxs = nil
 		log.Error("failed to get deposit txs", "err", err, "start", start, "end", end)
 		preconf.MetricsL1Deposit(false, 0)
-		return
+		return err
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.depositTxs = depositTxs
 	preconf.MetricsL1Deposit(true, len(depositTxs))
 	log.Debug("update deposit txs", "current_l1.number", currentL1, "head_l1.number", headL1, "start", start, "end", end, "deposit_txs", len(depositTxs))
+	return nil
 }
 
 func (c *preconfChecker) Preconf(tx *types.Transaction) (*types.Receipt, error) {
