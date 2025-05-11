@@ -1367,6 +1367,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	if err != nil {
 		return err
 	}
+	log.Info("test rpc, triedb commit start", "time", mclock.Now())
 	// If we're running an archive node, always flush
 	if bc.cacheConfig.TrieDirtyDisabled {
 		return bc.triedb.Commit(root, false)
@@ -1436,9 +1437,12 @@ func (bc *BlockChain) WriteBlockAndSetHead(block *types.Block, receipts []*types
 // writeBlockAndSetHead is the internal implementation of WriteBlockAndSetHead.
 // This function expects the chain mutex to be held.
 func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types.Receipt, logs []*types.Log, state *state.StateDB, emitHeadEvent bool) (status WriteStatus, err error) {
+	log.Info("test rpc, writeBlockWithState start", "time", mclock.Now())
 	if err := bc.writeBlockWithState(block, receipts, state); err != nil {
 		return NonStatTy, err
 	}
+	log.Info("test rpc, writeBlockWithState end", "time", mclock.Now())
+
 	currentBlock := bc.CurrentBlock()
 	reorg, err := bc.forker.ReorgNeeded(currentBlock, block.Header())
 	if err != nil {
@@ -1572,6 +1576,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 	abort, results := bc.engine.VerifyHeaders(bc, headers, seals)
 	defer close(abort)
 
+	log.Info("test rpc, new insertIterator", "time", mclock.Now())
 	// Peek the error for the first block to decide the directing import logic
 	it := newInsertIterator(chain, results, bc.validator)
 	block, err := it.next()
@@ -1583,26 +1588,30 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 		//   2. The block is stored as a sidechain, and is lying about it's stateroot, and passes a stateroot
 		//      from the canonical chain, which has not been verified.
 		// Skip all known blocks that are behind us.
+		log.Info("test rpc skip block", "number", block.Number(), "hash", block.Hash(), "time", mclock.Now())
 		var (
 			reorg   bool
 			current = bc.CurrentBlock()
 		)
 		for block != nil && bc.skipBlock(err, it) {
+			log.Info("test rpc skip block loop", "number", block.Number(), "hash", block.Hash(), "time", mclock.Now())
 			reorg, err = bc.forker.ReorgNeeded(current, block.Header())
 			if err != nil {
 				return it.index, err
 			}
 			if reorg {
+				log.Info("test rpc reorg", "number", block.Number(), "hash", block.Hash())
 				// Switch to import mode if the forker says the reorg is necessary
 				// and also the block is not on the canonical chain.
 				// In eth2 the forker always returns true for reorg decision (blindly trusting
 				// the external consensus engine), but in order to prevent the unnecessary
 				// reorgs when importing known blocks, the special case is handled here.
 				if block.NumberU64() > current.Number.Uint64() || bc.GetCanonicalHash(block.NumberU64()) != block.Hash() {
+					log.Info("test rpc canonical block", "number", block.Number(), "hash", block.Hash(), "time", mclock.Now())
 					break
 				}
 			}
-			log.Debug("Ignoring already known block", "number", block.Number(), "hash", block.Hash())
+			log.Info("test rpc Ignoring already known block", "number", block.Number(), "hash", block.Hash())
 			stats.ignored++
 
 			block, err = it.next()
@@ -1616,7 +1625,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 		// `insertChain` while a part of them have higher total difficulty than current
 		// head full block(new pivot point).
 		for block != nil && bc.skipBlock(err, it) {
-			log.Debug("Writing previously known block", "number", block.Number(), "hash", block.Hash())
+			log.Info("test rpc Writing previously known block", "number", block.Number(), "hash", block.Hash(), "time", mclock.Now())
+
 			if err := bc.writeKnownBlock(block); err != nil {
 				return it.index, err
 			}
@@ -1624,6 +1634,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 
 			block, err = it.next()
 		}
+		log.Info("test rpc skip block end", "time", mclock.Now())
 		// Falls through to the block import
 	}
 	switch {
@@ -1631,18 +1642,18 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 	case errors.Is(err, consensus.ErrPrunedAncestor):
 		if setHead {
 			// First block is pruned, insert as sidechain and reorg only if TD grows enough
-			log.Debug("Pruned ancestor, inserting as sidechain", "number", block.Number(), "hash", block.Hash())
+			log.Info("test rpc Pruned ancestor, inserting as sidechain", "number", block.Number(), "hash", block.Hash())
 			return bc.insertSideChain(block, it)
 		} else {
 			// We're post-merge and the parent is pruned, try to recover the parent state
-			log.Debug("Pruned ancestor", "number", block.Number(), "hash", block.Hash())
+			log.Info("test rpc Pruned ancestor", "number", block.Number(), "hash", block.Hash())
 			_, err := bc.recoverAncestors(block)
 			return it.index, err
 		}
 	// First block is future, shove it (and all children) to the future queue (unknown ancestor)
 	case errors.Is(err, consensus.ErrFutureBlock) || (errors.Is(err, consensus.ErrUnknownAncestor) && bc.futureBlocks.Contains(it.first().ParentHash())):
 		for block != nil && (it.index == 0 || errors.Is(err, consensus.ErrUnknownAncestor)) {
-			log.Debug("Future block, postponing import", "number", block.Number(), "hash", block.Hash())
+			log.Info("test rpc Future block, postponing import", "number", block.Number(), "hash", block.Hash(), "time", mclock.Now())
 			if err := bc.addFutureBlock(block); err != nil {
 				return it.index, err
 			}
@@ -1658,9 +1669,14 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 	// ErrKnownBlock is allowed here since some known blocks
 	// still need re-execution to generate snapshots that are missing
 	case err != nil && !errors.Is(err, ErrKnownBlock):
+		log.Info("test rpc failed to add block", "number", block.Number(), "hash", block.Hash(), "time", mclock.Now())
 		bc.futureBlocks.Remove(block.Hash())
+		log.Info("test rpc failed to add block remove", "number", block.Number(), "hash", block.Hash(), "time", mclock.Now())
+
 		stats.ignored += len(it.chain)
 		bc.reportBlock(block, nil, err)
+		log.Info("test rpc failed to add block report", "number", block.Number(), "hash", block.Hash(), "time", mclock.Now())
+
 		return it.index, err
 	}
 	// No validation errors for the first block (or chain prefix skipped)
@@ -1674,16 +1690,20 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 			activeState.StopPrefetcher()
 		}
 	}()
+	log.Info("test rpc, insertChain loop start", "time", mclock.Now())
 
 	for ; block != nil && err == nil || errors.Is(err, ErrKnownBlock); block, err = it.next() {
+		log.Info("test rpc, insertChain loop ", "block", block.NumberU64(), "time", mclock.Now())
+
 		// If the chain is terminating, stop processing blocks
 		if bc.insertStopped() {
-			log.Debug("Abort during block processing")
+			log.Info("test rpc Abort during block processing")
 			break
 		}
 		// If the header is a banned one, straight out abort
 		if BadHashes[block.Hash()] {
 			bc.reportBlock(block, nil, ErrBannedHash)
+			log.Info("test rpc, report bad block", "time", mclock.Now())
 			return it.index, ErrBannedHash
 		}
 		// If the block is known (in the middle of the chain), it's a special case for
@@ -1693,13 +1713,14 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 		// its header and body was already in the database). But if the corresponding
 		// snapshot layer is missing, forcibly rerun the execution to build it.
 		if bc.skipBlock(err, it) {
-			logger := log.Debug
-			if bc.chainConfig.Clique == nil {
-				logger = log.Warn
-			}
+			log.Info("test rpc ,insert chain loop, skip block", "number", block.Number(), "hash", block.Hash(), "time", mclock.Now())
+			logger := log.Info
+			//if bc.chainConfig.Clique == nil {
+			//	logger = log.Warn
+			//}
 			logger("Inserted known block", "number", block.Number(), "hash", block.Hash(),
 				"uncles", len(block.Uncles()), "txs", len(block.Transactions()), "gas", block.GasUsed(),
-				"root", block.Root())
+				"root", block.Root(), "time", mclock.Now())
 
 			// Special case. Commit the empty receipt slice if we meet the known
 			// block in the middle. It can only happen in the clique chain. Whenever
@@ -1711,13 +1732,17 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 			// the empty receipt entry.
 			if len(block.Transactions()) == 0 {
 				rawdb.WriteReceipts(bc.db, block.Hash(), block.NumberU64(), nil)
+				log.Info("test rpc, WriteReceipts", "time", mclock.Now())
 			} else {
 				log.Error("Please file an issue, skip known block execution without receipt",
 					"hash", block.Hash(), "number", block.NumberU64())
 			}
+			log.Info("test rpc, writeKnownBlock start", "time", mclock.Now())
 			if err := bc.writeKnownBlock(block); err != nil {
 				return it.index, err
 			}
+			log.Info("test rpc, writeKnownBlock end", "time", mclock.Now())
+
 			stats.processed++
 
 			// We can assume that logs are empty here, since the only way for consecutive
@@ -1725,6 +1750,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 			lastCanon = block
 			continue
 		}
+
+		log.Info("test rpc, insertChain loop --", "block", block.NumberU64(), "time", mclock.Now())
 
 		// Retrieve the parent block and it's state to execute on top
 		start := time.Now()
@@ -1736,6 +1763,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 		if err != nil {
 			return it.index, err
 		}
+		log.Info("test rpc, insertChain loop new state", "time", mclock.Now())
 
 		// Enable prefetching to pull in trie node paths while processing transactions
 		statedb.StartPrefetcher("chain")
@@ -1745,6 +1773,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 		// transactions and probabilistically some of the account/storage trie nodes.
 		var followupInterrupt uint32
 		if !bc.cacheConfig.TrieCleanNoPrefetch {
+			log.Info("test rpc, TrieCleanNoPrefetch", "time", mclock.Now())
 			if followup, err := it.peek(); followup != nil && err == nil {
 				throwaway, _ := state.New(parent.Root, bc.stateCache, bc.snaps)
 
@@ -1761,13 +1790,20 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 
 		// Process block using the parent state as reference point
 		pstart := time.Now()
+		log.Info("test rpc, insertChain loop pstart", "time", pstart)
+
 		receipts, logs, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig)
+		log.Info("test rpc, insertChain loop pstart Process", "time", mclock.Now())
+
 		if err != nil {
 			bc.reportBlock(block, receipts, err)
+			log.Info("test rpc, insertChain loop pstart Process report", "time", mclock.Now())
+
 			atomic.StoreUint32(&followupInterrupt, 1)
 			return it.index, err
 		}
 		ptime := time.Since(pstart)
+		log.Info("test rpc, insertChain loop pend", "time", ptime)
 
 		vstart := time.Now()
 		if err := bc.validator.ValidateState(block, statedb, receipts, usedGas); err != nil {
@@ -1794,6 +1830,16 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 		blockExecutionTimer.Update(ptime - trieRead)                    // The time spent on EVM processing
 		blockValidationTimer.Update(vtime - (triehash + trieUpdate))    // The time spent on block validation
 
+		log.Info("test rpc, accountReadTimer ", "time", statedb.AccountReads)
+		log.Info("test rpc, storageReadTimer ", "time", statedb.StorageReads)
+		log.Info("test rpc, snapshotAccountReadTimer ", "time", statedb.SnapshotAccountReads)
+		log.Info("test rpc, snapshotStorageReadTimer ", "time", statedb.SnapshotStorageReads)
+		log.Info("test rpc, accountUpdateTimer ", "time", statedb.AccountUpdates)
+		log.Info("test rpc, storageUpdateTimer ", "time", statedb.StorageUpdates)
+		log.Info("test rpc, accountHashTimer ", "time", statedb.AccountHashes)
+		log.Info("test rpc, storageHashTimer ", "time", statedb.StorageHashes)
+		log.Info("test rpc, block excution", "time", ptime-trieRead)
+		log.Info("test rpc, block validation", "time", vtime-(triehash+trieUpdate))
 		// Write the block to the chain and get the status.
 		var (
 			wstart = time.Now()
@@ -1817,6 +1863,13 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 
 		blockWriteTimer.Update(time.Since(wstart) - statedb.AccountCommits - statedb.StorageCommits - statedb.SnapshotCommits - statedb.TrieDBCommits)
 		blockInsertTimer.UpdateSince(start)
+
+		log.Info("test rpc, accountCommitTimer ", "time", statedb.AccountCommits)
+		log.Info("test rpc, storageCommitTimer ", "time", statedb.StorageCommits)
+		log.Info("test rpc, snapshotCommitTimer ", "time", statedb.SnapshotCommits)
+		log.Info("test rpc, triedbCommitTimer ", "time", statedb.TrieDBCommits)
+		log.Info("test rpc, blockWriteTimer ", "time", time.Since(wstart)-statedb.AccountCommits-statedb.StorageCommits-statedb.SnapshotCommits-statedb.TrieDBCommits)
+		log.Info("test rpc, block start", "time", start)
 
 		// Report the import stats before returning the various results
 		stats.processed++
@@ -1859,6 +1912,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 				"root", block.Root())
 		}
 	}
+	log.Info("test rpc, insertChain loop end", "time", mclock.Now())
 
 	// Any blocks remaining here? The only ones we care about are the future ones
 	if block != nil && errors.Is(err, consensus.ErrFutureBlock) {
@@ -1896,11 +1950,14 @@ func (bc *BlockChain) insertSideChain(block *types.Block, it *insertIterator) (i
 	// Since we don't import them here, we expect ErrUnknownAncestor for the remaining
 	// ones. Any other errors means that the block is invalid, and should not be written
 	// to disk.
+	log.Info("test rpc, insert side chain loop start", "time", mclock.Now())
 	err := consensus.ErrPrunedAncestor
 	for ; block != nil && errors.Is(err, consensus.ErrPrunedAncestor); block, err = it.next() {
+		log.Info("test rpc, insert side chain loop ", "block", block.Number(), "time", mclock.Now())
 		// Check the canonical state root for that number
 		if number := block.NumberU64(); current.Number.Uint64() >= number {
 			canonical := bc.GetBlockByNumber(number)
+			log.Info("test rpc, get block", "number", canonical.Number(), "tiem", mclock.Now())
 			if canonical != nil && canonical.Hash() == block.Hash() {
 				// Not a sidechain block, this is a re-import of a canon block which has it's state pruned
 
@@ -1936,13 +1993,14 @@ func (bc *BlockChain) insertSideChain(block *types.Block, it *insertIterator) (i
 			if err := bc.writeBlockWithoutState(block, externTd); err != nil {
 				return it.index, err
 			}
-			log.Debug("Injected sidechain block", "number", block.Number(), "hash", block.Hash(),
+			log.Info("test rpc, Injected sidechain block", "number", block.Number(), "hash", block.Hash(),
 				"diff", block.Difficulty(), "elapsed", common.PrettyDuration(time.Since(start)),
 				"txs", len(block.Transactions()), "gas", block.GasUsed(), "uncles", len(block.Uncles()),
-				"root", block.Root())
+				"root", block.Root(), "time", mclock.Now())
 		}
 		lastBlock = block
 	}
+	log.Info("test rpc, insert side chain loop end", "time", mclock.Now())
 	// At this point, we've written all sidechain blocks to database. Loop ended
 	// either on some other error or all were processed. If there was some other
 	// error, we can ignore the rest of those blocks.
@@ -1950,6 +2008,7 @@ func (bc *BlockChain) insertSideChain(block *types.Block, it *insertIterator) (i
 	// If the externTd was larger than our local TD, we now need to reimport the previous
 	// blocks to regenerate the required state
 	reorg, err := bc.forker.ReorgNeeded(current, lastBlock.Header())
+	log.Info("test rpc, reorg needed", "time", mclock.Now())
 	if err != nil {
 		return it.index, err
 	}
@@ -1978,7 +2037,10 @@ func (bc *BlockChain) insertSideChain(block *types.Block, it *insertIterator) (i
 		blocks []*types.Block
 		memory uint64
 	)
+	log.Info("test rpc, insert side chain hashes loop start", "time", mclock.Now())
 	for i := len(hashes) - 1; i >= 0; i-- {
+		log.Info("test rpc, insert side chain hashes loop", "time", mclock.Now())
+
 		// Append the next block to our batch
 		block := bc.GetBlock(hashes[i], numbers[i])
 
@@ -1989,7 +2051,7 @@ func (bc *BlockChain) insertSideChain(block *types.Block, it *insertIterator) (i
 		// all raised events and logs from notifications since we're too heavy on the
 		// memory here.
 		if len(blocks) >= 2048 || memory > 64*1024*1024 {
-			log.Info("Importing heavy sidechain segment", "blocks", len(blocks), "start", blocks[0].NumberU64(), "end", block.NumberU64())
+			log.Info("test rpc Importing heavy sidechain segment", "blocks", len(blocks), "start", blocks[0].NumberU64(), "end", block.NumberU64())
 			if _, err := bc.insertChain(blocks, false, true); err != nil {
 				return 0, err
 			}
@@ -1997,13 +2059,15 @@ func (bc *BlockChain) insertSideChain(block *types.Block, it *insertIterator) (i
 
 			// If the chain is terminating, stop processing blocks
 			if bc.insertStopped() {
-				log.Debug("Abort during blocks processing")
+				log.Info("test rpc Abort during blocks processing")
 				return 0, nil
 			}
 		}
 	}
+	log.Info("test rpc, insert side chain hashes loop end", "time", mclock.Now())
+
 	if len(blocks) > 0 {
-		log.Info("Importing sidechain segment", "start", blocks[0].NumberU64(), "end", blocks[len(blocks)-1].NumberU64())
+		log.Info("test rpc Importing sidechain segment", "start", blocks[0].NumberU64(), "end", blocks[len(blocks)-1].NumberU64())
 		return bc.insertChain(blocks, false, true)
 	}
 	return 0, nil
@@ -2020,25 +2084,31 @@ func (bc *BlockChain) recoverAncestors(block *types.Block) (common.Hash, error) 
 		numbers []uint64
 		parent  = block
 	)
+	log.Info("test rpc, parent has state loop start", "time", mclock.Now())
 	for parent != nil && !bc.HasState(parent.Root()) {
+		log.Info("test rpc, parent has state loop ", "block", parent.NumberU64(), "time", mclock.Now())
+
 		hashes = append(hashes, parent.Hash())
 		numbers = append(numbers, parent.NumberU64())
 		parent = bc.GetBlock(parent.ParentHash(), parent.NumberU64()-1)
 
 		// If the chain is terminating, stop iteration
 		if bc.insertStopped() {
-			log.Debug("Abort during blocks iteration")
+			log.Info("test rpc, Abort during blocks iteration")
 			return common.Hash{}, errInsertionInterrupted
 		}
 	}
+	log.Info("test rpc, parent has state loop end", "time", mclock.Now())
+
 	if parent == nil {
 		return common.Hash{}, errors.New("missing parent")
 	}
+	log.Info("test rpc, recover ancestors hashes loop start", "time", mclock.Now())
 	// Import all the pruned blocks to make the state available
 	for i := len(hashes) - 1; i >= 0; i-- {
 		// If the chain is terminating, stop processing blocks
 		if bc.insertStopped() {
-			log.Debug("Abort during blocks processing")
+			log.Info("test rpc, Abort during blocks processing")
 			return common.Hash{}, errInsertionInterrupted
 		}
 		var b *types.Block
@@ -2046,11 +2116,14 @@ func (bc *BlockChain) recoverAncestors(block *types.Block) (common.Hash, error) 
 			b = block
 		} else {
 			b = bc.GetBlock(hashes[i], numbers[i])
+			log.Info("test rpc, recover ancestors hashes loop", "number", numbers[i], "time", mclock.Now())
 		}
 		if _, err := bc.insertChain(types.Blocks{b}, false, false); err != nil {
 			return b.ParentHash(), err
 		}
 	}
+	log.Info("test rpc, recover ancestors hashes loop end", "time", mclock.Now())
+
 	return block.Hash(), nil
 }
 

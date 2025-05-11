@@ -18,6 +18,8 @@ package core
 
 import (
 	"fmt"
+	"github.com/ethereum/go-ethereum/common/mclock"
+	"github.com/ethereum/go-ethereum/log"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -74,13 +76,17 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, statedb, p.config, cfg)
 	rules := vmenv.ChainConfig().Rules(header.Number, false, header.Time)
 
+	log.Info("test rpc, start process tx loop", "block", block.NumberU64(), "time", mclock.Now())
+
 	// Iterate over and process the individual transactions
 	for i, tx := range block.Transactions() {
+		log.Info("test rpc, apply transaction", "tx", tx.Hash(), "time", mclock.Now())
 		msg, err := TransactionToMessage(tx, types.MakeSigner(p.config, header.Number), header.BaseFee, &rules)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
 		statedb.SetTxContext(tx.Hash(), i)
+
 		receipt, err := applyTransaction(msg, p.config, gp, statedb, blockNumber, blockHash, tx, usedGas, vmenv)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
@@ -101,6 +107,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 
 func applyTransaction(msg *Message, config *params.ChainConfig, gp *GasPool, statedb *state.StateDB, blockNumber *big.Int, blockHash common.Hash, tx *types.Transaction, usedGas *uint64, evm *vm.EVM) (*types.Receipt, error) {
 	// Create a new context to be used in the EVM environment.
+	log.Info("test rpc, new evm ctx", "tx", tx.Hash(), "time", mclock.Now())
 	txContext := NewEVMTxContext(msg)
 	evm.Reset(txContext, statedb)
 
@@ -108,15 +115,19 @@ func applyTransaction(msg *Message, config *params.ChainConfig, gp *GasPool, sta
 	if msg.IsDepositTx && config.IsOptimismRegolith(evm.Context.Time) {
 		nonce = statedb.GetNonce(msg.From)
 	}
+	log.Info("test rpc, DeriveL1GasInfo", "tx", tx.Hash(), "time", mclock.Now())
 
 	// used to record l1 fee
 	l1BaseFee, overhead, scalar, scaled, tokenRatio := types.DeriveL1GasInfo(statedb)
+
+	log.Info("test rpc, ApplyMessage start", "tx", tx.Hash(), "time", mclock.Now())
 
 	// Apply the transaction to the current state (included in the env).
 	result, err := ApplyMessage(evm, msg, gp)
 	if err != nil {
 		return nil, err
 	}
+	log.Info("test rpc, ApplyMessage end", "tx", tx.Hash(), "time", mclock.Now())
 
 	// Update the state with pending changes.
 	var root []byte
@@ -146,6 +157,8 @@ func applyTransaction(msg *Message, config *params.ChainConfig, gp *GasPool, sta
 
 	// used to record calculating l1 fee for txs from Layer2
 	if !msg.IsDepositTx {
+		log.Info("test rpc, RollupDataGas", "tx", tx.Hash(), "time", mclock.Now())
+
 		gas := tx.RollupDataGas().DataGas(evm.Context.Time, config)
 		receipt.L1GasUsed = new(big.Int).Add(new(big.Int).SetUint64(gas), overhead)
 		receipt.L1GasPrice = l1BaseFee
@@ -158,6 +171,7 @@ func applyTransaction(msg *Message, config *params.ChainConfig, gp *GasPool, sta
 	if msg.To == nil {
 		receipt.ContractAddress = crypto.CreateAddress(evm.TxContext.Origin, nonce)
 	}
+	log.Info("test rpc, GetLogs", "tx", tx.Hash(), "time", mclock.Now())
 
 	// Set the receipt logs and create the bloom filter.
 	receipt.Logs = statedb.GetLogs(tx.Hash(), blockNumber.Uint64(), blockHash)
@@ -165,6 +179,8 @@ func applyTransaction(msg *Message, config *params.ChainConfig, gp *GasPool, sta
 	receipt.BlockHash = blockHash
 	receipt.BlockNumber = blockNumber
 	receipt.TransactionIndex = uint(statedb.TxIndex())
+	log.Info("test rpc, return receipt", "tx", tx.Hash(), "time", mclock.Now())
+
 	return receipt, err
 }
 

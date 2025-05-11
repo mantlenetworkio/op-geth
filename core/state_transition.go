@@ -19,6 +19,7 @@ package core
 import (
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/common/mclock"
 	"math"
 	"math/big"
 
@@ -469,6 +470,7 @@ func (st *StateTransition) preCheck(metaTxV3 bool) (*big.Int, error) {
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
+	log.Info("test rpc, TransitionDb start", "time", mclock.Now())
 	if mint := st.msg.Mint; mint != nil {
 		st.state.AddBalance(st.msg.From, mint)
 	}
@@ -479,15 +481,18 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	if ethValue := st.msg.ETHValue; ethValue != nil && ethValue.Cmp(big.NewInt(0)) != 0 {
 		st.mintBVMETH(ethValue, rules)
 	}
+	log.Info("test rpc mint bvm eth end", "time", mclock.Now())
 	snap := st.state.Snapshot()
 	// Will be reverted if failed
-
+	log.Info("test rpc new snapshot end", "time", mclock.Now())
 	// Check if the owner of the L2ProxyAdmin contract needs to be upgraded
 	if st.evm.ChainConfig().IsProxyOwnerUpgrade(st.evm.Context.Time) {
 		st.evm.StateDB.SetState(L2ProxyAdminAddress, OwnerSlot, NewProxyAdminOwnerAddress)
 	}
 
+	log.Info("test rpc innerTransitionDb start", "time", mclock.Now())
 	result, err := st.innerTransitionDb()
+	log.Info("test rpc innerTransitionDb end", "time", mclock.Now())
 	// Failed deposits must still be included. Unless we cannot produce the block at all due to the gas limit.
 	// On deposit failure, we rewind any state changes from after the minting, and increment the nonce.
 	if err != nil && err != ErrGasLimitReached && st.msg.IsDepositTx {
@@ -509,6 +514,8 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 		}
 		err = nil
 	}
+	log.Info("test rpc, TransitionDb end", "time", mclock.Now())
+
 	return result, err
 }
 
