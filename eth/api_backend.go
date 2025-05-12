@@ -328,6 +328,10 @@ func (b *EthAPIBackend) SendTxWithPreconf(ctx context.Context, tx *types.Transac
 }
 
 func (b *EthAPIBackend) sendTxWithPreconf(ctx context.Context, tx *types.Transaction) (*core.NewPreconfTxEvent, error) {
+	if b.eth.config.Miner.PreconfConfig == nil || !b.eth.config.Miner.PreconfConfig.EnablePreconfChecker {
+		return nil, fmt.Errorf("preconf checker is not enabled, can't submit as preconf tx")
+	}
+
 	preconfTxCh := make(chan core.NewPreconfTxEvent, 100)
 	defer close(preconfTxCh)
 	sub := b.SubscribeNewPreconfTxEvent(preconfTxCh)
