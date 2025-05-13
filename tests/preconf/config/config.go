@@ -41,7 +41,7 @@ const (
 )
 
 var (
-	TestERC20    = common.HexToAddress("0x9954621E6A56cdC609144A52051965184cBd7Ee9")
+	TestERC20    = common.HexToAddress("0x5FbDB2315678afecb367f032d93F642f64180aa3")
 	TestPay      = common.HexToAddress("0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512")
 	FunderKey, _ = crypto.HexToECDSA(FundKeyHex)
 	Addr1Key, _  = crypto.HexToECDSA(Addr1Pk)

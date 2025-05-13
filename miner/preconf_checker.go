@@ -373,7 +373,6 @@ func (c *preconfChecker) applyTx(env *environment, tx *types.Transaction) (*type
 
 func (c *preconfChecker) PausePreconf() chan<- []*types.Transaction {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	// close old channel to avoid resource leak
 	if c.unSealedPreconfTxsCh != nil {
@@ -386,7 +385,6 @@ func (c *preconfChecker) PausePreconf() chan<- []*types.Transaction {
 }
 
 func (c *preconfChecker) UnpausePreconf(env *environment, preconfReady func()) {
-	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.env = env
 	c.envUpdatedAt = time.Now()

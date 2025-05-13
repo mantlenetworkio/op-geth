@@ -101,7 +101,7 @@ func sendRawTransactionWithPreconf(
 		log.Fatalf("failed to get chain ID: %v", err)
 	}
 
-	auth, err := bind.NewKeyedTransactorWithChainID(config.Addr3Key, chainID)
+	auth, err := bind.NewKeyedTransactorWithChainID(config.FunderKey, chainID)
 	if err != nil {
 		log.Fatalf("failed to create config.Addr1 signer: %v", err)
 	}

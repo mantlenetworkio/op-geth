@@ -49,8 +49,9 @@ func (s *FIFOTxSet) Add(from common.Address, tx *types.Transaction) {
 
 	hash := tx.Hash()
 	entry := &TxEntry{
-		Tx:   tx,
-		From: from,
+		Tx:     tx,
+		From:   from,
+		Status: core.PreconfStatusWaiting,
 	}
 
 	// If the transaction already exists, replace the old entry
@@ -189,22 +190,22 @@ func (s *FIFOTxSet) SetStatus(hash common.Hash, status core.PreconfStatus) int {
 	return 0
 }
 
-func (s *FIFOTxSet) CleanTimeout() int {
+func (s *FIFOTxSet) CleanTimeout() []*TxEntry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	removed := 0
+	removed := []*TxEntry{}
 	newTxQueue := make([]*TxEntry, 0, len(s.txQueue))
 	for _, entry := range s.txQueue {
 		if entry.Status == core.PreconfStatusTimeout {
 			delete(s.txMap, entry.Tx.Hash())
 			MetricsPendingPreconfDec(1)
-			removed++
+			removed = append(removed, entry)
 		} else {
 			newTxQueue = append(newTxQueue, entry)
 		}
 	}
-	log.Trace("preconf clean timeout", "before", len(s.txQueue), "after", len(newTxQueue), "removed", removed)
+	log.Trace("preconf clean timeout", "before", len(s.txQueue), "after", len(newTxQueue), "removed", len(removed))
 	s.txQueue = newTxQueue
 	return removed
 }
