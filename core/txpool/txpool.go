@@ -1297,6 +1297,11 @@ func (pool *TxPool) PreconfReady() {
 	})
 }
 
+func (pool *TxPool) SetPreconfTxStatus(txHash common.Hash, status core.PreconfStatus) {
+	// preconfTxs.SetStatus is thread safe
+	pool.preconfTxs.SetStatus(txHash, status)
+}
+
 func (pool *TxPool) addPreconfTx(tx *types.Transaction) {
 	txHash := tx.Hash()
 
@@ -1385,8 +1390,6 @@ func (pool *TxPool) handlePreconfTxs(from common.Address, tx *types.Transaction)
 				}
 				event.PredictedL2BlockNumber = hexutil.Uint64(response.Receipt.BlockNumber.Uint64())
 			}
-			preconfTxRequest.SetStatus(event.Status)
-			pool.preconfTxs.SetStatus(txHash, event.Status)
 		case <-timeout.C:
 			event.Reason = fmt.Sprintf("preconf timeout, over %s timeout", time.Since(now))
 			preconfTxRequest.SetStatus(core.PreconfStatusTimeout)

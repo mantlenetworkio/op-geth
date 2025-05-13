@@ -670,6 +670,15 @@ func (w *worker) mainLoop() {
 			}
 			log.Trace("worker preconf tx executed", "tx", ev.Tx.Hash(), "duration", time.Since(now))
 
+			// set preconf status before txpool receive response, avoid successful txs not included in block
+			if err == nil && receipt != nil && receipt.Status == types.ReceiptStatusSuccessful {
+				ev.SetStatus(core.PreconfStatusSuccess)
+				w.eth.TxPool().SetPreconfTxStatus(receipt.TxHash, core.PreconfStatusSuccess)
+			} else {
+				ev.SetStatus(core.PreconfStatusFailed)
+				w.eth.TxPool().SetPreconfTxStatus(ev.Tx.Hash(), core.PreconfStatusFailed)
+			}
+
 			select {
 			case ev.PreconfResult <- &core.PreconfResponse{Receipt: receipt, Err: err}:
 				log.Debug("worker sent preconf tx response", "tx", ev.Tx.Hash(), "duration", time.Since(now))
