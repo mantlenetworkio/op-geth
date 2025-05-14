@@ -72,8 +72,8 @@ type MantleUpgradeChainConfig struct {
 	MetaTxV2UpgradeTime   *uint64 `json:"metaTxV2UpgradeTime"`   // MetaTxV1UpgradeBlock identifies the current block height is using metaTx with MetaTxSignDataV2
 	MetaTxV3UpgradeTime   *uint64 `json:"metaTxV3UpgradeTime"`   // MetaTxV3UpgradeBlock identifies the current block height is ensuring sponsor and sender are not the same
 	ProxyOwnerUpgradeTime *uint64 `json:"proxyOwnerUpgradeTime"` // ProxyOwnerUpgradeBlock identifies the current block time is ensuring the L2ProxyAdmin contract owner is set to NewProxyAdminOwnerAddress
-	MantleEverestTime     *uint64 `json:"mantleEverestTimeTime"` // MantleEverestTime identifies the current block time is ensuring eip-7212 & disable MetaTx
-	MantleSkadiTime       *uint64 `json:"mantleSkadiTimeTime"`   // MantleSkadiTime identifies the current block time is ensuring prague upgrade
+	MantleEverestTime     *uint64 `json:"mantleEverestTime"`     // MantleEverestTime identifies the current block time is ensuring eip-7212 & disable MetaTx
+	MantleSkadiTime       *uint64 `json:"mantleSkadiTime"`       // MantleSkadiTime identifies the current block time is ensuring prague upgrade
 }
 
 func GetUpgradeConfigForMantle(chainID *big.Int) *MantleUpgradeChainConfig {

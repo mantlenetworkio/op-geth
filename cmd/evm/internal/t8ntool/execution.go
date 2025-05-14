@@ -220,6 +220,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig, 
 		)
 		core.ProcessParentBlockHash(prevHash, evm)
 	}
+	rules := chainConfig.Rules(new(big.Int).SetUint64(pre.Env.Number), false, pre.Env.Timestamp)
 	for i := 0; txIt.Next(); i++ {
 		tx, err := txIt.Tx()
 		if err != nil {
@@ -233,7 +234,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig, 
 			rejectedTxs = append(rejectedTxs, &rejectedTx{i, errMsg})
 			continue
 		}
-		msg, err := core.TransactionToMessage(tx, signer, pre.Env.BaseFee)
+		msg, err := core.TransactionToMessage(tx, signer, pre.Env.BaseFee, &rules)
 		if err != nil {
 			log.Warn("rejected tx", "index", i, "hash", tx.Hash(), "error", err)
 			rejectedTxs = append(rejectedTxs, &rejectedTx{i, err.Error()})
@@ -350,9 +351,11 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig, 
 		statedb.AddBalance(w.Address, uint256.MustFromBig(amount), tracing.BalanceIncreaseWithdrawal)
 	}
 
+	isMantleSkadi := chainConfig.IsMantleSkadi(vmContext.Time)
+
 	// Gather the execution-layer triggered requests.
 	var requests [][]byte
-	if chainConfig.IsPrague(vmContext.BlockNumber, vmContext.Time) {
+	if chainConfig.IsPrague(vmContext.BlockNumber, vmContext.Time) && !isMantleSkadi {
 		requests = [][]byte{}
 		// EIP-6110
 		var allLogs []*types.Log
@@ -366,6 +369,10 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig, 
 		core.ProcessWithdrawalQueue(&requests, evm)
 		// EIP-7251
 		core.ProcessConsolidationQueue(&requests, evm)
+	}
+
+	if isMantleSkadi {
+		requests = [][]byte{}
 	}
 
 	// Commit block

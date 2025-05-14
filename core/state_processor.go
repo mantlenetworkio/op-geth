@@ -106,9 +106,12 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		receipts = append(receipts, receipt)
 		allLogs = append(allLogs, receipt.Logs...)
 	}
+
+	isMantleSkadi := p.config.IsMantleSkadi(block.Time())
+
 	// Read requests if Prague is enabled.
 	var requests [][]byte
-	if p.config.IsPrague(block.Number(), block.Time()) {
+	if p.config.IsPrague(block.Number(), block.Time()) && !isMantleSkadi {
 		requests = [][]byte{}
 		// EIP-6110
 		if err := ParseDepositLogs(&requests, allLogs, p.config); err != nil {
@@ -118,6 +121,10 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		ProcessWithdrawalQueue(&requests, evm)
 		// EIP-7251
 		ProcessConsolidationQueue(&requests, evm)
+	}
+
+	if isMantleSkadi {
+		requests = [][]byte{}
 	}
 
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)

@@ -247,7 +247,33 @@ func (miner *Miner) buildPayload(args *BuildPayloadArgs, witness bool) (*Payload
 	payload := newPayload(empty.block, empty.requests, empty.witness, args.Id())
 
 	if args.NoTxPool { // don't start the background payload updating job if there is no tx pool to pull from
+		// make sure to make it appear as full, otherwise it will wait indefinitely for payload building to complete.
+		payload.full = empty.block
+		payload.fullFees = empty.fees
+		payload.fullWitness = empty.witness
+		payload.requests = empty.requests
 		return payload, nil
+	}
+
+	fullParams := &generateParams{
+		timestamp:   args.Timestamp,
+		forceTime:   true,
+		parentHash:  args.Parent,
+		coinbase:    args.FeeRecipient,
+		random:      args.Random,
+		withdrawals: args.Withdrawals,
+		beaconRoot:  args.BeaconRoot,
+		noTxs:       false,
+		txs:         args.Transactions,
+		gasLimit:    args.GasLimit,
+		baseFee:     args.BaseFee,
+	}
+
+	// Since we skip building the empty block when using the tx pool, we need to explicitly
+	// validate the BuildPayloadArgs here.
+	blockTime, err := miner.validateParams(fullParams)
+	if err != nil {
+		return nil, err
 	}
 
 	// Spin up a routine for updating the payload in background. This strategy
@@ -258,21 +284,10 @@ func (miner *Miner) buildPayload(args *BuildPayloadArgs, witness bool) (*Payload
 		timer := time.NewTimer(0)
 		defer timer.Stop()
 
-		// Setup the timer for terminating the process if SECONDS_PER_SLOT (12s in
-		// the Mainnet configuration) have passed since the point in time identified
-		// by the timestamp parameter.
-		endTimer := time.NewTimer(time.Second * 12)
-
-		fullParams := &generateParams{
-			timestamp:   args.Timestamp,
-			forceTime:   true,
-			parentHash:  args.Parent,
-			coinbase:    args.FeeRecipient,
-			random:      args.Random,
-			withdrawals: args.Withdrawals,
-			beaconRoot:  args.BeaconRoot,
-			noTxs:       false,
-		}
+		// Setup the timer for terminating the payload building process as determined
+		// by validateParams.
+		endTimer := time.NewTimer(blockTime)
+		defer endTimer.Stop()
 
 		for {
 			select {

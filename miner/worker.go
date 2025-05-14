@@ -149,9 +149,11 @@ func (miner *Miner) generateWork(params *generateParams, witness bool) *newPaylo
 		allLogs = append(allLogs, r.Logs...)
 	}
 
+	isMantleSkadi := miner.chainConfig.IsMantleSkadi(work.header.Time)
+
 	// Collect consensus-layer requests if Prague is enabled.
 	var requests [][]byte
-	if miner.chainConfig.IsPrague(work.header.Number, work.header.Time) {
+	if miner.chainConfig.IsPrague(work.header.Number, work.header.Time) && !isMantleSkadi {
 		requests = [][]byte{}
 		// EIP-6110 deposits
 		if err := core.ParseDepositLogs(&requests, allLogs, miner.chainConfig); err != nil {
@@ -162,6 +164,11 @@ func (miner *Miner) generateWork(params *generateParams, witness bool) *newPaylo
 		// EIP-7251 consolidations
 		core.ProcessConsolidationQueue(&requests, work.evm)
 	}
+
+	if isMantleSkadi {
+		requests = [][]byte{}
+	}
+
 	if requests != nil {
 		reqHash := types.CalcRequestsHash(requests)
 		work.header.RequestsHash = &reqHash
@@ -560,4 +567,36 @@ func signalToErr(signal int32) error {
 	default:
 		panic(fmt.Errorf("undefined signal %d", signal))
 	}
+}
+
+// validateParams validates the given parameters.
+// It currently checks that the parent block is known and that the timestamp is valid,
+// i.e., after the parent block's timestamp.
+// It returns an upper bound of the payload building duration as computed
+// by the difference in block timestamps between the parent and genParams.
+func (miner *Miner) validateParams(genParams *generateParams) (time.Duration, error) {
+	miner.confMu.RLock()
+	defer miner.confMu.RUnlock()
+
+	// Find the parent block for sealing task
+	parent := miner.chain.CurrentBlock()
+	if genParams.parentHash != (common.Hash{}) {
+		block := miner.chain.GetBlockByHash(genParams.parentHash)
+		if block == nil {
+			return 0, fmt.Errorf("missing parent %v", genParams.parentHash)
+		}
+		parent = block.Header()
+	}
+
+	// Sanity check the timestamp correctness
+	blockTime := int64(genParams.timestamp) - int64(parent.Time)
+	if blockTime <= 0 && genParams.forceTime {
+		return 0, fmt.Errorf("invalid timestamp, parent %d given %d", parent.Time, genParams.timestamp)
+	}
+
+	// minimum payload build time of 2s
+	if blockTime < 2 {
+		blockTime = 2
+	}
+	return time.Duration(blockTime) * time.Second, nil
 }

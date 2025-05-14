@@ -375,8 +375,21 @@ func (beacon *Beacon) FinalizeAndAssemble(chain consensus.ChainHeaderReader, hea
 	// Assign the final state root to header.
 	header.Root = state.IntermediateRoot(true)
 
+	if chain.Config().IsMantleSkadi(header.Time) {
+		if body.Withdrawals == nil || len(body.Withdrawals) > 0 {
+			return nil, fmt.Errorf("expected non-nil empty withdrawals operation list in skadi, but got: %v", body.Withdrawals)
+		}
+		// State-root has just been computed, we can get an accurate storage-root now.
+		h := state.GetStorageRoot(params.OptimismL2ToL1MessagePasser)
+		header.WithdrawalsHash = &h
+		sa := state.AccessEvents()
+		if sa != nil {
+			sa.AddAccount(params.OptimismL2ToL1MessagePasser, false) // include in execution witness
+		}
+	}
+
 	// Assemble the final block.
-	block := types.NewBlock(header, body, receipts, trie.NewStackTrie(nil))
+	block := types.NewBlock(header, body, receipts, trie.NewStackTrie(nil), chain.Config())
 
 	// Create the block witness and attach to block.
 	// This step needs to happen as late as possible to catch all access events.

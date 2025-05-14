@@ -5,6 +5,7 @@ package engine
 import (
 	"encoding/json"
 	"errors"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -24,6 +25,7 @@ func (p PayloadAttributes) MarshalJSON() ([]byte, error) {
 		Transactions          []hexutil.Bytes     `json:"transactions,omitempty"  gencodec:"optional"`
 		NoTxPool              bool                `json:"noTxPool,omitempty" gencodec:"optional"`
 		GasLimit              *hexutil.Uint64     `json:"gasLimit,omitempty" gencodec:"optional"`
+		BaseFee               *big.Int            `json:"baseFee,omitempty" gencodec:"optional"`
 	}
 	var enc PayloadAttributes
 	enc.Timestamp = hexutil.Uint64(p.Timestamp)
@@ -39,6 +41,7 @@ func (p PayloadAttributes) MarshalJSON() ([]byte, error) {
 	}
 	enc.NoTxPool = p.NoTxPool
 	enc.GasLimit = (*hexutil.Uint64)(p.GasLimit)
+	enc.BaseFee = p.BaseFee
 	return json.Marshal(&enc)
 }
 
@@ -53,6 +56,7 @@ func (p *PayloadAttributes) UnmarshalJSON(input []byte) error {
 		Transactions          []hexutil.Bytes     `json:"transactions,omitempty"  gencodec:"optional"`
 		NoTxPool              *bool               `json:"noTxPool,omitempty" gencodec:"optional"`
 		GasLimit              *hexutil.Uint64     `json:"gasLimit,omitempty" gencodec:"optional"`
+		BaseFee               *big.Int            `json:"baseFee,omitempty" gencodec:"optional"`
 	}
 	var dec PayloadAttributes
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -87,6 +91,9 @@ func (p *PayloadAttributes) UnmarshalJSON(input []byte) error {
 	}
 	if dec.GasLimit != nil {
 		p.GasLimit = (*uint64)(dec.GasLimit)
+	}
+	if dec.BaseFee != nil {
+		p.BaseFee = dec.BaseFee
 	}
 	return nil
 }

@@ -127,7 +127,7 @@ func ReadGenesis(db ethdb.Database) (*Genesis, error) {
 }
 
 // hashAlloc computes the state root according to the genesis specification.
-func hashAlloc(ga *types.GenesisAlloc, isVerkle bool) (common.Hash, error) {
+func hashAlloc(ga *types.GenesisAlloc, isVerkle, isMantleSkadi bool) (common.Hash, common.Hash, error) {
 	// If a genesis-time verkle trie is requested, create a trie config
 	// with the verkle trie enabled so that the tree can be initialized
 	// as such.
@@ -147,7 +147,7 @@ func hashAlloc(ga *types.GenesisAlloc, isVerkle bool) (common.Hash, error) {
 	db := rawdb.NewMemoryDatabase()
 	statedb, err := state.New(emptyRoot, state.NewDatabase(triedb.NewDatabase(db, config), nil))
 	if err != nil {
-		return common.Hash{}, err
+		return common.Hash{}, common.Hash{}, err
 	}
 	for addr, account := range *ga {
 		if account.Balance != nil {
@@ -159,19 +159,30 @@ func hashAlloc(ga *types.GenesisAlloc, isVerkle bool) (common.Hash, error) {
 			statedb.SetState(addr, key, value)
 		}
 	}
-	return statedb.Commit(0, false, false)
+
+	stateRoot, err := statedb.Commit(0, false, false)
+	if err != nil {
+		return common.Hash{}, common.Hash{}, err
+	}
+	// get the storage root of the L2ToL1MessagePasser contract
+	var storageRootMessagePasser common.Hash
+	if isMantleSkadi {
+		storageRootMessagePasser = statedb.GetStorageRoot(params.OptimismL2ToL1MessagePasser)
+	}
+
+	return stateRoot, storageRootMessagePasser, nil
 }
 
 // flushAlloc is very similar with hash, but the main difference is all the
 // generated states will be persisted into the given database.
-func flushAlloc(ga *types.GenesisAlloc, triedb *triedb.Database) (common.Hash, error) {
+func flushAlloc(ga *types.GenesisAlloc, triedb *triedb.Database, isMantleSkadi bool) (common.Hash, common.Hash, error) {
 	emptyRoot := types.EmptyRootHash
 	if triedb.IsVerkle() {
 		emptyRoot = types.EmptyVerkleHash
 	}
 	statedb, err := state.New(emptyRoot, state.NewDatabase(triedb, nil))
 	if err != nil {
-		return common.Hash{}, err
+		return common.Hash{}, common.Hash{}, err
 	}
 	for addr, account := range *ga {
 		if account.Balance != nil {
@@ -187,15 +198,19 @@ func flushAlloc(ga *types.GenesisAlloc, triedb *triedb.Database) (common.Hash, e
 	}
 	root, err := statedb.Commit(0, false, false)
 	if err != nil {
-		return common.Hash{}, err
+		return common.Hash{}, common.Hash{}, err
+	}
+	var storageRootMessagePasser common.Hash
+	if isMantleSkadi {
+		storageRootMessagePasser = statedb.GetStorageRoot(params.OptimismL2ToL1MessagePasser)
 	}
 	// Commit newly generated states into disk if it's not empty.
 	if root != types.EmptyRootHash {
 		if err := triedb.Commit(root, true); err != nil {
-			return common.Hash{}, err
+			return common.Hash{}, common.Hash{}, err
 		}
 	}
-	return root, nil
+	return root, storageRootMessagePasser, nil
 }
 
 func getGenesisState(db ethdb.Database, blockhash common.Hash) (alloc types.GenesisAlloc, err error) {
@@ -487,15 +502,15 @@ func (g *Genesis) IsVerkle() bool {
 
 // ToBlock returns the genesis block according to genesis specification.
 func (g *Genesis) ToBlock() *types.Block {
-	root, err := hashAlloc(&g.Alloc, g.IsVerkle())
+	stateRoot, storageRootMessagePasser, err := hashAlloc(&g.Alloc, g.IsVerkle(), g.Config.IsMantleSkadi(g.Timestamp))
 	if err != nil {
 		panic(err)
 	}
-	return g.toBlockWithRoot(root)
+	return g.toBlockWithRoot(stateRoot, storageRootMessagePasser)
 }
 
 // toBlockWithRoot constructs the genesis block with the given genesis state root.
-func (g *Genesis) toBlockWithRoot(root common.Hash) *types.Block {
+func (g *Genesis) toBlockWithRoot(root common.Hash, storageRootMessagePasser common.Hash) *types.Block {
 	head := &types.Header{
 		Number:     new(big.Int).SetUint64(g.Number),
 		Nonce:      types.EncodeNonce(g.Nonce),
@@ -554,8 +569,16 @@ func (g *Genesis) toBlockWithRoot(root common.Hash) *types.Block {
 		if conf.IsPrague(num, g.Timestamp) {
 			head.RequestsHash = &types.EmptyRequestsHash
 		}
+		// If Skadi is active at genesis, set the WithdrawalRoot to the storage root of the L2ToL1MessagePasser contract.
+		if g.Config.IsMantleSkadi(g.Timestamp) {
+			if storageRootMessagePasser == (common.Hash{}) {
+				// if there was no MessagePasser contract storage, set the WithdrawalsHash to the empty hash
+				storageRootMessagePasser = types.EmptyWithdrawalsHash
+			}
+			head.WithdrawalsHash = &storageRootMessagePasser
+		}
 	}
-	return types.NewBlock(head, &types.Body{Withdrawals: withdrawals}, nil, trie.NewStackTrie(nil))
+	return types.NewBlock(head, &types.Body{Withdrawals: withdrawals}, nil, trie.NewStackTrie(nil), g.Config)
 }
 
 // Commit writes the block and state of a genesis specification to the database.
@@ -575,11 +598,11 @@ func (g *Genesis) Commit(db ethdb.Database, triedb *triedb.Database) (*types.Blo
 		return nil, errors.New("can't start clique chain without signers")
 	}
 	// flush the data to disk and compute the state root
-	root, err := flushAlloc(&g.Alloc, triedb)
+	root, storageRootMessagePasser, err := flushAlloc(&g.Alloc, triedb, g.Config.IsMantleSkadi(g.Timestamp))
 	if err != nil {
 		return nil, err
 	}
-	block := g.toBlockWithRoot(root)
+	block := g.toBlockWithRoot(root, storageRootMessagePasser)
 
 	// Marshal the genesis state specification and persist.
 	blob, err := json.Marshal(g.Alloc)

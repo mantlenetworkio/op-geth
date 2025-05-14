@@ -314,7 +314,9 @@ func (b *BlockGen) collectRequests(readonly bool) (requests [][]byte) {
 		statedb = statedb.Copy()
 	}
 
-	if b.cm.config.IsPrague(b.header.Number, b.header.Time) {
+	isMantleSkadi := b.cm.config.IsMantleSkadi(b.header.Time)
+
+	if b.cm.config.IsPrague(b.header.Number, b.header.Time) && !isMantleSkadi {
 		requests = [][]byte{}
 		// EIP-6110 deposits
 		var blockLogs []*types.Log
@@ -332,6 +334,11 @@ func (b *BlockGen) collectRequests(readonly bool) (requests [][]byte) {
 		// EIP-7251
 		ProcessConsolidationQueue(&requests, evm)
 	}
+
+	if isMantleSkadi {
+		requests = [][]byte{}
+	}
+
 	return requests
 }
 

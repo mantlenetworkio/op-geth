@@ -232,6 +232,10 @@ type extblock struct {
 	Withdrawals []*Withdrawal `rlp:"optional"`
 }
 
+type BlockType interface {
+	IsMantleSkadi(blkTime uint64) bool
+}
+
 // NewBlock creates a new block. The input data is copied, changes to header and to the
 // field values will not affect the block.
 //
@@ -240,7 +244,7 @@ type extblock struct {
 //
 // The receipt's bloom must already calculated for the block's bloom to be
 // correctly calculated.
-func NewBlock(header *Header, body *Body, receipts []*Receipt, hasher TrieHasher) *Block {
+func NewBlock(header *Header, body *Body, receipts []*Receipt, hasher TrieHasher, bType BlockType) *Block {
 	if body == nil {
 		body = &Body{}
 	}
@@ -279,7 +283,13 @@ func NewBlock(header *Header, body *Body, receipts []*Receipt, hasher TrieHasher
 		}
 	}
 
-	if withdrawals == nil {
+	if bType.IsMantleSkadi(b.header.Time) {
+		if withdrawals == nil || len(withdrawals) > 0 {
+			panic(fmt.Sprintf("expected non-nil empty withdrawals operation list in Skadi, but got: %v", body.Withdrawals))
+		}
+		b.header.WithdrawalsHash = header.WithdrawalsHash
+		b.withdrawals = make(Withdrawals, 0)
+	} else if withdrawals == nil {
 		b.header.WithdrawalsHash = nil
 	} else if len(withdrawals) == 0 {
 		b.header.WithdrawalsHash = &EmptyWithdrawalsHash
@@ -400,6 +410,14 @@ func (b *Block) TxHash() common.Hash      { return b.header.TxHash }
 func (b *Block) ReceiptHash() common.Hash { return b.header.ReceiptHash }
 func (b *Block) UncleHash() common.Hash   { return b.header.UncleHash }
 func (b *Block) Extra() []byte            { return common.CopyBytes(b.header.Extra) }
+
+func (b *Block) WithdrawalsRoot() *common.Hash {
+	if b.header.WithdrawalsHash == nil {
+		return nil
+	}
+	h := *b.header.WithdrawalsHash
+	return &h
+}
 
 func (b *Block) BaseFee() *big.Int {
 	if b.header.BaseFee == nil {
