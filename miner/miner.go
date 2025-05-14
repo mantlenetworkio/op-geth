@@ -268,3 +268,7 @@ func (miner *Miner) SubscribePendingLogs(ch chan<- []*types.Log) event.Subscript
 func (miner *Miner) BuildPayload(args *BuildPayloadArgs) (*Payload, error) {
 	return miner.worker.buildPayload(args)
 }
+
+func (miner *Miner) IsPreconfStatusOk() bool {
+	return miner.worker.preconfChecker.PrecheckStatus() == nil
+}

@@ -1332,8 +1332,16 @@ func (pool *TxPool) handlePreconfTxs(from common.Address, tx *types.Transaction)
 
 	// add tx to preconfTxs and send preconf request event should keep same order
 	pool.preconfTxs.Add(from, tx)
-	pool.preconfTxRequestFeed.Send(preconfTxRequest)
-	log.Debug("txpool sent preconf tx request", "tx", txHash)
+	select {
+	case <-pool.initDoneCh:
+		pool.preconfTxRequestFeed.Send(preconfTxRequest)
+		log.Debug("txpool sent preconf tx request", "tx", txHash)
+	default:
+		// only success preconf tx can be restored from journal
+		pool.preconfTxs.SetStatus(txHash, core.PreconfStatusSuccess)
+		log.Debug("handle preconf tx from journal", "tx", txHash)
+		return
+	}
 
 	// goroutine to avoid blocking
 	go func() {
@@ -1352,18 +1360,12 @@ func (pool *TxPool) handlePreconfTxs(from common.Address, tx *types.Transaction)
 		select {
 		case <-pool.preconfReadyCh:
 		default:
-			select {
-			case <-pool.initDoneCh:
-				preconf.PreconfTxFailureMeter.Mark(1)
-				event.Status = core.PreconfStatusFailed
-				event.Reason = "preconf txs not ready"
-				pool.preconfTxFeed.Send(event)
-				log.Info("preconf txs not ready, can't handle", "tx", txHash)
-				return
-			default:
-				log.Info("preconf txs not ready, skip handle", "tx", txHash)
-				return
-			}
+			preconf.PreconfTxFailureMeter.Mark(1)
+			event.Status = core.PreconfStatusFailed
+			event.Reason = "preconf txs not ready"
+			pool.preconfTxFeed.Send(event)
+			log.Info("preconf txs not ready, can't handle", "tx", txHash)
+			return
 		}
 
 		// timeout
@@ -1391,10 +1393,14 @@ func (pool *TxPool) handlePreconfTxs(from common.Address, tx *types.Transaction)
 				event.PredictedL2BlockNumber = hexutil.Uint64(response.Receipt.BlockNumber.Uint64())
 			}
 		case <-timeout.C:
-			event.Reason = fmt.Sprintf("preconf timeout, over %s timeout", time.Since(now))
-			preconfTxRequest.SetStatus(core.PreconfStatusTimeout)
-			pool.preconfTxs.SetStatus(txHash, core.PreconfStatusTimeout)
-			event.Status = core.PreconfStatusTimeout
+			status := preconfTxRequest.SetStatus(core.PreconfStatusWaiting, core.PreconfStatusTimeout)
+			if status == core.PreconfStatusTimeout {
+				event.Reason = fmt.Sprintf("preconf timeout, over %s timeout", time.Since(now))
+				pool.preconfTxs.SetStatus(txHash, core.PreconfStatusTimeout)
+				event.Status = core.PreconfStatusTimeout
+			} else {
+				event.Status = status
+			}
 		}
 
 		// add preconf success tx to journal

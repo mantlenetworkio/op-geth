@@ -672,11 +672,18 @@ func (w *worker) mainLoop() {
 
 			// set preconf status before txpool receive response, avoid successful txs not included in block
 			if err == nil && receipt != nil && receipt.Status == types.ReceiptStatusSuccessful {
-				ev.SetStatus(core.PreconfStatusSuccess)
+				status = ev.SetStatus(core.PreconfStatusWaiting, core.PreconfStatusSuccess)
 				w.eth.TxPool().SetPreconfTxStatus(receipt.TxHash, core.PreconfStatusSuccess)
 			} else {
-				ev.SetStatus(core.PreconfStatusFailed)
+				status = ev.SetStatus(core.PreconfStatusWaiting, core.PreconfStatusFailed)
 				w.eth.TxPool().SetPreconfTxStatus(ev.Tx.Hash(), core.PreconfStatusFailed)
+			}
+
+			if status == core.PreconfStatusTimeout {
+				log.Warn("preconf tx request timeout after preconf executed", "tx", ev.Tx.Hash())
+				w.preconfChecker.RevertTx(ev.Tx.Hash())
+				ev.ClosePreconfResultFn()
+				continue
 			}
 
 			select {

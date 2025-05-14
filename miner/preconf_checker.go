@@ -50,6 +50,8 @@ type preconfChecker struct {
 	opnodeClient *http.Client
 	l1ethclient  ethereum.LogFilterer
 
+	snapEnv      *environment
+	snapTxHash   common.Hash
 	env          *environment
 	envUpdatedAt time.Time
 
@@ -269,9 +271,30 @@ func (c *preconfChecker) Preconf(tx *types.Transaction) (*types.Receipt, error) 
 		}
 	}
 
+	c.snapEnv = c.env
+	c.snapTxHash = tx.Hash()
+	c.env = c.env.copy()
 	// apply tx
 	log.Trace("apply tx", "tx", tx.Hash().Hex(), "nonce", tx.Nonce())
 	return c.applyTxWithResetEnv(c.env, tx)
+}
+
+func (c *preconfChecker) RevertTx(txHash common.Hash) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.snapEnv == nil || c.snapTxHash != txHash {
+		return fmt.Errorf("no snapshot env or tx hash not match")
+	}
+	c.env = c.snapEnv
+	c.snapEnv = nil
+	c.snapTxHash = common.Hash{}
+	return nil
+}
+
+func (c *preconfChecker) PrecheckStatus() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.precheck()
 }
 
 func (c *preconfChecker) precheck() error {

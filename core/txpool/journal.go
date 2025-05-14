@@ -145,9 +145,25 @@ func (journal *journal) rotate(all map[common.Address]types.Transactions, precon
 	}
 	journaled := 0
 
+	// add preconf txs to the journal
+	// preconf txs is priority txs, so it should be the first
+	preconfTxsMap := make(map[common.Hash]bool)
+	for _, tx := range preconfTxs {
+		if err = rlp.Encode(replacement, tx); err != nil {
+			replacement.Close()
+			return err
+		} else {
+			preconfTxsMap[tx.Hash()] = true
+		}
+	}
+	journaled += len(preconfTxs)
+
 	// add all txs to the journal
 	for _, txs := range all {
 		for _, tx := range txs {
+			if preconfTxsMap[tx.Hash()] {
+				continue
+			}
 			if err = rlp.Encode(replacement, tx); err != nil {
 				replacement.Close()
 				return err
@@ -155,15 +171,6 @@ func (journal *journal) rotate(all map[common.Address]types.Transactions, precon
 		}
 		journaled += len(txs)
 	}
-
-	// add preconf txs to the journal
-	for _, tx := range preconfTxs {
-		if err = rlp.Encode(replacement, tx); err != nil {
-			replacement.Close()
-			return err
-		}
-	}
-	journaled += len(preconfTxs)
 
 	replacement.Close()
 

@@ -61,10 +61,13 @@ func (e *NewPreconfTxRequest) GetStatus() PreconfStatus {
 	return e.Status
 }
 
-func (e *NewPreconfTxRequest) SetStatus(status PreconfStatus) {
+func (e *NewPreconfTxRequest) SetStatus(statusBefore PreconfStatus, status PreconfStatus) PreconfStatus {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.Status = status
+	if e.Status == statusBefore {
+		e.Status = status
+	}
+	return e.Status
 }
 
 type PreconfResponse struct {
