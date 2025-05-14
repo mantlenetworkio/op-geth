@@ -77,6 +77,7 @@ type Ethereum struct {
 
 	handler *handler
 	discmix *enode.FairMix
+	dropper *dropper
 
 	seqRPCService        *rpc.Client
 	historicalRPCService *rpc.Client
@@ -148,7 +149,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	// Here we determine genesis hash and active ChainConfig.
 	// We need these to figure out the consensus parameters and to set up history pruning.
-	chainConfig, genesisHash, err := core.LoadChainConfig(chainDb, config.Genesis)
+	chainConfig, _, err := core.LoadChainConfig(chainDb, config.Genesis)
 	if err != nil {
 		return nil, err
 	}
@@ -156,22 +157,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	// Validate history pruning configuration.
-	var (
-		cutoffNumber uint64
-		cutoffHash   common.Hash
-	)
-	if config.HistoryMode == ethconfig.PostMergeHistory {
-		prunecfg, ok := ethconfig.HistoryPrunePoints[genesisHash]
-		if !ok {
-			return nil, fmt.Errorf("no history pruning point is defined for genesis %x", genesisHash)
-		}
-		cutoffNumber = prunecfg.BlockNumber
-		cutoffHash = prunecfg.BlockHash
-		log.Info("Chain cutoff configured", "number", cutoffNumber, "hash", cutoffHash)
-	}
-
 	// Set networkID to chainID by default.
 	networkID := config.NetworkId
 	if networkID == 0 {
@@ -197,6 +182,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		dbVer = fmt.Sprintf("%d", *bcVersion)
 	}
 
+	// Create BlockChain object.
 	if !config.SkipBcVersionCheck {
 		if bcVersion != nil && *bcVersion > core.BlockChainVersion {
 			return nil, fmt.Errorf("database version is v%d, Geth %s only supports v%d", *bcVersion, version.WithMeta, core.BlockChainVersion)
@@ -212,17 +198,16 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			EnablePreimageRecording: config.EnablePreimageRecording,
 		}
 		cacheConfig = &core.CacheConfig{
-			TrieCleanLimit:             config.TrieCleanCache,
-			TrieCleanNoPrefetch:        config.NoPrefetch,
-			TrieDirtyLimit:             config.TrieDirtyCache,
-			TrieDirtyDisabled:          config.NoPruning,
-			TrieTimeLimit:              config.TrieTimeout,
-			SnapshotLimit:              config.SnapshotCache,
-			Preimages:                  config.Preimages,
-			StateHistory:               config.StateHistory,
-			StateScheme:                scheme,
-			HistoryPruningCutoffNumber: cutoffNumber,
-			HistoryPruningCutoffHash:   cutoffHash,
+			TrieCleanLimit:      config.TrieCleanCache,
+			TrieCleanNoPrefetch: config.NoPrefetch,
+			TrieDirtyLimit:      config.TrieDirtyCache,
+			TrieDirtyDisabled:   config.NoPruning,
+			TrieTimeLimit:       config.TrieTimeout,
+			SnapshotLimit:       config.SnapshotCache,
+			Preimages:           config.Preimages,
+			StateHistory:        config.StateHistory,
+			StateScheme:         scheme,
+			ChainHistoryMode:    config.HistoryMode,
 		}
 	)
 	if config.VMTrace != "" {
@@ -263,6 +248,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkId, "dbversion", dbVer)
 
+	// Initialize filtermaps log index.
 	fmConfig := filtermaps.Config{
 		History:        config.LogHistory,
 		Disabled:       config.LogNoHistory,
@@ -278,6 +264,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	eth.filterMaps = filtermaps.NewFilterMaps(chainDb, chainView, historyCutoff, finalBlock, filtermaps.DefaultParams, fmConfig)
 	eth.closeFilterMaps = make(chan chan struct{})
 
+	// TxPool
 	if config.TxPool.Journal != "" {
 		config.TxPool.Journal = stack.ResolvePath(config.TxPool.Journal)
 	}
@@ -310,6 +297,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		pj := locals.NewPoolJournaler(config.TxPool.Journal, rejournal, eth.txPool)
 		stack.RegisterLifecycle(pj)
 	}
+
 	// Permit the downloader to use the trie cache allowance during fast sync
 	cacheLimit := cacheConfig.TrieCleanLimit + cacheConfig.TrieDirtyLimit + cacheConfig.SnapshotLimit
 	if eth.handler, err = newHandler(&handlerConfig{
@@ -326,6 +314,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}); err != nil {
 		return nil, err
 	}
+
+	eth.dropper = newDropper(eth.p2pServer.MaxDialedConns(), eth.p2pServer.MaxInboundConns())
 
 	eth.miner = miner.New(eth, config.Miner, eth.engine)
 	eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
@@ -457,6 +447,9 @@ func (s *Ethereum) Start() error {
 	// Start the networking layer
 	s.handler.Start(s.p2pServer.MaxPeers)
 
+	// Start the connection manager
+	s.dropper.Start(s.p2pServer, func() bool { return !s.Synced() })
+
 	// start log indexer
 	s.filterMaps.Start()
 	go s.updateFilterMapsHeads()
@@ -558,6 +551,7 @@ func (s *Ethereum) setupDiscovery() error {
 func (s *Ethereum) Stop() error {
 	// Stop all the peer-related stuff first.
 	s.discmix.Close()
+	s.dropper.Stop()
 	s.handler.Stop()
 
 	// Then stop everything else.

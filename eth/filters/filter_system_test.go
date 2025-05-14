@@ -80,6 +80,13 @@ func (b *testBackend) GetReceiptsByHash(hash common.Hash) types.Receipts {
 	return r
 }
 
+func (b *testBackend) GetRawReceiptsByHash(hash common.Hash) types.Receipts {
+	if number := rawdb.ReadHeaderNumber(b.db, hash); number != nil {
+		return rawdb.ReadRawReceipts(b.db, hash, *number)
+	}
+	return nil
+}
+
 func (b *testBackend) HeaderByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*types.Header, error) {
 	var (
 		hash common.Hash
@@ -152,6 +159,11 @@ func (b *testBackend) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscript
 
 func (b *testBackend) SubscribeChainEvent(ch chan<- core.ChainEvent) event.Subscription {
 	return b.chainFeed.Subscribe(ch)
+}
+
+func (b *testBackend) CurrentView() *filtermaps.ChainView {
+	head := b.CurrentBlock()
+	return filtermaps.NewChainView(b, head.Number.Uint64(), head.Hash())
 }
 
 func (b *testBackend) NewMatcherBackend() filtermaps.MatcherBackend {

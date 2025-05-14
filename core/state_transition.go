@@ -58,10 +58,10 @@ var (
 // ExecutionResult includes all output after executing given evm
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
-	UsedGas     uint64 // Total used gas, not including the refunded gas
-	RefundedGas uint64 // Total gas refunded after execution
-	Err         error  // Any error encountered during the execution(listed in core/vm/errors.go)
-	ReturnData  []byte // Returned data from evm(function result or data supplied with revert opcode)
+	UsedGas    uint64 // Total used gas, not including the refunded gas
+	MaxUsedGas uint64 // Maximum gas consumed during execution, excluding gas refunds.
+	Err        error  // Any error encountered during the execution(listed in core/vm/errors.go)
+	ReturnData []byte // Returned data from evm(function result or data supplied with revert opcode)
 }
 
 // Unwrap returns the internal evm error which allows us for further
@@ -797,11 +797,13 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 		}, nil
 	}
 
-	var gasRefund uint64
+	// Record the gas used excluding gas refunds. This value represents the actual
+	// gas allowance required to complete execution.
+	peakGasUsed := st.gasUsedWithTokenRatio(tokenRatio)
+
 	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
 		// Compute refund counter, capped to a refund quotient.
-		gasRefund = st.calcRefund()
-		st.gasRemaining += gasRefund
+		st.gasRemaining += st.calcRefund()
 		st.gasRemaining = st.gasRemaining * tokenRatio
 		if rules.IsPrague {
 			// After EIP-7623: Data-heavy transactions pay the floor gas.
@@ -811,6 +813,9 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 				if t := st.evm.Config.Tracer; t != nil && t.OnGasChange != nil {
 					t.OnGasChange(prev, st.gasRemaining, tracing.GasChangeTxDataFloor)
 				}
+			}
+			if peakGasUsed < floorDataGas {
+				peakGasUsed = floorDataGas
 			}
 		}
 		st.returnGas(rules.IsMetaTxV3)
@@ -866,10 +871,10 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 	}
 
 	return &ExecutionResult{
-		UsedGas:     st.gasUsed(),
-		RefundedGas: gasRefund * tokenRatio,
-		Err:         vmerr,
-		ReturnData:  ret,
+		UsedGas:    st.gasUsed(),
+		MaxUsedGas: peakGasUsed,
+		Err:        vmerr,
+		ReturnData: ret,
 	}, nil
 }
 
@@ -982,6 +987,10 @@ func (st *stateTransition) returnGas(metaTxV3 bool) {
 // gasUsed returns the amount of gas used up by the state transition.
 func (st *stateTransition) gasUsed() uint64 {
 	return st.initialGas - st.gasRemaining
+}
+
+func (st *stateTransition) gasUsedWithTokenRatio(tokenRatio uint64) uint64 {
+	return st.initialGas - st.gasRemaining*tokenRatio
 }
 
 // blobGasUsed returns the amount of blob gas used by the message.

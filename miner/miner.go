@@ -98,7 +98,6 @@ func New(eth Backend, config Config, engine consensus.Engine) *Miner {
 		txpool:      eth.TxPool(),
 		chain:       eth.BlockChain(),
 		pending:     &pending{},
-		backend:     eth,
 	}
 }
 
