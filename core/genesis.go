@@ -505,7 +505,7 @@ func (g *Genesis) IsVerkle() bool {
 
 // ToBlock returns the genesis block according to genesis specification.
 func (g *Genesis) ToBlock() *types.Block {
-	stateRoot, storageRootMessagePasser, err := hashAlloc(&g.Alloc, g.IsVerkle(), g.Config.IsMantleSkadi(g.Timestamp))
+	stateRoot, storageRootMessagePasser, err := hashAlloc(&g.Alloc, g.IsVerkle(), g.Config.IsOptimismWithSkadi(g.Timestamp))
 	if err != nil {
 		panic(err)
 	}
@@ -573,7 +573,7 @@ func (g *Genesis) toBlockWithRoot(root common.Hash, storageRootMessagePasser com
 			head.RequestsHash = &types.EmptyRequestsHash
 		}
 		// If Skadi is active at genesis, set the WithdrawalRoot to the storage root of the L2ToL1MessagePasser contract.
-		if g.Config.IsMantleSkadi(g.Timestamp) {
+		if g.Config.IsOptimismWithSkadi(g.Timestamp) {
 			if storageRootMessagePasser == (common.Hash{}) {
 				// if there was no MessagePasser contract storage, set the WithdrawalsHash to the empty hash
 				storageRootMessagePasser = types.EmptyWithdrawalsHash

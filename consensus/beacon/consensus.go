@@ -375,7 +375,7 @@ func (beacon *Beacon) FinalizeAndAssemble(chain consensus.ChainHeaderReader, hea
 	// Assign the final state root to header.
 	header.Root = state.IntermediateRoot(true)
 
-	if chain.Config().IsMantleSkadi(header.Time) {
+	if chain.Config().IsOptimismWithSkadi(header.Time) {
 		if body.Withdrawals == nil || len(body.Withdrawals) > 0 {
 			return nil, fmt.Errorf("expected non-nil empty withdrawals operation list in skadi, but got: %v", body.Withdrawals)
 		}

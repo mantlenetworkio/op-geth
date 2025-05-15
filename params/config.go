@@ -770,6 +770,10 @@ func (c *ChainConfig) IsMantleSkadi(time uint64) bool {
 	return isTimestampForked(c.MantleSkadiTime, time)
 }
 
+func (c *ChainConfig) IsOptimismWithSkadi(time uint64) bool {
+	return c.IsOptimism() && c.IsMantleSkadi(time)
+}
+
 // IsProxyOwnerUpgrade returns whether time is either equal to the ProxyOwnerUpgrade fork time
 func (c *ChainConfig) IsProxyOwnerUpgrade(time uint64) bool {
 	return isTimestampEqual(c.ProxyOwnerUpgradeTime, time)

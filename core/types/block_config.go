@@ -4,7 +4,7 @@ type BlockConfig struct {
 	IsMantleSkadiEnabled bool
 }
 
-func (bc *BlockConfig) IsMantleSkadi(blockTime uint64) bool {
+func (bc *BlockConfig) IsOptimismWithSkadi(blockTime uint64) bool {
 	return bc.IsMantleSkadiEnabled
 }
 

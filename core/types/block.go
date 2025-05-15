@@ -233,7 +233,7 @@ type extblock struct {
 }
 
 type BlockType interface {
-	IsMantleSkadi(blkTime uint64) bool
+	IsOptimismWithSkadi(blkTime uint64) bool
 }
 
 // NewBlock creates a new block. The input data is copied, changes to header and to the
@@ -283,7 +283,7 @@ func NewBlock(header *Header, body *Body, receipts []*Receipt, hasher TrieHasher
 		}
 	}
 
-	if bType.IsMantleSkadi(b.header.Time) {
+	if bType.IsOptimismWithSkadi(b.header.Time) {
 		if withdrawals == nil || len(withdrawals) > 0 {
 			panic(fmt.Sprintf("expected non-nil empty withdrawals operation list in Skadi, but got: %v", body.Withdrawals))
 		}

@@ -278,7 +278,7 @@ func ExecutableDataToBlockNoHash(data ExecutableData, versionedHashes []common.H
 	// ExecutableData before withdrawals are enabled by marshaling
 	// Withdrawals as the json null value.
 	var withdrawalsRoot *common.Hash
-	if bType.IsMantleSkadi(data.Timestamp) {
+	if bType.IsOptimismWithSkadi(data.Timestamp) {
 		if data.WithdrawalsRoot == nil {
 			return nil, fmt.Errorf("attribute WithdrawalsRoot is required for Skadi blocks")
 		}
@@ -294,7 +294,7 @@ func ExecutableDataToBlockNoHash(data ExecutableData, versionedHashes []common.H
 		withdrawalsRoot = &h
 	}
 
-	skadiEnabled := bType.IsMantleSkadi(data.Timestamp)
+	skadiEnabled := bType.IsOptimismWithSkadi(data.Timestamp)
 	var requestsHash *common.Hash
 	if requests != nil {
 		if skadiEnabled && len(requests) > 0 {

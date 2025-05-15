@@ -383,6 +383,11 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 				b.header.Difficulty = big.NewInt(0)
 			}
 		}
+		if config.IsOptimismWithSkadi(b.header.Time) {
+			b.withdrawals = make([]*types.Withdrawal, 0)
+			h := types.EmptyWithdrawalsHash
+			b.header.WithdrawalsHash = &h
+		}
 
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
