@@ -33,8 +33,32 @@ const (
 	PreconfStatusWaiting PreconfStatus = "waiting"
 )
 
+// a copy of core/types/log.go
+// removed some fields that preconf can't provide
+type Log struct {
+	// Consensus fields:
+	// address of the contract that generated the event
+	Address common.Address `json:"address" gencodec:"required"`
+	// list of topics provided by the contract.
+	Topics []common.Hash `json:"topics" gencodec:"required"`
+	// supplied by the contract, usually ABI-encoded
+	Data hexutil.Bytes `json:"data" gencodec:"required"`
+}
+
+func NewLogs(originalLogs []*types.Log) []*Log {
+	logs := make([]*Log, 0, len(originalLogs))
+	for _, log := range originalLogs {
+		logs = append(logs, &Log{
+			Address: log.Address,
+			Topics:  log.Topics,
+			Data:    log.Data,
+		})
+	}
+	return logs
+}
+
 type PreconfTxReceipt struct {
-	Logs []*types.Log `json:"logs"`
+	Logs []*Log `json:"logs"`
 }
 
 // NewPreconfTxsEvent is posted when a preconf transaction enters the transaction pool.
@@ -61,7 +85,7 @@ func (e *NewPreconfTxRequest) GetStatus() PreconfStatus {
 	return e.Status
 }
 
-func (e *NewPreconfTxRequest) SetStatus(statusBefore PreconfStatus, status PreconfStatus) PreconfStatus {
+func (e *NewPreconfTxRequest) SetStatus(statusBefore, status PreconfStatus) PreconfStatus {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.Status == statusBefore {

@@ -1246,8 +1246,17 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 	for i, tx := range txs {
 		// If the transaction is known, pre-set the error slot
 		if pool.all.Get(tx.Hash()) != nil {
-			errs[i] = ErrAlreadyKnown
-			knownTxMeter.Mark(1)
+			status := pool.preconfTxs.GetStatus(tx.Hash())
+			if status != nil && *status == core.PreconfStatusTimeout {
+				pool.mu.Lock()
+				pool.recoverTimeoutPreconfTx(tx)
+				pool.mu.Unlock()
+				errs[i] = nil
+				knownTxMeter.Mark(1)
+			} else {
+				errs[i] = ErrAlreadyKnown
+				knownTxMeter.Mark(1)
+			}
 			continue
 		}
 		// Exclude transactions with invalid signatures as soon as
@@ -1302,7 +1311,14 @@ func (pool *TxPool) SetPreconfTxStatus(txHash common.Hash, status core.PreconfSt
 	pool.preconfTxs.SetStatus(txHash, status)
 }
 
+func (pool *TxPool) recoverTimeoutPreconfTx(tx *types.Transaction) {
+	log.Trace("recoverTimeoutPreconfTx", "tx", tx.Hash())
+	_ = pool.preconfTxs.CleanTimeoutTx(tx.Hash())
+	pool.addPreconfTx(tx)
+}
+
 func (pool *TxPool) addPreconfTx(tx *types.Transaction) {
+	log.Trace("addPreconfTx", "tx", tx.Hash())
 	txHash := tx.Hash()
 
 	// check tx is preconf tx
@@ -1345,6 +1361,7 @@ func (pool *TxPool) handlePreconfTxs(from common.Address, tx *types.Transaction)
 
 	// goroutine to avoid blocking
 	go func() {
+		log.Trace("handlePreconfTxs", "tx", tx.Hash())
 		defer preconf.MetricsPreconfTxPoolHandleCost(time.Now())
 		tx := preconfTxRequest.Tx
 
@@ -1385,7 +1402,7 @@ func (pool *TxPool) handlePreconfTxs(from common.Address, tx *types.Transaction)
 			if response.Receipt != nil {
 				if response.Receipt.Status == types.ReceiptStatusSuccessful {
 					event.Status = core.PreconfStatusSuccess
-					event.Receipt = core.PreconfTxReceipt{Logs: response.Receipt.Logs}
+					event.Receipt = core.PreconfTxReceipt{Logs: core.NewLogs(response.Receipt.Logs)}
 				} else {
 					event.Status = core.PreconfStatusFailed
 					event.Reason = vm.ErrExecutionReverted.Error()
