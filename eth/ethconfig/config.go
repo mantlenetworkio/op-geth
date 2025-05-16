@@ -43,12 +43,14 @@ import (
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gasprice.Config{
-	Blocks:           20,
-	Percentile:       60,
-	MaxHeaderHistory: 1024,
-	MaxBlockHistory:  1024,
-	MaxPrice:         gasprice.DefaultMaxPrice,
-	IgnorePrice:      gasprice.DefaultIgnorePrice,
+	Blocks:                  20,
+	Percentile:              60,
+	MaxHeaderHistory:        1024,
+	MaxBlockHistory:         1024,
+	MaxPrice:                gasprice.DefaultMaxPrice,
+	IgnorePrice:             gasprice.DefaultIgnorePrice,
+	OpPattern:               gasprice.DefaultOpPattern,
+	MinSuggestedPriorityFee: gasprice.DefaultMinSuggestedPriorityFee,
 }
 
 // LightClientGPO contains default gasprice oracle settings for light client.

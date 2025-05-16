@@ -973,6 +973,18 @@ var (
 		Value:    ethconfig.Defaults.GPO.IgnorePrice.Int64(),
 		Category: flags.GasPriceCategory,
 	}
+	GpoOpPatternFlag = &cli.BoolFlag{
+		Name:     "gpo.oppattern",
+		Usage:    "Enable Optimism fee suggestion pattern",
+		Value:    ethconfig.Defaults.GPO.OpPattern,
+		Category: flags.GasPriceCategory,
+	}
+	GpoMinSuggestedPriorityFeeFlag = &cli.Int64Flag{
+		Name:     "gpo.minsuggestedpriorityfee",
+		Usage:    "Minimum transaction priority fee to suggest. Used on OP chains when blocks are not full.",
+		Value:    ethconfig.Defaults.GPO.MinSuggestedPriorityFee.Int64(),
+		Category: flags.GasPriceCategory,
+	}
 
 	// Rollup Flags
 	RollupSequencerHTTPFlag = &cli.StringFlag{
@@ -1668,6 +1680,12 @@ func setGPO(ctx *cli.Context, cfg *gasprice.Config, light bool) {
 	}
 	if ctx.IsSet(GpoIgnoreGasPriceFlag.Name) {
 		cfg.IgnorePrice = big.NewInt(ctx.Int64(GpoIgnoreGasPriceFlag.Name))
+	}
+	if ctx.IsSet(GpoOpPatternFlag.Name) {
+		cfg.OpPattern = ctx.Bool(GpoOpPatternFlag.Name)
+	}
+	if ctx.IsSet(GpoMinSuggestedPriorityFeeFlag.Name) {
+		cfg.MinSuggestedPriorityFee = big.NewInt(ctx.Int64(GpoMinSuggestedPriorityFeeFlag.Name))
 	}
 }
 

@@ -187,6 +187,7 @@ func TestSuggestTipCap(t *testing.T) {
 		Blocks:     3,
 		Percentile: 60,
 		Default:    big.NewInt(params.GWei),
+		OpPattern:  false,
 	}
 	var cases = []struct {
 		fork   *big.Int // London fork number

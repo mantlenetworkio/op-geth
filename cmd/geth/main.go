@@ -161,6 +161,8 @@ var (
 		utils.GpoPercentileFlag,
 		utils.GpoMaxGasPriceFlag,
 		utils.GpoIgnoreGasPriceFlag,
+		utils.GpoOpPatternFlag,
+		utils.GpoMinSuggestedPriorityFeeFlag,
 		utils.MinerNotifyFullFlag,
 		utils.RollupSequencerHTTPFlag,
 		utils.RollupHistoricalRPCFlag,

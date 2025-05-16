@@ -28,6 +28,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
 )
@@ -35,8 +36,11 @@ import (
 const sampleNumber = 3 // Number of transactions sampled in a block
 
 var (
-	DefaultMaxPrice    = big.NewInt(500 * params.GWei)
-	DefaultIgnorePrice = big.NewInt(2 * params.Wei)
+	DefaultMaxPrice                = big.NewInt(500 * params.GWei)
+	DefaultIgnorePrice             = big.NewInt(2 * params.Wei)
+	DefaultStartPrice              = miner.DefaultConfig.GasPrice // consistent with geth logic
+	DefaultOpPattern               = true
+	DefaultMinSuggestedPriorityFee = big.NewInt(1e6 * params.Wei) // 0.001 gwei, for Optimism fee suggestion
 )
 
 type Config struct {
@@ -47,6 +51,9 @@ type Config struct {
 	Default          *big.Int `toml:",omitempty"`
 	MaxPrice         *big.Int `toml:",omitempty"`
 	IgnorePrice      *big.Int `toml:",omitempty"`
+
+	OpPattern               bool     `toml:",omitempty"` // indicate if Optimism fee suggestion is enabled
+	MinSuggestedPriorityFee *big.Int `toml:",omitempty"` // for Optimism fee suggestion
 }
 
 // OracleBackend includes all necessary background APIs for oracle.
@@ -74,6 +81,9 @@ type Oracle struct {
 	maxHeaderHistory, maxBlockHistory int
 
 	historyCache *lru.Cache[cacheKey, processedFees]
+
+	opPattern               bool     // indicate if Optimism fee suggestion is enabled
+	minSuggestedPriorityFee *big.Int // for Optimism fee suggestion
 }
 
 // NewOracle returns a new gasprice oracle which can recommend suitable
@@ -114,6 +124,20 @@ func NewOracle(backend OracleBackend, params Config) *Oracle {
 		maxBlockHistory = 1
 		log.Warn("Sanitizing invalid gasprice oracle max block history", "provided", params.MaxBlockHistory, "updated", maxBlockHistory)
 	}
+	startPrice := params.Default
+	if startPrice == nil || startPrice.Int64() < 0 {
+		startPrice = DefaultStartPrice
+		log.Warn("Sanitizing invalid gasprice oracle start price", "provided", params.Default, "updated", startPrice)
+	}
+	opPattern := params.OpPattern
+	log.Info("Gasprice oracle uses Optimism pattern for fee suggestion ", "enabled", opPattern)
+	minSuggestedPriorityFee := params.MinSuggestedPriorityFee
+	if minSuggestedPriorityFee == nil || minSuggestedPriorityFee.Int64() <= 0 {
+		minSuggestedPriorityFee = DefaultMinSuggestedPriorityFee
+		log.Warn("Sanitizing invalid optimism gasprice oracle min priority fee suggestion",
+			"provided", params.MinSuggestedPriorityFee,
+			"updated", minSuggestedPriorityFee)
+	}
 
 	cache := lru.NewCache[cacheKey, processedFees](2048)
 	headEvent := make(chan core.ChainHeadEvent, 1)
@@ -129,15 +153,17 @@ func NewOracle(backend OracleBackend, params Config) *Oracle {
 	}()
 
 	return &Oracle{
-		backend:          backend,
-		lastPrice:        params.Default,
-		maxPrice:         maxPrice,
-		ignorePrice:      ignorePrice,
-		checkBlocks:      blocks,
-		percentile:       percent,
-		maxHeaderHistory: maxHeaderHistory,
-		maxBlockHistory:  maxBlockHistory,
-		historyCache:     cache,
+		backend:                 backend,
+		lastPrice:               startPrice,
+		maxPrice:                maxPrice,
+		ignorePrice:             ignorePrice,
+		checkBlocks:             blocks,
+		percentile:              percent,
+		maxHeaderHistory:        maxHeaderHistory,
+		maxBlockHistory:         maxBlockHistory,
+		historyCache:            cache,
+		opPattern:               opPattern,
+		minSuggestedPriorityFee: minSuggestedPriorityFee,
 	}
 }
 
@@ -168,6 +194,11 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*big.Int, error) {
 	if headHash == lastHead {
 		return new(big.Int).Set(lastPrice), nil
 	}
+
+	if oracle.opPattern {
+		return oracle.SuggestOptimismPriorityFee(ctx, head, headHash), nil
+	}
+
 	var (
 		sent, exp int
 		number    = head.Number.Uint64()
