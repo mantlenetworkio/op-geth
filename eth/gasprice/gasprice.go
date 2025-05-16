@@ -28,7 +28,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
 )
@@ -36,9 +35,9 @@ import (
 const sampleNumber = 3 // Number of transactions sampled in a block
 
 var (
-	DefaultMaxPrice                = big.NewInt(500 * params.GWei)
-	DefaultIgnorePrice             = big.NewInt(2 * params.Wei)
-	DefaultStartPrice              = miner.DefaultConfig.GasPrice // consistent with geth logic
+	DefaultMaxPrice    = big.NewInt(500 * params.GWei)
+	DefaultIgnorePrice = big.NewInt(2 * params.Wei)
+
 	DefaultOpPattern               = true
 	DefaultMinSuggestedPriorityFee = big.NewInt(1e6 * params.Wei) // 0.001 gwei, for Optimism fee suggestion
 )
@@ -48,7 +47,6 @@ type Config struct {
 	Percentile       int
 	MaxHeaderHistory int
 	MaxBlockHistory  int
-	Default          *big.Int `toml:",omitempty"`
 	MaxPrice         *big.Int `toml:",omitempty"`
 	IgnorePrice      *big.Int `toml:",omitempty"`
 
@@ -88,7 +86,7 @@ type Oracle struct {
 
 // NewOracle returns a new gasprice oracle which can recommend suitable
 // gasprice for newly created transaction.
-func NewOracle(backend OracleBackend, params Config) *Oracle {
+func NewOracle(backend OracleBackend, params Config, startPrice *big.Int) *Oracle {
 	blocks := params.Blocks
 	if blocks < 1 {
 		blocks = 1
@@ -124,10 +122,9 @@ func NewOracle(backend OracleBackend, params Config) *Oracle {
 		maxBlockHistory = 1
 		log.Warn("Sanitizing invalid gasprice oracle max block history", "provided", params.MaxBlockHistory, "updated", maxBlockHistory)
 	}
-	startPrice := params.Default
 	if startPrice == nil || startPrice.Int64() < 0 {
-		startPrice = DefaultStartPrice
-		log.Warn("Sanitizing invalid gasprice oracle start price", "provided", params.Default, "updated", startPrice)
+		log.Warn("Sanitizing invalid gasprice oracle start price", "provided", startPrice, "updated", 0)
+		startPrice = big.NewInt(0)
 	}
 	opPattern := params.OpPattern
 	log.Info("Gasprice oracle uses Optimism pattern for fee suggestion ", "enabled", opPattern)

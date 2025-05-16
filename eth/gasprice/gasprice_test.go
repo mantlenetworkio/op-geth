@@ -186,7 +186,6 @@ func TestSuggestTipCap(t *testing.T) {
 	config := Config{
 		Blocks:     3,
 		Percentile: 60,
-		Default:    big.NewInt(params.GWei),
 		OpPattern:  false,
 	}
 	var cases = []struct {
@@ -201,7 +200,7 @@ func TestSuggestTipCap(t *testing.T) {
 	}
 	for _, c := range cases {
 		backend := newTestBackend(t, c.fork, false)
-		oracle := NewOracle(backend, config)
+		oracle := NewOracle(backend, config, big.NewInt(params.GWei))
 
 		// The gas price sampled is: 32G, 31G, 30G, 29G, 28G, 27G
 		got, err := oracle.SuggestTipCap(context.Background())

@@ -189,7 +189,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*LightEthereum, error) {
 	}
 
 	leth.ApiBackend = &LesApiBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, leth, nil}
-	leth.ApiBackend.gpo = gasprice.NewOracle(leth.ApiBackend, config.GPO)
+	leth.ApiBackend.gpo = gasprice.NewOracle(leth.ApiBackend, config.GPO, config.Miner.GasPrice)
 
 	leth.handler = newClientHandler(config.UltraLightServers, config.UltraLightFraction, checkpoint, leth)
 	if leth.handler.ulc != nil {
