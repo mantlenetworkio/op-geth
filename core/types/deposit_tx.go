@@ -41,10 +41,10 @@ type DepositTx struct {
 	Gas uint64
 	// Field indicating if this transaction is exempt from the L2 gas limit.
 	IsSystemTransaction bool
-	// Normal Tx data
-	Data []byte
 	// EthValue means L2 BVM_ETH mint tag, nil means that there is no need to mint BVM_ETH.
 	EthValue *big.Int `rlp:"nil"`
+	// Normal Tx data
+	Data []byte
 	// EthTxValue means L2 BVM_ETH tx tag, nil means that there is no need to transfer BVM_ETH to msg.To.
 	EthTxValue *big.Int `rlp:"optional"`
 }

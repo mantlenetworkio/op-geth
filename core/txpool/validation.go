@@ -271,7 +271,7 @@ func ValidateTransactionWithState(tx *types.Transaction, head *types.Header, sig
 		return err
 	}
 	if tx.Gas() < intrGas*tokenRatio {
-		return fmt.Errorf("%w: gas %v, minimum needed %v", core.ErrIntrinsicGas, tx.Gas(), intrGas)
+		return fmt.Errorf("%w: gas %v, minimum needed %v", core.ErrIntrinsicGas, tx.Gas(), intrGas*tokenRatio)
 	}
 
 	// Ensure the transaction can cover floor data gas.
@@ -281,7 +281,7 @@ func ValidateTransactionWithState(tx *types.Transaction, head *types.Header, sig
 			return err
 		}
 		if tx.Gas() < floorDataGas*tokenRatio {
-			return fmt.Errorf("%w: gas %v, minimum needed %v", core.ErrFloorDataGas, tx.Gas(), floorDataGas)
+			return fmt.Errorf("%w: gas %v, minimum needed %v", core.ErrFloorDataGas, tx.Gas(), floorDataGas*tokenRatio)
 		}
 	}
 

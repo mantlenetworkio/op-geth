@@ -19,6 +19,7 @@ package eth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"time"
 
@@ -321,21 +322,23 @@ func (b *EthAPIBackend) SendTx(ctx context.Context, signedTx *types.Transaction)
 			return err
 		}
 		if err := b.eth.seqRPCService.CallContext(ctx, nil, "eth_sendRawTransaction", hexutil.Encode(data)); err != nil {
-			return err
+			return fmt.Errorf("failed to forward tx to sequencer, err: '%w'", err)
 		}
-		if b.disableTxPool {
-			return nil
-		}
-		// Retain tx in local tx pool after forwarding, for local RPC usage.
-		if err := b.eth.txPool.Add([]*types.Transaction{signedTx}, false)[0]; err != nil {
-			log.Warn("successfully sent tx to sequencer, but failed to persist in local tx pool", "err", err, "tx", signedTx.Hash())
-		}
-		return nil
 	}
 	if b.disableTxPool {
 		return nil
 	}
 
+	// Retain tx in local tx pool after forwarding, for local RPC usage.
+	err := b.sendTx(ctx, signedTx)
+	if err != nil && b.eth.seqRPCService != nil {
+		log.Warn("successfully sent tx to sequencer, but failed to persist in local tx pool", "err", err, "tx", signedTx.Hash())
+		return nil
+	}
+	return err
+}
+
+func (b *EthAPIBackend) sendTx(ctx context.Context, signedTx *types.Transaction) error {
 	err := b.eth.txPool.Add([]*types.Transaction{signedTx}, false)[0]
 
 	// If the local transaction tracker is not configured, returns whatever
