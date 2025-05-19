@@ -205,15 +205,11 @@ func (s *FIFOTxSet) CleanTimeout() []*TxEntry {
 
 	removed := []*TxEntry{}
 	newTxQueue := make([]*TxEntry, 0, len(s.txQueue))
-	for idx, entry := range s.txQueue {
+	for _, entry := range s.txQueue {
 		if entry.Status == core.PreconfStatusTimeout {
 			delete(s.txMap, entry.Tx.Hash())
 			MetricsPendingPreconfDec(1)
 			removed = append(removed, entry)
-		} else if entry.Status == core.PreconfStatusWaiting {
-			// tx in txQueue is processed in sequence, so we can break here
-			newTxQueue = append(newTxQueue, s.txQueue[idx:]...)
-			break
 		} else {
 			newTxQueue = append(newTxQueue, entry)
 		}
@@ -222,23 +218,4 @@ func (s *FIFOTxSet) CleanTimeout() []*TxEntry {
 
 	s.txQueue = newTxQueue
 	return removed
-}
-
-func (s *FIFOTxSet) CleanTimeoutTx(txHash common.Hash) *TxEntry {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	tx := s.txMap[txHash]
-	if tx == nil {
-		return nil
-	}
-
-	for idx, entry := range s.txQueue {
-		if entry.Tx.Hash() == txHash {
-			s.txQueue = append(s.txQueue[:idx], s.txQueue[idx+1:]...)
-			break
-		}
-	}
-
-	return tx
 }

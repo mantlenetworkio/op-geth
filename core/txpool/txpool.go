@@ -98,6 +98,9 @@ var (
 	// ErrOverdraft is returned if a transaction would cause the senders balance to go negative
 	// thus invalidating a potential large number of transactions.
 	ErrOverdraft = errors.New("transaction would cause overdraft")
+
+	// ErrPreconfInProcess is returned if a transaction is in process as an preconf transaction
+	ErrPreconfInProcess = errors.New("exist preconf transaction in process")
 )
 
 var (
@@ -1025,6 +1028,15 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (replaced bool, err e
 
 	// Try to replace an existing transaction in the pending pool
 	if list := pool.pending[from]; list != nil && list.Overlaps(tx) {
+		old := list.txs.Get(tx.Nonce())
+		if old != nil {
+			status := pool.preconfTxs.GetStatus(tx.Hash())
+			// only timeout preconf tx can be replaced
+			if status != nil && *status != core.PreconfStatusTimeout {
+				return false, ErrPreconfInProcess
+			}
+		}
+
 		// Nonce already pending, check if required price bump is met
 		inserted, old := list.Add(tx, pool.config.PriceBump)
 		if !inserted {
@@ -1313,7 +1325,7 @@ func (pool *TxPool) SetPreconfTxStatus(txHash common.Hash, status core.PreconfSt
 
 func (pool *TxPool) recoverTimeoutPreconfTx(tx *types.Transaction) {
 	log.Trace("recoverTimeoutPreconfTx", "tx", tx.Hash())
-	_ = pool.preconfTxs.CleanTimeoutTx(tx.Hash())
+	pool.preconfTxs.Remove(tx.Hash())
 	pool.addPreconfTx(tx)
 }
 
