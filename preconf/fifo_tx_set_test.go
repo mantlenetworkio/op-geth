@@ -289,7 +289,7 @@ func TestFIFOTxSet_CleanTimeout(t *testing.T) {
 			// Verify results
 			assert.Equal(t, tt.expectedRemoved, removed, "unexpected number of removed transactions")
 			assert.Equal(t, tt.expectedRemaining, s.Len(), "unexpected number of remaining transactions")
-			assert.Equal(t, initialLen-removed, s.Len(), "inconsistent removal count")
+			assert.Equal(t, initialLen-len(removed), s.Len(), "inconsistent removal count")
 
 			// Verify all remaining transactions don't have timeout status
 			for _, entry := range s.TxEntries() {
