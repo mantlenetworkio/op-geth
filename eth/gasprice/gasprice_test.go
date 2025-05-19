@@ -186,7 +186,6 @@ func TestSuggestTipCap(t *testing.T) {
 	config := Config{
 		Blocks:     3,
 		Percentile: 60,
-		OpPattern:  false,
 	}
 	var cases = []struct {
 		fork   *big.Int // London fork number

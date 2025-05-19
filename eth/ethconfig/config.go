@@ -49,7 +49,6 @@ var FullNodeGPO = gasprice.Config{
 	MaxBlockHistory:         1024,
 	MaxPrice:                gasprice.DefaultMaxPrice,
 	IgnorePrice:             gasprice.DefaultIgnorePrice,
-	OpPattern:               gasprice.DefaultOpPattern,
 	MinSuggestedPriorityFee: gasprice.DefaultMinSuggestedPriorityFee,
 }
 

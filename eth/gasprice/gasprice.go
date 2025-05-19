@@ -38,7 +38,6 @@ var (
 	DefaultMaxPrice    = big.NewInt(500 * params.GWei)
 	DefaultIgnorePrice = big.NewInt(2 * params.Wei)
 
-	DefaultOpPattern               = true
 	DefaultMinSuggestedPriorityFee = big.NewInt(1e6 * params.Wei) // 0.001 gwei, for Optimism fee suggestion
 )
 
@@ -50,7 +49,6 @@ type Config struct {
 	MaxPrice         *big.Int `toml:",omitempty"`
 	IgnorePrice      *big.Int `toml:",omitempty"`
 
-	OpPattern               bool     `toml:",omitempty"` // indicate if Optimism fee suggestion is enabled
 	MinSuggestedPriorityFee *big.Int `toml:",omitempty"` // for Optimism fee suggestion
 }
 
@@ -80,7 +78,6 @@ type Oracle struct {
 
 	historyCache *lru.Cache[cacheKey, processedFees]
 
-	opPattern               bool     // indicate if Optimism fee suggestion is enabled
 	minSuggestedPriorityFee *big.Int // for Optimism fee suggestion
 }
 
@@ -126,15 +123,6 @@ func NewOracle(backend OracleBackend, params Config, startPrice *big.Int) *Oracl
 		log.Warn("Sanitizing invalid gasprice oracle start price", "provided", startPrice, "updated", 0)
 		startPrice = big.NewInt(0)
 	}
-	opPattern := params.OpPattern
-	log.Info("Gasprice oracle uses Optimism pattern for fee suggestion ", "enabled", opPattern)
-	minSuggestedPriorityFee := params.MinSuggestedPriorityFee
-	if minSuggestedPriorityFee == nil || minSuggestedPriorityFee.Int64() <= 0 {
-		minSuggestedPriorityFee = DefaultMinSuggestedPriorityFee
-		log.Warn("Sanitizing invalid optimism gasprice oracle min priority fee suggestion",
-			"provided", params.MinSuggestedPriorityFee,
-			"updated", minSuggestedPriorityFee)
-	}
 
 	cache := lru.NewCache[cacheKey, processedFees](2048)
 	headEvent := make(chan core.ChainHeadEvent, 1)
@@ -149,19 +137,28 @@ func NewOracle(backend OracleBackend, params Config, startPrice *big.Int) *Oracl
 		}
 	}()
 
-	return &Oracle{
-		backend:                 backend,
-		lastPrice:               startPrice,
-		maxPrice:                maxPrice,
-		ignorePrice:             ignorePrice,
-		checkBlocks:             blocks,
-		percentile:              percent,
-		maxHeaderHistory:        maxHeaderHistory,
-		maxBlockHistory:         maxBlockHistory,
-		historyCache:            cache,
-		opPattern:               opPattern,
-		minSuggestedPriorityFee: minSuggestedPriorityFee,
+	r := &Oracle{
+		backend:          backend,
+		lastPrice:        startPrice,
+		maxPrice:         maxPrice,
+		ignorePrice:      ignorePrice,
+		checkBlocks:      blocks,
+		percentile:       percent,
+		maxHeaderHistory: maxHeaderHistory,
+		maxBlockHistory:  maxBlockHistory,
+		historyCache:     cache,
 	}
+
+	if backend.ChainConfig().IsOptimism() {
+		r.minSuggestedPriorityFee = params.MinSuggestedPriorityFee
+		if r.minSuggestedPriorityFee == nil || r.minSuggestedPriorityFee.Int64() <= 0 {
+			r.minSuggestedPriorityFee = DefaultMinSuggestedPriorityFee
+			log.Warn("Sanitizing invalid optimism gasprice oracle min priority fee suggestion",
+				"provided", params.MinSuggestedPriorityFee,
+				"updated", r.minSuggestedPriorityFee)
+		}
+	}
+	return r
 }
 
 // SuggestTipCap returns a tip cap so that newly created transaction can have a
@@ -192,7 +189,7 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*big.Int, error) {
 		return new(big.Int).Set(lastPrice), nil
 	}
 
-	if oracle.opPattern {
+	if oracle.backend.ChainConfig().IsOptimism() {
 		return oracle.SuggestOptimismPriorityFee(ctx, head, headHash), nil
 	}
 
