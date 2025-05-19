@@ -665,8 +665,8 @@ func (w *worker) mainLoop() {
 
 			receipt, err := w.preconfChecker.Preconf(ev.Tx)
 			if err != nil {
-				// Not fatal, just warn to the log
-				log.Warn("preconf failed", "tx", ev.Tx.Hash(), "err", err)
+				// Not fatal, just trace to the log
+				log.Trace("preconf failed", "tx", ev.Tx.Hash(), "err", err)
 			}
 			log.Trace("worker preconf tx executed", "tx", ev.Tx.Hash(), "duration", time.Since(now))
 

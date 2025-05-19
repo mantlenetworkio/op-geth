@@ -1443,7 +1443,7 @@ func (pool *TxPool) handlePreconfTxs(from common.Address, tx *types.Transaction)
 			}
 		} else {
 			preconf.PreconfTxFailureMeter.Mark(1)
-			log.Trace("preconf failure", "tx", txHash, "reason", event.Reason)
+			log.Warn("preconf failure", "tx", txHash, "nonce", tx.Nonce(), "reason", event.Reason)
 		}
 
 		// send preconf event

@@ -3,7 +3,12 @@ package preconf
 import (
 	"time"
 
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
+)
+
+const (
+	SlowThreshold = 100 * time.Millisecond
 )
 
 // metrics
@@ -32,13 +37,14 @@ var (
 	PreconfTxPoolForwardTimer = metrics.NewRegisteredTimer("preconf/txpool/forward", nil)
 	PreconfTxPoolFilterTimer  = metrics.NewRegisteredTimer("preconf/txpool/filter", nil)
 	PreconfMinerExecuteTimer  = metrics.NewRegisteredTimer("preconf/execute", nil)
+	PreconfMinerPauseTimer    = metrics.NewRegisteredTimer("preconf/miner/pause", nil)
 	PreconfAPIHandleTimer     = metrics.NewRegisteredTimer("preconf/api/handle", nil)
 )
 
 // OpNode status update
 func MetricsOpNodeSyncStatus(status *OptimismSyncStatus, optimismSyncStatusOK bool) {
 	if status != nil {
-		OpNodeL1CurrentGauge.Update(int64(status.CurrentL1.Number))
+		OpNodeL1CurrentGauge.Update(int64(status.UnsafeL2.L1Origin.Number))
 		OpNodeL1HeadGauge.Update(int64(status.HeadL1.Number))
 		OpNodeL2UnsafeGauge.Update(int64(status.UnsafeL2.Number))
 		OpNodeEngineSyncTargetGauge.Update(int64(status.EngineSyncTarget.Number))
@@ -82,6 +88,10 @@ func MetricsPreconfExecuteCost(start time.Time) {
 	PreconfMinerExecuteTimer.Update(time.Since(start))
 }
 
+func MetricsPreconfMinerPauseCost(start time.Time) {
+	PreconfMinerPauseTimer.Update(time.Since(start))
+}
+
 func MetricsPreconfAPIHandleCost(start time.Time) {
 	PreconfAPIHandleTimer.Update(time.Since(start))
 }
@@ -93,4 +103,11 @@ func MetricsPendingPreconfInc(count int) {
 
 func MetricsPendingPreconfDec(count int) {
 	PreconfTxPendingGauge.Dec(int64(count))
+}
+
+func LogIfSlow(start time.Time, msg string, ctx ...any) {
+	duration := time.Since(start)
+	if duration > SlowThreshold {
+		log.Warn("Slow "+msg, append([]any{"duration", duration}, ctx...)...)
+	}
 }

@@ -28,7 +28,6 @@ var (
 	ErrOptimismSyncNil                                                        = errors.New("optimism sync status is nil")
 	ErrOptimismSyncNotOk                                                      = errors.New("optimism sync status is not ok")
 	ErrEnvTooOld                                                              = errors.New("env is too old")
-	ErrCurrentL1BlockTooOld                                                   = errors.New("current l1 block is too old")
 	ErrHeadL1BlockTooOld                                                      = errors.New("head l1 block is too old")
 	ErrCurrentL1NumberAndHeadL1NumberDistanceTooLarge                         = errors.New("current l1 number and head l1 number distance is too large")
 	ErrEnvBlockNumberLessThanEngineSyncTargetBlockNumberOrUnsafeL2BlockNumber = errors.New("env block number is less than engine sync target block number or unsafe l2 block number")
@@ -54,6 +53,7 @@ type preconfChecker struct {
 	snapTxHash   common.Hash
 	env          *environment
 	envUpdatedAt time.Time
+	lastPauseNow time.Time
 
 	optimismSyncStatus   *preconf.OptimismSyncStatus
 	optimismSyncStatusOk bool
@@ -158,6 +158,7 @@ func (c *preconfChecker) GetDepositTxs(start, end uint64) ([]*types.Transaction,
 }
 
 func (c *preconfChecker) UpdateOptimismSyncStatus(newOptimismSyncStatus *preconf.OptimismSyncStatus) {
+	defer preconf.LogIfSlow(time.Now(), "UpdateOptimismSyncStatus", "newOptimismSyncStatus", newOptimismSyncStatus)
 	status, statusOk, header := func() (*preconf.OptimismSyncStatus, bool, *updateDepositTxsHeader) {
 		c.mu.Lock()
 		defer c.mu.Unlock()
@@ -215,14 +216,12 @@ func (c *preconfChecker) UpdateOptimismSyncStatus(newOptimismSyncStatus *preconf
 
 // check optimism sync status
 //
-// current_l1.number normal growth
 // head_l1.number normal growth
 // unsafe_l2.number normal growth
 // unsafe_l2.l1_origin.number normal growth
 // engine_sync_target.number normal growth
 func (c *preconfChecker) isSyncStatusOk(newStatus *preconf.OptimismSyncStatus) bool {
-	return c.optimismSyncStatus.CurrentL1.Number <= newStatus.CurrentL1.Number &&
-		c.optimismSyncStatus.HeadL1.Number <= newStatus.HeadL1.Number &&
+	return c.optimismSyncStatus.HeadL1.Number <= newStatus.HeadL1.Number &&
 		c.optimismSyncStatus.UnsafeL2.Number <= newStatus.UnsafeL2.Number &&
 		c.optimismSyncStatus.UnsafeL2.L1Origin.Number <= newStatus.UnsafeL2.L1Origin.Number &&
 		c.optimismSyncStatus.EngineSyncTarget.Number <= newStatus.EngineSyncTarget.Number
@@ -232,6 +231,7 @@ func (c *preconfChecker) isSyncStatusOk(newStatus *preconf.OptimismSyncStatus) b
 // We cannot use `newOptimismSyncStatus.CurrentL1.Number` because it may not have been successfully derived yet, which could cause us to
 // miss the deposit transactions for this block. Therefore, we can only use `newOptimismSyncStatus.UnsafeL2.L1Origin.Number`
 func (c *preconfChecker) updateDepositTxs(currentL1, headL1 uint64) error {
+	defer preconf.LogIfSlow(time.Now(), "updateDepositTxs", "currentL1", currentL1, "headL1", headL1)
 	start, end := currentL1+1, headL1-1
 	depositTxs, err := c.GetDepositTxs(start, end)
 	if err != nil {
@@ -317,11 +317,6 @@ func (c *preconfChecker) precheck() error {
 	}
 
 	// Not more than EthToleranceDuration(default 1m36s) from the last L1Block.
-	currentL1BlockTime := time.Unix(int64(c.optimismSyncStatus.CurrentL1.Time), 0)
-	if time.Since(currentL1BlockTime) > c.minerConfig.EthToleranceDuration() {
-		log.Trace("currentL1BlockTooOld", "currentL1Block.number", c.optimismSyncStatus.CurrentL1.Number, "currentL1BlockTime", currentL1BlockTime, "time.Since(currentL1BlockTime)", time.Since(currentL1BlockTime), "tolerance", c.minerConfig.EthToleranceDuration())
-		return ErrCurrentL1BlockTooOld
-	}
 	headL1BlockTime := time.Unix(int64(c.optimismSyncStatus.HeadL1.Time), 0)
 	if time.Since(headL1BlockTime) > c.minerConfig.EthToleranceDuration() {
 		log.Trace("headL1BlockTooOld", "headL1Block.number", c.optimismSyncStatus.HeadL1.Number, "headL1BlockTime", headL1BlockTime, "time.Since(headL1BlockTime)", time.Since(headL1BlockTime), "tolerance", c.minerConfig.EthToleranceDuration())
@@ -358,6 +353,7 @@ func (c *preconfChecker) precheck() error {
 
 // applyTxWithResetEnv applies a transaction and resets the environment if a gas limit reached error occurs.
 func (c *preconfChecker) applyTxWithResetEnv(env *environment, tx *types.Transaction) (*types.Receipt, error) {
+	defer preconf.LogIfSlow(time.Now(), "applyTxWithResetEnv", "tx", tx.Hash().Hex(), "nonce", tx.Nonce())
 	receipt, err := c.applyTx(env, tx)
 	if err != nil {
 		if errors.Is(err, core.ErrGasLimitReached) {
@@ -403,11 +399,13 @@ func (c *preconfChecker) PausePreconf() chan<- []*types.Transaction {
 	}
 	c.unSealedPreconfTxsCh = make(chan []*types.Transaction, 1) // buffer 1 to avoid worker block
 
-	log.Debug("pause preconf")
+	c.lastPauseNow = time.Now()
 	return c.unSealedPreconfTxsCh
 }
 
 func (c *preconfChecker) UnpausePreconf(env *environment, preconfReady func()) {
+	defer preconf.LogIfSlow(c.lastPauseNow, "UnpausePreconf", "env.header.Number", env.header.Number.Int64())
+	defer preconf.MetricsPreconfMinerPauseCost(c.lastPauseNow)
 	defer c.mu.Unlock()
 	c.env = env
 	c.envUpdatedAt = time.Now()
