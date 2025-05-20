@@ -57,6 +57,7 @@ func testBuildPayloadWithPreconf(t *testing.T, cfg *preconf.TxPoolConfig, txs []
 		if env.gasPool == nil {
 			env.gasPool = new(core.GasPool).AddGas(gasLimit)
 		}
+		w.preconfChecker.PausePreconf()
 		w.preconfChecker.UnpausePreconf(env, w.eth.TxPool().PreconfReady)
 	}
 

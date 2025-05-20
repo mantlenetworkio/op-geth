@@ -32,6 +32,7 @@ var (
 	ErrCurrentL1NumberAndHeadL1NumberDistanceTooLarge                         = errors.New("current l1 number and head l1 number distance is too large")
 	ErrEnvBlockNumberLessThanEngineSyncTargetBlockNumberOrUnsafeL2BlockNumber = errors.New("env block number is less than engine sync target block number or unsafe l2 block number")
 	ErrEnvBlockNumberAndEngineSyncTargetBlockNumberDistanceTooLarge           = errors.New("env block number and engine sync target block number distance is too large")
+	ErrPreconfNotAvailable                                                    = errors.New("preconf is not available")
 )
 
 const (
@@ -255,7 +256,7 @@ func (c *preconfChecker) Preconf(tx *types.Transaction) (*types.Receipt, error) 
 	defer c.mu.Unlock()
 
 	if err := c.precheck(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w because of %w", ErrPreconfNotAvailable, err)
 	}
 	log.Trace("preconf", "tx", tx.Hash().Hex(), "nonce", tx.Nonce(), "env.header.Number", c.env.header.Number)
 
@@ -294,7 +295,10 @@ func (c *preconfChecker) RevertTx(txHash common.Hash) error {
 func (c *preconfChecker) PrecheckStatus() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.precheck()
+	if err := c.precheck(); err != nil {
+		return fmt.Errorf("%w because of %w", ErrPreconfNotAvailable, err)
+	}
+	return nil
 }
 
 func (c *preconfChecker) precheck() error {

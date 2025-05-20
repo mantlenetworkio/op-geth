@@ -1340,11 +1340,11 @@ func (pool *TxPool) addPreconfTx(tx *types.Transaction) {
 		return
 	}
 
-	// handle preconf txs
-	pool.handlePreconfTxs(from, tx)
+	// handle preconf tx
+	pool.handlePreconfTx(from, tx)
 }
 
-func (pool *TxPool) handlePreconfTxs(from common.Address, tx *types.Transaction) { // check tx is preconf tx
+func (pool *TxPool) handlePreconfTx(from common.Address, tx *types.Transaction) {
 	txHash := tx.Hash()
 
 	// send preconf request event
@@ -1391,9 +1391,9 @@ func (pool *TxPool) handlePreconfTxs(from common.Address, tx *types.Transaction)
 		default:
 			preconf.PreconfTxFailureMeter.Mark(1)
 			event.Status = core.PreconfStatusFailed
-			event.Reason = "preconf txs not ready"
+			event.Reason = "preconf tx is not ready"
 			pool.preconfTxFeed.Send(event)
-			log.Info("preconf txs not ready, can't handle", "tx", txHash)
+			log.Info("preconf tx is not ready, can't handle", "tx", txHash)
 			return
 		}
 
