@@ -287,7 +287,7 @@ func TestFIFOTxSet_CleanTimeout(t *testing.T) {
 			removed := s.CleanTimeout()
 
 			// Verify results
-			assert.Equal(t, tt.expectedRemoved, removed, "unexpected number of removed transactions")
+			assert.Equal(t, tt.expectedRemoved, len(removed), "unexpected number of removed transactions")
 			assert.Equal(t, tt.expectedRemaining, s.Len(), "unexpected number of remaining transactions")
 			assert.Equal(t, initialLen-len(removed), s.Len(), "inconsistent removal count")
 

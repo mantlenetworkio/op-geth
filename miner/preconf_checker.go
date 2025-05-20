@@ -310,22 +310,22 @@ func (c *preconfChecker) precheck() error {
 		return ErrOptimismSyncNotOk
 	}
 
-	// Not more than MantleToleranceDuration(default 6s) from the last L2Block.
+	// Not more than MantleToleranceDuration(default 12s) from the last L2Block.
 	if time.Since(c.envUpdatedAt) > c.minerConfig.MantleToleranceDuration() {
-		log.Trace("envTooOld", "env.header.Number", c.env.header.Number.Uint64(), "envUpdatedAt", c.envUpdatedAt, "time.Since(envUpdatedAt)", time.Since(c.envUpdatedAt), "tolerance", c.minerConfig.MantleToleranceDuration())
+		log.Warn("envTooOld", "env.header.Number", c.env.header.Number.Uint64(), "envUpdatedAt", c.envUpdatedAt, "time.Since(envUpdatedAt)", time.Since(c.envUpdatedAt), "tolerance", c.minerConfig.MantleToleranceDuration())
 		return ErrEnvTooOld
 	}
 
-	// Not more than EthToleranceDuration(default 1m36s) from the last L1Block.
+	// Not more than EthToleranceDuration(default 1m48s) from the last L1Block.
 	headL1BlockTime := time.Unix(int64(c.optimismSyncStatus.HeadL1.Time), 0)
 	if time.Since(headL1BlockTime) > c.minerConfig.EthToleranceDuration() {
-		log.Trace("headL1BlockTooOld", "headL1Block.number", c.optimismSyncStatus.HeadL1.Number, "headL1BlockTime", headL1BlockTime, "time.Since(headL1BlockTime)", time.Since(headL1BlockTime), "tolerance", c.minerConfig.EthToleranceDuration())
+		log.Warn("headL1BlockTooOld", "headL1Block.number", c.optimismSyncStatus.HeadL1.Number, "headL1BlockTime", headL1BlockTime, "time.Since(headL1BlockTime)", time.Since(headL1BlockTime), "tolerance", c.minerConfig.EthToleranceDuration())
 		return ErrHeadL1BlockTooOld
 	}
 
 	// The distance between unsafe_l2.l1_origin.number and head_l1.number should not exceed EthToleranceBlock(default 6)
 	if c.optimismSyncStatus.HeadL1.Number-c.optimismSyncStatus.UnsafeL2.L1Origin.Number > c.minerConfig.EthToleranceBlock() {
-		log.Trace("currentL1NumberAndHeadL1NumberDistanceTooLarge", "unsafe_l2.l1_origin.number", c.optimismSyncStatus.UnsafeL2.L1Origin.Number, "headL1Number", c.optimismSyncStatus.HeadL1.Number, "tolerance", c.minerConfig.EthToleranceBlock())
+		log.Warn("currentL1NumberAndHeadL1NumberDistanceTooLarge", "unsafe_l2.l1_origin.number", c.optimismSyncStatus.UnsafeL2.L1Origin.Number, "headL1Number", c.optimismSyncStatus.HeadL1.Number, "tolerance", c.minerConfig.EthToleranceBlock())
 		return ErrCurrentL1NumberAndHeadL1NumberDistanceTooLarge
 	}
 
@@ -333,7 +333,7 @@ func (c *preconfChecker) precheck() error {
 	envBlockNumber := c.env.header.Number.Uint64()
 	engineSyncTargetBlockNumber, unsafeL2BlockNumber := c.optimismSyncStatus.EngineSyncTarget.Number, c.optimismSyncStatus.UnsafeL2.Number
 	if envBlockNumber < engineSyncTargetBlockNumber || envBlockNumber < unsafeL2BlockNumber {
-		log.Trace("envBlockNumberLessThanEngineSyncTargetBlockNumberOrUnsafeL2BlockNumber", "envBlockNumber", envBlockNumber, "engineSyncTargetBlockNumber", engineSyncTargetBlockNumber, "unsafeL2BlockNumber", unsafeL2BlockNumber)
+		log.Warn("envBlockNumberLessThanEngineSyncTargetBlockNumberOrUnsafeL2BlockNumber", "envBlockNumber", envBlockNumber, "engineSyncTargetBlockNumber", engineSyncTargetBlockNumber, "unsafeL2BlockNumber", unsafeL2BlockNumber)
 		return ErrEnvBlockNumberLessThanEngineSyncTargetBlockNumberOrUnsafeL2BlockNumber
 	}
 
@@ -344,7 +344,7 @@ func (c *preconfChecker) precheck() error {
 		// When there are a large number of preconfirmation transactions in the queue, it may cause the future 6 blocks to be
 		// filled with preconfirmation transactions. At this point, stop new preconfirmation transactions from entering,
 		// because there may be unblocked deposit transactions in future blocks, which cannot be predicted at this time.
-		log.Trace("envBlockNumberAndEngineSyncTargetBlockNumberDistanceTooLarge", "envBlockNumber", c.env.header.Number.Uint64(), "engineSyncTargetBlockNumber", c.optimismSyncStatus.EngineSyncTarget.Number, "unsafeL2BlockNumber", c.optimismSyncStatus.UnsafeL2.Number, "tolerance", c.minerConfig.EthToleranceBlock())
+		log.Warn("envBlockNumberAndEngineSyncTargetBlockNumberDistanceTooLarge", "envBlockNumber", c.env.header.Number.Uint64(), "engineSyncTargetBlockNumber", c.optimismSyncStatus.EngineSyncTarget.Number, "unsafeL2BlockNumber", c.optimismSyncStatus.UnsafeL2.Number, "tolerance", c.minerConfig.EthToleranceBlock())
 		return ErrEnvBlockNumberAndEngineSyncTargetBlockNumberDistanceTooLarge
 	}
 
