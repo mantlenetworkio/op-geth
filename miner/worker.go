@@ -667,6 +667,10 @@ func (w *worker) mainLoop() {
 			if err != nil {
 				// Not fatal, just trace to the log
 				log.Trace("preconf failed", "tx", ev.Tx.Hash(), "err", err)
+				if errors.Is(err, ErrPreconfNotAvailable) {
+					log.Warn("preconf is temporary not available, tx will be handled as timeout in txpool", "tx", ev.Tx.Hash())
+					continue
+				}
 			}
 			log.Trace("worker preconf tx executed", "tx", ev.Tx.Hash(), "duration", time.Since(now))
 
