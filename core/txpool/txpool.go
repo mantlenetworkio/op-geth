@@ -1259,11 +1259,18 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 		// If the transaction is known, pre-set the error slot
 		if pool.all.Get(tx.Hash()) != nil {
 			status := pool.preconfTxs.GetStatus(tx.Hash())
-			if status != nil && *status == core.PreconfStatusTimeout {
-				pool.mu.Lock()
-				pool.recoverTimeoutPreconfTx(tx)
-				pool.mu.Unlock()
-				errs[i] = nil
+			if status != nil {
+				if *status == core.PreconfStatusTimeout {
+					pool.mu.Lock()
+					pool.recoverTimeoutPreconfTx(tx)
+					pool.mu.Unlock()
+					errs[i] = nil
+				} else if *status == core.PreconfStatusWaiting {
+					log.Info("preconf tx is waiting", "tx", tx.Hash())
+					errs[i] = nil
+				} else {
+					errs[i] = ErrAlreadyKnown
+				}
 				knownTxMeter.Mark(1)
 			} else {
 				errs[i] = ErrAlreadyKnown
@@ -1929,6 +1936,7 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) []*types.Trans
 			hash := tx.Hash()
 			if pool.promoteTx(addr, hash, tx) {
 				promoted = append(promoted, tx)
+				log.Trace("Promoted transaction", "hash", hash)
 			}
 		}
 		log.Trace("Promoted queued transactions", "count", len(promoted))
