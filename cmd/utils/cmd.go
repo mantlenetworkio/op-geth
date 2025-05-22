@@ -236,6 +236,111 @@ func missingBlocks(chain *core.BlockChain, blocks []*types.Block) []*types.Block
 	return nil
 }
 
+
+// ExportReceipts exports receipts into the specified file, truncating any data
+// already present in the file.
+func ExportReceipt(blockchain *core.BlockChain, fn string) error {
+	log.Info("Exporting receipts", "file", fn)
+
+	// Open the file handle and potentially wrap with a gzip stream
+	fh, err := os.OpenFile(fn, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.ModePerm)
+	if err != nil {
+		return err
+	}
+	defer fh.Close()
+
+	var writer io.Writer = fh
+	if strings.HasSuffix(fn, ".gz") {
+		writer = gzip.NewWriter(writer)
+		defer writer.(*gzip.Writer).Close()
+	}
+	// Iterate over the blocks and export them
+	if err := blockchain.ExportReceipts(writer); err != nil {
+		return err
+	}
+	log.Info("Exported receipts", "file", fn)
+
+	return nil
+}
+
+// ExportAppendReceipt exports receipts into the specified file, appending to
+// the file if data already exists in it.
+func ExportAppendReceipt(blockchain *core.BlockChain, fn string, first uint64, last uint64) error {
+	log.Info("Exporting receipts", "file", fn)
+
+	// Open the file handle and potentially wrap with a gzip stream
+	fh, err := os.OpenFile(fn, os.O_CREATE|os.O_APPEND|os.O_WRONLY, os.ModePerm)
+	if err != nil {
+		return err
+	}
+	defer fh.Close()
+
+	var writer io.Writer = fh
+	if strings.HasSuffix(fn, ".gz") {
+		writer = gzip.NewWriter(writer)
+		defer writer.(*gzip.Writer).Close()
+	}
+	// Iterate over the blocks and export them
+	if err := blockchain.ExportReceiptsN(writer, first, last); err != nil {
+		return err
+	}
+	log.Info("Exported receipts to", "file", fn)
+
+	return nil
+}
+
+// ExportTotalDifficulty exports difficulty into the specified file, truncating any data
+// already present in the file.
+func ExportTotalDifficulty(blockchain *core.BlockChain, fn string) error {
+	log.Info("Exporting total difficulty", "file", fn)
+
+	// Open the file handle and potentially wrap with a gzip stream
+	fh, err := os.OpenFile(fn, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.ModePerm)
+	if err != nil {
+		return err
+	}
+	defer fh.Close()
+
+	var writer io.Writer = fh
+	if strings.HasSuffix(fn, ".gz") {
+		writer = gzip.NewWriter(writer)
+		defer writer.(*gzip.Writer).Close()
+	}
+	// Iterate over the blocks and export them
+	if err := blockchain.ExportTotalDifficulty(writer); err != nil {
+		return err
+	}
+	log.Info("Exported difficulty", "file", fn)
+
+	return nil
+}
+
+// ExportAppendTotalDifficulty exports difficulty into the specified file, appending to
+// the file if data already exists in it.
+func ExportAppendTotalDifficulty(blockchain *core.BlockChain, fn string, first uint64, last uint64) error {
+	log.Info("Exporting total difficulty", "file", fn)
+
+	// Open the file handle and potentially wrap with a gzip stream
+	fh, err := os.OpenFile(fn, os.O_CREATE|os.O_APPEND|os.O_WRONLY, os.ModePerm)
+	if err != nil {
+		return err
+	}
+	defer fh.Close()
+
+	var writer io.Writer = fh
+	if strings.HasSuffix(fn, ".gz") {
+		writer = gzip.NewWriter(writer)
+		defer writer.(*gzip.Writer).Close()
+	}
+	// Iterate over the blocks and export them
+	if err := blockchain.ExportTotalDifficultyN(writer, first, last); err != nil {
+		return err
+	}
+	log.Info("Exported total difficulty to", "file", fn)
+
+	return nil
+}
+
 // ExportChain exports a blockchain into the specified file, truncating any data
 // already present in the file.
 func ExportChain(blockchain *core.BlockChain, fn string) error {

@@ -85,6 +85,38 @@ type Receipt struct {
 	TokenRatio *big.Int   `json:"tokenRatio,omitempty"`
 }
 
+type HackReceipt struct {
+	// Consensus fields: These fields are defined by the Yellow Paper
+	Type              uint8  `json:"type,omitempty"`
+	PostState         []byte `json:"root"`
+	Status            uint64 `json:"status"`
+	CumulativeGasUsed uint64 `json:"cumulativeGasUsed" gencodec:"required"`
+	Bloom             Bloom  `json:"logsBloom"         gencodec:"required"`
+	Logs              []*Log `json:"logs"              gencodec:"required"`
+
+	// Implementation fields: These fields are added by geth when processing a transaction.
+	// They are stored in the chain database.
+	TxHash          common.Hash    `json:"transactionHash" gencodec:"required"`
+	ContractAddress common.Address `json:"contractAddress"`
+	GasUsed         uint64         `json:"gasUsed" gencodec:"required"`
+
+	// No DepositNonce for prebedrock
+
+	// Inclusion information: These fields provide information about the inclusion of the
+	// transaction corresponding to this receipt.
+	BlockHash        common.Hash `json:"blockHash,omitempty"`
+	BlockNumber      *big.Int    `json:"blockNumber,omitempty"`
+	TransactionIndex uint        `json:"transactionIndex"`
+
+	// UsingOVM
+	L1GasPrice *big.Int `json:"l1GasPrice" gencodec:"required"`
+	L1GasUsed  *big.Int `json:"l1GasUsed" gencodec:"required"`
+	L1Fee      *big.Int `json:"l1Fee" gencodec:"required"`
+	// FeeScalar as string
+	FeeScalar string `json:"l1FeeScalar" gencodec:"required"`
+	TokenRatio *big.Int   `json:"tokenRatio" gencodec:"required"`
+}
+
 type receiptMarshaling struct {
 	Type              hexutil.Uint64
 	PostState         hexutil.Bytes
@@ -228,17 +260,25 @@ func NewReceipt(root []byte, failed bool, cumulativeGasUsed uint64) *Receipt {
 // EncodeRLP implements rlp.Encoder, and flattens the consensus fields of a receipt
 // into an RLP stream. If no post state is present, byzantium fork is assumed.
 func (r *Receipt) EncodeRLP(w io.Writer) error {
-	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs}
-	if r.Type == LegacyTxType {
-		return rlp.Encode(w, data)
-	}
-	buf := encodeBufferPool.Get().(*bytes.Buffer)
-	defer encodeBufferPool.Put(buf)
-	buf.Reset()
-	if err := r.encodeTyped(data, buf); err != nil {
-		return err
-	}
-	return rlp.Encode(w, buf.Bytes())
+	return rlp.Encode(w, &HackReceipt{
+		Type:              r.Type,
+		PostState:         r.PostState,
+		Status:            r.Status,
+		CumulativeGasUsed: r.CumulativeGasUsed,
+		Bloom:             r.Bloom,
+		Logs:              r.Logs,
+		TxHash:            r.TxHash,
+		ContractAddress:   r.ContractAddress,
+		GasUsed:           r.GasUsed,
+		BlockHash:         r.BlockHash,
+		BlockNumber:       r.BlockNumber,
+		TransactionIndex:  r.TransactionIndex,
+		L1GasPrice:        r.L1GasPrice,
+		L1GasUsed:         r.L1GasUsed,
+		L1Fee:             r.L1Fee,
+		FeeScalar:         r.FeeScalar.String(),
+		TokenRatio:        r.TokenRatio,
+	})
 }
 
 // encodeTyped writes the canonical encoding of a typed receipt to w.
