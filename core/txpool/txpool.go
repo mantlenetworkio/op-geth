@@ -1030,7 +1030,7 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (replaced bool, err e
 	if list := pool.pending[from]; list != nil && list.Overlaps(tx) {
 		old := list.txs.Get(tx.Nonce())
 		if old != nil {
-			status := pool.preconfTxs.GetStatus(tx.Hash())
+			status := pool.preconfTxs.GetStatus(old.Hash())
 			// only timeout preconf tx can be replaced
 			if status != nil && *status != core.PreconfStatusTimeout {
 				return false, ErrPreconfInProcess
