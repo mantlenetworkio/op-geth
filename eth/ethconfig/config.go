@@ -179,6 +179,10 @@ type Config struct {
 // Clique is allowed for now to live standalone, but ethash is forbidden and can
 // only exist on already merged networks.
 func CreateConsensusEngine(config *params.ChainConfig, db ethdb.Database) (consensus.Engine, error) {
+	if config.Optimism != nil {
+		return beacon.New(&beacon.OpLegacy{}), nil
+	}
+
 	if config.TerminalTotalDifficulty == nil {
 		log.Error("Geth only supports PoS networks. Please transition legacy networks using Geth v1.13.x.")
 		return nil, fmt.Errorf("'terminalTotalDifficulty' is not set in genesis block")

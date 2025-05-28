@@ -203,9 +203,10 @@ func BenchmarkHashing(b *testing.B) {
 func TestBlockRlpEncodeDecode(t *testing.T) {
 	zeroTime := uint64(0)
 
-	// create a config where Isthmus upgrade is active
+	// create a config where Skadi upgrade is active
 	config := *params.OptimismTestConfig
 	config.ShanghaiTime = &zeroTime
+	config.CancunTime = &zeroTime
 	config.MantleSkadiTime = &zeroTime
 	require.True(t, config.IsOptimismWithSkadi(zeroTime))
 

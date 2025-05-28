@@ -298,12 +298,12 @@ func ExecutableDataToBlockNoHash(data ExecutableData, versionedHashes []common.H
 	var requestsHash *common.Hash
 	if requests != nil {
 		if skadiEnabled && len(requests) > 0 {
-			return nil, fmt.Errorf("requests should be empty for Isthmus blocks")
+			return nil, fmt.Errorf("requests should be empty for Skadi blocks")
 		}
 		h := types.CalcRequestsHash(requests)
 		requestsHash = &h
 	} else if skadiEnabled {
-		return nil, fmt.Errorf("requests must be an empty array for Isthmus blocks")
+		return nil, fmt.Errorf("requests must be an empty array for Skadi blocks")
 	}
 
 	header := &types.Header{
