@@ -42,6 +42,7 @@ type testBackend struct {
 	db              ethdb.Database
 	fm              *filtermaps.FilterMaps
 	txFeed          event.Feed
+	preconfTxFeed   event.Feed
 	logsFeed        event.Feed
 	rmLogsFeed      event.Feed
 	chainFeed       event.Feed
@@ -147,6 +148,10 @@ func (b *testBackend) GetLogs(ctx context.Context, hash common.Hash, number uint
 
 func (b *testBackend) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription {
 	return b.txFeed.Subscribe(ch)
+}
+
+func (b *testBackend) SubscribeNewPreconfTxEvent(ch chan<- core.NewPreconfTxEvent) event.Subscription {
+	return b.preconfTxFeed.Subscribe(ch)
 }
 
 func (b *testBackend) SubscribeRemovedLogsEvent(ch chan<- core.RemovedLogsEvent) event.Subscription {

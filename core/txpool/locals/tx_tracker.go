@@ -205,7 +205,8 @@ func (tracker *TxTracker) loop() {
 				// Lock to prevent journal.rotate <-> journal.insert (via TrackAll) conflicts
 				tracker.mu.Lock()
 				lastJournal = time.Now()
-				if err := tracker.journal.rotate(rejournal); err != nil {
+				preconfTxs, _ := tracker.pool.PendingPreconfTxs(txpool.PendingFilter{})
+				if err := tracker.journal.rotate(rejournal, preconfTxs); err != nil {
 					log.Warn("Transaction journal rotation failed", "err", err)
 				}
 				tracker.mu.Unlock()

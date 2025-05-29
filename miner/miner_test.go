@@ -34,6 +34,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/preconf"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/triedb"
 )
@@ -140,6 +141,7 @@ func createMiner(t *testing.T) *Miner {
 	// Create Ethash config
 	config := Config{
 		PendingFeeRecipient: common.HexToAddress("123456789"),
+		PreconfConfig:       &preconf.DefaultMinerConfig,
 	}
 	// Create chainConfig
 	chainDB := rawdb.NewMemoryDatabase()

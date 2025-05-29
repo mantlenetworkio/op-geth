@@ -326,6 +326,10 @@ type BlobPool struct {
 	txValidationFn txpool.ValidationFunction
 
 	lock sync.RWMutex // Mutex protecting the pool during reorg handling
+
+	// Preconf variables
+	preconfTxRequestFeed event.Feed
+	preconfTxFeed        event.Feed
 }
 
 // New creates a new blob transaction pool to gather, sort and filter inbound
@@ -1741,6 +1745,26 @@ func (p *BlobPool) SubscribeTransactions(ch chan<- core.NewTxsEvent, reorgs bool
 	} else {
 		return p.discoverFeed.Subscribe(ch)
 	}
+}
+
+// SubscribeNewPreconfTxEvent subscribes to new preconf transaction events.
+func (p *BlobPool) SubscribeNewPreconfTxEvent(ch chan<- core.NewPreconfTxEvent) event.Subscription {
+	return p.preconfTxFeed.Subscribe(ch)
+}
+
+// SubscribeNewPreconfTxRequestEvent subscribes to new preconf transaction request events.
+func (p *BlobPool) SubscribeNewPreconfTxRequestEvent(ch chan<- core.NewPreconfTxRequest) event.Subscription {
+	return p.preconfTxRequestFeed.Subscribe(ch)
+}
+
+func (p *BlobPool) PendingPreconfTxs(filter txpool.PendingFilter) ([]*types.Transaction, map[common.Address][]*txpool.LazyTransaction) {
+	// Blob pool does not support preconf transactions
+	return nil, p.Pending(filter)
+}
+
+// PreconfReady closes the preconfReadyCh channel to notify the miner that preconf is ready
+func (p *BlobPool) PreconfReady() {
+	// Do nothing
 }
 
 // Nonce returns the next nonce of an account, with all transactions executable

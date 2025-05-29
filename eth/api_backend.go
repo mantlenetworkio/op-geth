@@ -360,6 +360,53 @@ func (b *EthAPIBackend) sendTx(ctx context.Context, signedTx *types.Transaction)
 	return nil
 }
 
+func (b *EthAPIBackend) SendTxWithPreconf(ctx context.Context, tx *types.Transaction) (*core.NewPreconfTxEvent, error) {
+	if b.eth.seqRPCService != nil {
+		data, err := tx.MarshalBinary()
+		if err != nil {
+			return nil, err
+		}
+		var result *core.NewPreconfTxEvent
+		if err = b.eth.seqRPCService.CallContext(ctx, &result, "eth_sendRawTransactionWithPreconf", hexutil.Encode(data)); err != nil {
+			return nil, fmt.Errorf("failed to forward tx to sequencer, please try again. Error message: '%w'", err)
+		}
+		return result, nil
+	}
+
+	return b.sendTxWithPreconf(ctx, tx)
+}
+
+func (b *EthAPIBackend) sendTxWithPreconf(ctx context.Context, tx *types.Transaction) (*core.NewPreconfTxEvent, error) {
+	preconfTxCh := make(chan core.NewPreconfTxEvent, 100)
+	defer close(preconfTxCh)
+	sub := b.SubscribeNewPreconfTxEvent(preconfTxCh)
+	defer sub.Unsubscribe()
+
+	// Send tx
+	txHash := tx.Hash()
+	if err := b.SendTx(ctx, tx); err != nil {
+		return nil, err
+	}
+
+	// Wait for preconf tx event
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	for {
+		select {
+		case preconfTx := <-preconfTxCh:
+			if preconfTx.TxHash == txHash {
+				if preconfTx.Status == core.PreconfStatusFailed {
+					log.Trace("api backend received preconf tx failed event", "tx", txHash, "reason", preconfTx.Reason)
+				}
+				return &preconfTx, nil
+			}
+		case <-ctx.Done():
+			log.Trace("preconf tx event not received", "tx", txHash, "err", ctx.Err())
+			return nil, errors.New("preconf tx event not received")
+		}
+	}
+}
+
 func (b *EthAPIBackend) GetPoolTransactions() (types.Transactions, error) {
 	pending := b.eth.txPool.Pending(txpool.PendingFilter{})
 	var txs types.Transactions
@@ -414,6 +461,10 @@ func (b *EthAPIBackend) TxPoolContentFrom(addr common.Address) ([]*types.Transac
 
 func (b *EthAPIBackend) TxPool() *txpool.TxPool {
 	return b.eth.txPool
+}
+
+func (b *EthAPIBackend) SubscribeNewPreconfTxEvent(ch chan<- core.NewPreconfTxEvent) event.Subscription {
+	return b.eth.TxPool().SubscribeNewPreconfTxEvent(ch)
 }
 
 func (b *EthAPIBackend) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription {

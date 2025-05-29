@@ -161,6 +161,20 @@ type SubPool interface {
 	// or also for reorged out ones.
 	SubscribeTransactions(ch chan<- core.NewTxsEvent, reorgs bool) event.Subscription
 
+	// SubscribeNewPreconfTxEvent subscribes to new preconf transaction events.
+	SubscribeNewPreconfTxEvent(ch chan<- core.NewPreconfTxEvent) event.Subscription
+
+	// SubscribeNewPreconfTxRequestEvent subscribes to new preconf transaction request events.
+	SubscribeNewPreconfTxRequestEvent(ch chan<- core.NewPreconfTxRequest) event.Subscription
+
+	// PendingPreconfTxs returns all currently processable preconf and pending transactions, grouped by origin
+	// account and sorted by nonce.
+	PendingPreconfTxs(filter PendingFilter) ([]*types.Transaction, map[common.Address][]*LazyTransaction)
+
+	// PreconfReady closes the preconfReadyCh channel to notify the miner that preconf is ready
+	// This is called every time a worker is ready with an env, but it only closes once, so we need to use sync.Once to ensure it only closes once
+	PreconfReady()
+
 	// Nonce returns the next nonce of an account, with all transactions executable
 	// by the pool already applied on top.
 	Nonce(addr common.Address) uint64

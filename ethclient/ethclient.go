@@ -713,6 +713,18 @@ func RevertErrorData(err error) ([]byte, bool) {
 	return nil, false
 }
 
+// SendTransactionWithPreconf injects a signed transaction into the pending pool for execution.
+//
+// If the transaction was a contract creation use the TransactionReceipt method to get the
+// contract address after the transaction has been mined.
+func (ec *Client) SendTransactionWithPreconf(ctx context.Context, tx *types.Transaction, result interface{}) error {
+	data, err := tx.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	return ec.c.CallContext(ctx, &result, "eth_sendRawTransactionWithPreconf", hexutil.Encode(data))
+}
+
 func toBlockNumArg(number *big.Int) string {
 	if number == nil {
 		return "latest"
