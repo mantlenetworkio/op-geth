@@ -94,6 +94,8 @@ type TxMetadata struct {
 // production, this interface defines the common methods that allow the primary
 // transaction pool to manage the subpools.
 type SubPool interface {
+	preconfTxPool
+
 	// Filter is a selector used to decide whether a transaction would be added
 	// to this particular subpool.
 	Filter(tx *types.Transaction) bool
@@ -160,20 +162,6 @@ type SubPool interface {
 	// can decide whether to receive notifications only for newly seen transactions
 	// or also for reorged out ones.
 	SubscribeTransactions(ch chan<- core.NewTxsEvent, reorgs bool) event.Subscription
-
-	// SubscribeNewPreconfTxEvent subscribes to new preconf transaction events.
-	SubscribeNewPreconfTxEvent(ch chan<- core.NewPreconfTxEvent) event.Subscription
-
-	// SubscribeNewPreconfTxRequestEvent subscribes to new preconf transaction request events.
-	SubscribeNewPreconfTxRequestEvent(ch chan<- core.NewPreconfTxRequest) event.Subscription
-
-	// PendingPreconfTxs returns all currently processable preconf and pending transactions, grouped by origin
-	// account and sorted by nonce.
-	PendingPreconfTxs(filter PendingFilter) ([]*types.Transaction, map[common.Address][]*LazyTransaction)
-
-	// PreconfReady closes the preconfReadyCh channel to notify the miner that preconf is ready
-	// This is called every time a worker is ready with an env, but it only closes once, so we need to use sync.Once to ensure it only closes once
-	PreconfReady()
 
 	// Nonce returns the next nonce of an account, with all transactions executable
 	// by the pool already applied on top.

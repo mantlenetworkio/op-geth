@@ -19,7 +19,6 @@ package legacypool
 
 import (
 	"errors"
-	"fmt"
 	"maps"
 	"math"
 	"math/big"
@@ -30,14 +29,12 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/common/prque"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto/kzg4844"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
@@ -441,206 +438,6 @@ func (pool *LegacyPool) SubscribeTransactions(ch chan<- core.NewTxsEvent, reorgs
 	return pool.txFeed.Subscribe(ch)
 }
 
-// SubscribeNewPreconfTxEvent subscribes to new preconf transaction events.
-func (pool *LegacyPool) SubscribeNewPreconfTxEvent(ch chan<- core.NewPreconfTxEvent) event.Subscription {
-	return pool.preconfTxFeed.Subscribe(ch)
-}
-
-// SubscribeNewPreconfTxRequestEvent subscribes to new preconf transaction request events.
-func (pool *LegacyPool) SubscribeNewPreconfTxRequestEvent(ch chan<- core.NewPreconfTxRequest) event.Subscription {
-	return pool.preconfTxRequestFeed.Subscribe(ch)
-}
-
-// PendingPreconfTxs retrieves the preconf transactions and the pending transactions.
-func (pool *LegacyPool) PendingPreconfTxs(filter txpool.PendingFilter) ([]*types.Transaction, map[common.Address][]*txpool.LazyTransaction) {
-	defer preconf.MetricsPreconfTxPoolFilterCost(time.Now())
-	// If only blob transactions are requested, this pool is unsuitable as it
-	// contains none, don't even bother.
-	if filter.OnlyBlobTxs {
-		return nil, nil
-	}
-	pool.mu.Lock()
-	defer pool.mu.Unlock()
-
-	pending := pool.pendingWithFilter(filter)
-	return pool.extractPreconfTxsFromPending(pending), pending
-}
-
-// extractPreconfTxsFromPending extracts pre-confirmation transactions from the pending pool and ensures consistency
-// between pending and preconfTxs. It checks that all preconf transactions in pending are in pool.preconfTxs,
-// and all transactions in pool.preconfTxs are in pending. Any inconsistencies are logged as errors.
-// Finally, it removes preconf transactions from pending and returns them while preserving the order of remaining transactions.
-//
-// Parameters:
-// - pending: A map of addresses to their pending transactions.
-//
-// Returns:
-// - A slice of pre-confirmation transactions extracted from pending.
-func (pool *LegacyPool) extractPreconfTxsFromPending(pending map[common.Address][]*txpool.LazyTransaction) []*types.Transaction {
-	// check preconf tx in pending map and also in preconfTxs
-	for from, txs := range pending {
-		if pool.config.Preconf.IsPreconfTxFrom(from) {
-			for _, tx := range txs {
-				if pool.config.Preconf.IsPreconfTx(&from, tx.Tx.To()) && !pool.preconfTxs.Contains(tx.Tx.Hash()) {
-					// This tx will be sealed like a normal tx, not a preconf tx
-					log.Error("Missing preconf tx in preconfTxs, please report the issue", "tx", tx.Tx.Hash(), "from", from.Hex(), "nonce", tx.Tx.Nonce())
-					continue
-				}
-			}
-		}
-	}
-
-	// removes the preconf transaction from the pending map, maintaining the order.
-	preconfTxs := make([]*types.Transaction, 0)
-	for _, preconfTx := range pool.preconfTxs.TxEntries() {
-		preconfTxHash := preconfTx.Tx.Hash()
-
-		// Get the slice of transactions for the target address
-		txs, exists := pending[preconfTx.From]
-
-		// If the transaction isn't in pending map but it's expected to be there,
-		// show the error log.
-		if !exists || len(txs) == 0 {
-			log.Error("Missing transaction in pending map, please report the issue", "hash", preconfTxHash)
-			pool.preconfTxs.Remove(preconfTxHash) // remove it prevent log always print
-			continue
-		}
-
-		// Create a new slice to hold the transactions that are not deleted
-		var newTxs []*txpool.LazyTransaction
-		for _, tx := range txs {
-			if tx.Tx.Hash() != preconfTxHash {
-				newTxs = append(newTxs, tx) // Only keep the transactions that are not to be deleted
-			}
-		}
-
-		// Update the slice in the map
-		if len(newTxs) == 0 {
-			delete(pending, preconfTx.From) // If the slice is empty, delete the entry for that address
-		} else {
-			pending[preconfTx.From] = newTxs // Replace with the new slice
-		}
-
-		preconfTxs = append(preconfTxs, preconfTx.Tx)
-	}
-	return preconfTxs
-}
-
-// PreconfReady closes the preconfReadyCh channel to notify the miner that preconf is ready
-// This is called every time a worker is ready with an env, but it only closes once, so we need to use sync.Once to ensure it only closes once
-func (pool *LegacyPool) PreconfReady() {
-	pool.preconfReadyOnce.Do(func() {
-		close(pool.preconfReadyCh)
-		log.Info("preconf ready")
-	})
-}
-
-func (pool *LegacyPool) addPreconfTx(tx *types.Transaction) {
-	txHash := tx.Hash()
-
-	// check tx is preconf tx
-	from, _ := types.Sender(pool.signer, tx)
-	if !pool.config.Preconf.IsPreconfTx(&from, tx.To()) {
-		log.Debug("preconf from and to is not match", "tx", txHash)
-		return
-	}
-
-	pool.preconfTxs.Add(from, tx)
-
-	// handle preconf txs
-	pool.handlePreconfTxs([]*types.Transaction{tx})
-}
-
-func (pool *LegacyPool) handlePreconfTxs(news []*types.Transaction) {
-	for _, tx := range news {
-		txHash := tx.Hash()
-		if !pool.preconfTxs.Contains(txHash) {
-			log.Debug("tx not in preconfTxs, skip handle", "tx", txHash)
-			continue
-		}
-
-		// send preconf request event
-		result := make(chan *core.PreconfResponse, 1) // buffer 1 to avoid worker blocking
-		pool.preconfTxRequestFeed.Send(core.NewPreconfTxRequest{
-			Tx:            tx,
-			PreconfResult: result,
-			ClosePreconfResultFn: func() {
-				close(result)
-			},
-		})
-		log.Debug("txpool sent preconf tx request", "tx", txHash)
-
-		// avoid race condition
-		// tx := tx
-		// goroutine to avoid blocking
-		go func() {
-			defer preconf.MetricsPreconfTxPoolHandleCost(time.Now())
-
-			// If preconfReadyCh is not closed, it means this is a preconf tx restored from journal after system restart.
-			// In this case, we don't need to execute preconfirmation again to avoid resource contention with worker.
-			select {
-			case <-pool.preconfReadyCh:
-			default:
-				log.Warn("preconf txs not ready, skip handle", "tx", txHash)
-				return
-			}
-
-			// default preconf event
-			event := core.NewPreconfTxEvent{
-				TxHash:                 txHash,
-				PredictedL2BlockNumber: hexutil.Uint64(0),
-			}
-			// timeout
-			timeout := time.NewTimer(pool.config.Preconf.PreconfTimeout)
-			defer timeout.Stop()
-			now := time.Now()
-			// wait for miner.worker preconf response
-			select {
-			case response := <-result:
-				log.Trace("txpool received preconf tx response", "tx", txHash, "duration", time.Since(now))
-				if response.Err == nil {
-					event.Status = core.PreconfStatusSuccess
-				} else {
-					event.Status = core.PreconfStatusFailed
-					event.Reason = response.Err.Error()
-				}
-				if response.Receipt != nil {
-					if response.Receipt.Status == types.ReceiptStatusSuccessful {
-						event.Status = core.PreconfStatusSuccess
-					} else {
-						event.Status = core.PreconfStatusFailed
-						event.Reason = vm.ErrExecutionReverted.Error()
-					}
-					event.PredictedL2BlockNumber = hexutil.Uint64(response.Receipt.BlockNumber.Uint64())
-				}
-			case <-timeout.C:
-				event.Status = core.PreconfStatusFailed
-				event.Reason = fmt.Sprintf("preconf timeout, over %s timeout", time.Since(now))
-			}
-
-			// send preconf event
-			pool.preconfTxFeed.Send(event)
-
-			// add preconf success tx to journal
-			if event.Status == core.PreconfStatusSuccess {
-				preconf.PreconfTxSuccessMeter.Mark(1)
-				log.Trace("preconf success", "tx", txHash)
-				// TODO: add preconf success tx to journal
-				// if pool.journal != nil {
-				// 	if err := pool.journal.insert(tx); err != nil {
-				// 		log.Error("Failed to journal preconf success transaction", "tx", txHash, "err", err)
-				// 	} else {
-				// 		log.Trace("preconf success transaction journaled", "tx", txHash)
-				// 	}
-				// }
-			} else {
-				preconf.PreconfTxFailureMeter.Mark(1)
-				log.Trace("preconf failure", "tx", txHash, "reason", event.Reason)
-			}
-		}()
-	}
-}
-
 // SetGasTip updates the minimum gas tip required by the transaction pool for a
 // new transaction, and drops all transactions below this threshold.
 func (pool *LegacyPool) SetGasTip(tip *big.Int) {
@@ -1019,6 +816,15 @@ func (pool *LegacyPool) add(tx *types.Transaction) (replaced bool, err error) {
 
 	// Try to replace an existing transaction in the pending pool
 	if list := pool.pending[from]; list != nil && list.Contains(tx.Nonce()) {
+		old := list.txs.Get(tx.Nonce())
+		if old != nil {
+			status := pool.preconfTxs.GetStatus(old.Hash())
+			// only timeout preconf tx can be replaced
+			if status != nil && *status != core.PreconfStatusTimeout {
+				return false, txpool.ErrPreconfInProcess
+			}
+		}
+
 		// Nonce already pending, check if required price bump is met
 		inserted, old := list.Add(tx, pool.config.PriceBump)
 		if !inserted {
@@ -1033,10 +839,10 @@ func (pool *LegacyPool) add(tx *types.Transaction) (replaced bool, err error) {
 			pool.preconfTxs.Remove(old.Hash())
 			log.Trace("add: removed old tx", "hash", old.Hash())
 		}
-		pool.addPreconfTx(tx)
 		pool.all.Add(tx)
 		pool.priced.Put(tx)
 		pool.queueTxEvent(tx)
+		pool.addPreconfTx(tx)
 		log.Trace("Pooled new executable transaction", "hash", hash, "from", from, "to", tx.To())
 
 		// Successful promotion, bump the heartbeat
@@ -1195,8 +1001,24 @@ func (pool *LegacyPool) Add(txs []*types.Transaction, sync bool) []error {
 	for i, tx := range txs {
 		// If the transaction is known, pre-set the error slot
 		if pool.all.Get(tx.Hash()) != nil {
-			errs[i] = txpool.ErrAlreadyKnown
-			knownTxMeter.Mark(1)
+			status := pool.preconfTxs.GetStatus(tx.Hash())
+			if status != nil {
+				if *status == core.PreconfStatusTimeout {
+					pool.mu.Lock()
+					pool.recoverTimeoutPreconfTx(tx)
+					pool.mu.Unlock()
+					errs[i] = nil
+				} else if *status == core.PreconfStatusWaiting {
+					log.Info("preconf tx is waiting", "tx", tx.Hash())
+					errs[i] = nil
+				} else {
+					errs[i] = txpool.ErrAlreadyKnown
+				}
+				knownTxMeter.Mark(1)
+			} else {
+				errs[i] = txpool.ErrAlreadyKnown
+				knownTxMeter.Mark(1)
+			}
 			continue
 		}
 		// Exclude transactions with basic errors, e.g invalid signatures and

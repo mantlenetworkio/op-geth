@@ -5,6 +5,10 @@ import (
 	"log"
 	"math/big"
 
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/tests/preconf/config"
 	frontrunning "github.com/ethereum/go-ethereum/tests/preconf/front_running"
@@ -14,6 +18,7 @@ import (
 
 func main() {
 	precheck()
+	checkPreconfRPCValid()
 	stress.StressTest()
 	frontrunning.TransferTest()
 	sort.SortTest()
@@ -37,6 +42,7 @@ func precheck() {
 
 	checkERC20(ctx, sequencerClient)
 	checkERC20(ctx, rpcClient)
+
 }
 
 func checkERC20(ctx context.Context, client *ethclient.Client) {
@@ -65,4 +71,86 @@ func checkERC20(ctx context.Context, client *ethclient.Client) {
 	// 1. Deploy TestERC20/TestPay
 	// 2. setERC20Address in TestPay
 	// 3. set TestPay address in ToPreconfs of op-geth
+}
+
+func checkPreconfRPCValid() {
+	ctx := context.Background()
+	client, err := ethclient.Dial(config.L2RpcEndpoint)
+	if err != nil {
+		log.Fatalf("failed to connect to L2 RPC: %v", err)
+		return
+	}
+	defer client.Close()
+
+	event := sendRawTransactionWithPreconf(ctx, client)
+	if event == nil {
+		log.Fatalf("preconf not valid err: %v", err)
+		return
+	}
+
+	log.Printf("preconf valid, event: %v", event)
+}
+
+func sendRawTransactionWithPreconf(
+	ctx context.Context,
+	client *ethclient.Client,
+) *core.NewPreconfTxEvent {
+
+	chainID, err := client.ChainID(ctx)
+	if err != nil {
+		log.Fatalf("failed to get chain ID: %v", err)
+	}
+
+	auth, err := bind.NewKeyedTransactorWithChainID(config.FunderKey, chainID)
+	if err != nil {
+		log.Fatalf("failed to create config.Addr1 signer: %v", err)
+	}
+
+	nonce, err := client.PendingNonceAt(ctx, auth.From)
+	if err != nil {
+		log.Fatalf("failed to get nonce for %s: %v", auth.From.Hex(), err)
+	}
+
+	gasTipCap := big.NewInt(0)
+
+	head, err := client.HeaderByNumber(ctx, nil)
+	if err != nil {
+		log.Fatalf("failed to suggest gas price: %v", err)
+	}
+	baseFee := head.BaseFee
+
+	gasFeeCap := new(big.Int).Add(
+		gasTipCap,
+		new(big.Int).Mul(baseFee, big.NewInt(2)),
+	)
+
+	tx := &types.DynamicFeeTx{
+		ChainID:   chainID,
+		Nonce:     nonce,
+		To:        &config.TestERC20,
+		GasTipCap: gasTipCap,
+		GasFeeCap: gasFeeCap,
+		Gas:       config.TransferGasLimit,
+		Data:      common.Hex2Bytes("40c10f19000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb922660000000000000000000000000000000000000000000000000000000000000064"),
+	}
+
+	signedTx, err := auth.Signer(auth.From, types.NewTx(tx))
+	if err != nil {
+		log.Printf("Error signing transaction: %v\n", err)
+		return nil
+	}
+
+	var result core.NewPreconfTxEvent
+	err = client.SendTransactionWithPreconf(ctx, signedTx, &result)
+	txHash := signedTx.Hash()
+
+	if err != nil {
+		log.Fatalf("Error sending transaction: %v, txHash: %s\n", err, txHash.Hex())
+	}
+
+	if result.TxHash != txHash {
+		log.Fatalf("Transaction hash mismatch: %v != %v\n", result.TxHash, txHash)
+	}
+
+	return &result
 }

@@ -67,4 +67,7 @@ var (
 	// ErrInflightTxLimitReached is returned when the maximum number of in-flight
 	// transactions is reached for specific accounts.
 	ErrInflightTxLimitReached = errors.New("in-flight transaction limit reached for delegated accounts")
+
+	// ErrPreconfInProcess is returned if a transaction is in process as an preconf transaction
+	ErrPreconfInProcess = errors.New("exist preconf transaction in process")
 )

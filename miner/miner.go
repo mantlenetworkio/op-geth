@@ -33,7 +33,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/eth/tracers"
 	"github.com/ethereum/go-ethereum/event"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/preconf"
 )
@@ -95,14 +94,14 @@ type Miner struct {
 	backend Backend
 
 	// Preconf Subscriptions
-	preconfTxRequestCh  chan core.NewPreconfTxRequest
+	preconfTxRequestCh  chan *core.NewPreconfTxRequest
 	preconfTxRequestSub event.Subscription
 	preconfChecker      *preconfChecker
 }
 
 // New creates a new miner with provided config.
 func New(eth Backend, config Config, engine consensus.Engine) *Miner {
-	preconfTxRequestCh := make(chan core.NewPreconfTxRequest, txChanSize)
+	preconfTxRequestCh := make(chan *core.NewPreconfTxRequest, txChanSize)
 	miner := &Miner{
 		config:      &config,
 		chainConfig: eth.BlockChain().Config(),
@@ -113,40 +112,11 @@ func New(eth Backend, config Config, engine consensus.Engine) *Miner {
 		backend:     eth,
 		// preconf init
 		preconfTxRequestCh:  preconfTxRequestCh,
-		preconfChecker:      NewPreconfChecker(config.PreconfConfig),
+		preconfChecker:      NewPreconfChecker(eth.BlockChain(), config.PreconfConfig),
 		preconfTxRequestSub: eth.TxPool().SubscribeNewPreconfTxRequestEvent(preconfTxRequestCh),
 	}
-	go miner.mainLoop()
+	go miner.preconfLoop()
 	return miner
-}
-
-func (miner *Miner) mainLoop() {
-	defer miner.preconfTxRequestSub.Unsubscribe()
-	for {
-		select {
-		case ev := <-miner.preconfTxRequestCh:
-			now := time.Now()
-			log.Debug("worker received preconf tx request", "tx", ev.Tx.Hash())
-
-			receipt, err := miner.preconfChecker.Preconf(ev.Tx)
-			if err != nil {
-				// Not fatal, just warn to the log
-				log.Warn("preconf failed", "tx", ev.Tx.Hash(), "err", err)
-			}
-			log.Trace("worker preconf tx executed", "tx", ev.Tx.Hash(), "duration", time.Since(now))
-
-			select {
-			case ev.PreconfResult <- &core.PreconfResponse{Receipt: receipt, Err: err}:
-				log.Debug("worker sent preconf tx response", "tx", ev.Tx.Hash(), "duration", time.Since(now))
-			case <-time.After(time.Second):
-				log.Warn("preconf tx response timeout, preconf result is closed?", "tx", ev.Tx.Hash())
-			}
-			ev.ClosePreconfResultFn()
-
-		case <-miner.preconfTxRequestSub.Err():
-			return
-		}
-	}
 }
 
 // Pending returns the currently pending block and associated receipts, logs
@@ -244,3 +214,4 @@ func (miner *Miner) getPending() *newPayloadResult {
 	miner.pending.update(header.Hash(), ret)
 	return ret
 }
+

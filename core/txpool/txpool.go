@@ -400,47 +400,6 @@ func (p *TxPool) SubscribeTransactions(ch chan<- core.NewTxsEvent, reorgs bool) 
 	return p.subs.Track(event.JoinSubscriptions(subs...))
 }
 
-// SubscribeNewPreconfTxEvent registers a subscription of NewPreconfTxEvent and
-// starts sending event to the given channel.
-func (p *TxPool) SubscribeNewPreconfTxEvent(ch chan<- core.NewPreconfTxEvent) event.Subscription {
-	subs := make([]event.Subscription, len(p.subpools))
-	for i, subpool := range p.subpools {
-		subs[i] = subpool.SubscribeNewPreconfTxEvent(ch)
-	}
-	return p.subs.Track(event.JoinSubscriptions(subs...))
-}
-
-// SubscribeNewPreconfTxRequest registers a subscription of NewPreconfTxRequest and
-// starts sending event to the given channel.
-func (p *TxPool) SubscribeNewPreconfTxRequestEvent(ch chan<- core.NewPreconfTxRequest) event.Subscription {
-	subs := make([]event.Subscription, len(p.subpools))
-	for i, subpool := range p.subpools {
-		subs[i] = subpool.SubscribeNewPreconfTxRequestEvent(ch)
-	}
-	return p.subs.Track(event.JoinSubscriptions(subs...))
-}
-
-func (p *TxPool) PendingPreconfTxs(filter PendingFilter) ([]*types.Transaction, map[common.Address][]*LazyTransaction) {
-	preconfTxs := make([]*types.Transaction, 0)
-	pendingTxs := make(map[common.Address][]*LazyTransaction)
-	for _, subpool := range p.subpools {
-		preconfTxsSub, pendingTxsSub := subpool.PendingPreconfTxs(filter)
-		preconfTxs = append(preconfTxs, preconfTxsSub...)
-		for addr, txs := range pendingTxsSub {
-			pendingTxs[addr] = append(pendingTxs[addr], txs...)
-		}
-	}
-	return preconfTxs, pendingTxs
-}
-
-// PreconfReady closes the preconfReadyCh channel to notify the miner that preconf is ready
-// This is called every time a worker is ready with an env, but it only closes once, so we need to use sync.Once to ensure it only closes once
-func (p *TxPool) PreconfReady() {
-	for _, subpool := range p.subpools {
-		subpool.PreconfReady()
-	}
-}
-
 // PoolNonce returns the next nonce of an account, with all transactions executable
 // by the pool already applied on top.
 func (p *TxPool) PoolNonce(addr common.Address) uint64 {

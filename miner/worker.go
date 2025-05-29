@@ -536,7 +536,7 @@ func (miner *Miner) commitTransactions(env *environment, plainTxs, blobTxs *tran
 // into the given sealing block. The transaction selection and ordering strategy can
 // be customized with the plugin in the future.
 func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *environment) error {
-	unsealedPreconfTxsCh := miner.preconfChecker.PausePreconf()
+	unSealedPreconfTxsCh := miner.preconfChecker.PausePreconf()
 	defer func() {
 		miner.preconfChecker.UnpausePreconf(env.copy(miner.backend.BlockChain()), miner.txpool.PreconfReady)
 	}()
@@ -570,7 +570,7 @@ func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *environment) 
 		}
 		unsealedPreconfTxs = unsealedTxs
 	}
-	unsealedPreconfTxsCh <- unsealedPreconfTxs
+	unSealedPreconfTxsCh <- unsealedPreconfTxs
 	// If there are unsealed preconfirmation transactions, we cannot include new transactions
 	// as this could cause other transactions to be packaged before preconfirmation transactions,
 	// potentially causing successfully preconfirmed transactions to actually fail

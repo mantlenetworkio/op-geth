@@ -89,8 +89,7 @@ func (pj *PoolJournaler) loop() {
 	journal := func() {
 		start := time.Now()
 		tojournal := pj.pool.ToJournal()
-		preconfTxs, _ := pj.pool.PendingPreconfTxs(txpool.PendingFilter{})
-		if err := pj.journal.rotate(tojournal, preconfTxs); err != nil {
+		if err := pj.journal.rotate(tojournal); err != nil {
 			log.Error("PoolJournaler: Transaction journal rotation failed", "err", err)
 		} else {
 			log.Debug("PoolJournaler: Transaction journal rotated", "count", len(tojournal), "duration", time.Since(start))
