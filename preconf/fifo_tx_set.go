@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 )
@@ -27,8 +28,9 @@ type FIFOTxSet struct {
 
 // TxEntry contains the transaction
 type TxEntry struct {
-	Tx   *types.Transaction // Transaction object
-	From common.Address     // Sender address
+	Tx     *types.Transaction // Transaction object
+	From   common.Address     // Sender address
+	Status core.PreconfStatus
 }
 
 // NewFIFOTxSet creates a new FIFOTxSet
@@ -47,8 +49,9 @@ func (s *FIFOTxSet) Add(from common.Address, tx *types.Transaction) {
 
 	hash := tx.Hash()
 	entry := &TxEntry{
-		Tx:   tx,
-		From: from,
+		Tx:     tx,
+		From:   from,
+		Status: core.PreconfStatusWaiting,
 	}
 
 	// If the transaction already exists, replace the old entry
@@ -175,4 +178,44 @@ func (s *FIFOTxSet) Forward(addr common.Address, nonce uint64) {
 	s.txQueue = s.txQueue[:i]
 
 	log.Debug("preconf forward", "duration", time.Since(now))
+}
+
+func (s *FIFOTxSet) SetStatus(hash common.Hash, status core.PreconfStatus) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if entry, exists := s.txMap[hash]; exists {
+		entry.Status = status
+		return 1
+	}
+	return 0
+}
+
+func (s *FIFOTxSet) GetStatus(hash common.Hash) *core.PreconfStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if entry, exists := s.txMap[hash]; exists {
+		return &entry.Status
+	}
+	return nil
+}
+
+func (s *FIFOTxSet) CleanTimeout() []*TxEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	removed := []*TxEntry{}
+	newTxQueue := make([]*TxEntry, 0, len(s.txQueue))
+	for _, entry := range s.txQueue {
+		if entry.Status == core.PreconfStatusTimeout {
+			delete(s.txMap, entry.Tx.Hash())
+			MetricsPendingPreconfDec(1)
+			removed = append(removed, entry)
+		} else {
+			newTxQueue = append(newTxQueue, entry)
+		}
+	}
+	log.Trace("preconf clean timeout", "before", len(s.txQueue), "after", len(newTxQueue), "removed", len(removed))
+
+	s.txQueue = newTxQueue
+	return removed
 }

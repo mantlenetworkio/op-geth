@@ -328,6 +328,14 @@ func (b *EthAPIBackend) SendTxWithPreconf(ctx context.Context, tx *types.Transac
 }
 
 func (b *EthAPIBackend) sendTxWithPreconf(ctx context.Context, tx *types.Transaction) (*core.NewPreconfTxEvent, error) {
+	if b.eth.config.Miner.PreconfConfig == nil || !b.eth.config.Miner.PreconfConfig.EnablePreconfChecker {
+		return nil, fmt.Errorf("preconf checker is not enabled, can't be submitted as preconf tx")
+	}
+
+	if !b.eth.miner.IsPreconfStatusOk() {
+		return nil, fmt.Errorf("preconf checker is not ready, can't be submitted as preconf tx")
+	}
+
 	preconfTxCh := make(chan core.NewPreconfTxEvent, 100)
 	defer close(preconfTxCh)
 	sub := b.SubscribeNewPreconfTxEvent(preconfTxCh)
@@ -340,20 +348,20 @@ func (b *EthAPIBackend) sendTxWithPreconf(ctx context.Context, tx *types.Transac
 	}
 
 	// Wait for preconf tx event
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	for {
 		select {
 		case preconfTx := <-preconfTxCh:
 			if preconfTx.TxHash == txHash {
-				if preconfTx.Status == core.PreconfStatusFailed {
+				if preconfTx.Status != core.PreconfStatusSuccess {
 					log.Trace("api backend received preconf tx failed event", "tx", txHash, "reason", preconfTx.Reason)
 				}
 				return &preconfTx, nil
 			}
 		case <-ctx.Done():
 			log.Trace("preconf tx event not received", "tx", txHash, "err", ctx.Err())
-			return nil, fmt.Errorf("preconf tx event not received, txHash: %s, err: %w", txHash, ctx.Err())
+			return nil, fmt.Errorf("can't be submitted as preconf tx, txHash: %s", txHash)
 		}
 	}
 }

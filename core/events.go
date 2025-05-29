@@ -17,29 +17,81 @@
 package core
 
 import (
+	"sync"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
+type PreconfStatus string
+
 const (
-	PreconfStatusSuccess = "success"
-	PreconfStatusFailed  = "failed"
+	PreconfStatusSuccess PreconfStatus = "success"
+	PreconfStatusFailed  PreconfStatus = "failed"
+	PreconfStatusTimeout PreconfStatus = "timeout"
+	PreconfStatusWaiting PreconfStatus = "waiting"
 )
+
+// a copy of core/types/log.go
+// removed some fields that preconf can't provide
+type Log struct {
+	// Consensus fields:
+	// address of the contract that generated the event
+	Address common.Address `json:"address" gencodec:"required"`
+	// list of topics provided by the contract.
+	Topics []common.Hash `json:"topics" gencodec:"required"`
+	// supplied by the contract, usually ABI-encoded
+	Data hexutil.Bytes `json:"data" gencodec:"required"`
+}
+
+func NewLogs(originalLogs []*types.Log) []*Log {
+	logs := make([]*Log, 0, len(originalLogs))
+	for _, log := range originalLogs {
+		logs = append(logs, &Log{
+			Address: log.Address,
+			Topics:  log.Topics,
+			Data:    log.Data,
+		})
+	}
+	return logs
+}
+
+type PreconfTxReceipt struct {
+	Logs []*Log `json:"logs"`
+}
 
 // NewPreconfTxsEvent is posted when a preconf transaction enters the transaction pool.
 type NewPreconfTxEvent struct {
-	TxHash                 common.Hash    `json:"txHash"`
-	Status                 string         `json:"status"`      // "success" | "failed"
-	Reason                 string         `json:"reason"`      // "optional failure message"
-	PredictedL2BlockNumber hexutil.Uint64 `json:"blockHeight"` // "predicted L2 block number"
+	TxHash                 common.Hash      `json:"txHash"`
+	Status                 PreconfStatus    `json:"status"`
+	Reason                 string           `json:"reason"`      // "optional failure message"
+	PredictedL2BlockNumber hexutil.Uint64   `json:"blockHeight"` // "predicted L2 block number"
+	Receipt                PreconfTxReceipt `json:"receipt"`
 }
 
 // NewPreconfTxRequestEvent is posted when a preconf transaction request enters the transaction pool.
 type NewPreconfTxRequest struct {
 	Tx                   *types.Transaction
+	mu                   sync.Mutex
+	Status               PreconfStatus
 	PreconfResult        chan<- *PreconfResponse
 	ClosePreconfResultFn func()
+}
+
+func (e *NewPreconfTxRequest) GetStatus() PreconfStatus {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.Status
+}
+
+func (e *NewPreconfTxRequest) SetStatus(statusBefore, status PreconfStatus) PreconfStatus {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.Status == statusBefore {
+		e.Status = status
+	}
+	return e.Status
 }
 
 type PreconfResponse struct {

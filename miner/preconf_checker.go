@@ -28,11 +28,11 @@ var (
 	ErrOptimismSyncNil                                                        = errors.New("optimism sync status is nil")
 	ErrOptimismSyncNotOk                                                      = errors.New("optimism sync status is not ok")
 	ErrEnvTooOld                                                              = errors.New("env is too old")
-	ErrCurrentL1BlockTooOld                                                   = errors.New("current l1 block is too old")
 	ErrHeadL1BlockTooOld                                                      = errors.New("head l1 block is too old")
 	ErrCurrentL1NumberAndHeadL1NumberDistanceTooLarge                         = errors.New("current l1 number and head l1 number distance is too large")
 	ErrEnvBlockNumberLessThanEngineSyncTargetBlockNumberOrUnsafeL2BlockNumber = errors.New("env block number is less than engine sync target block number or unsafe l2 block number")
 	ErrEnvBlockNumberAndEngineSyncTargetBlockNumberDistanceTooLarge           = errors.New("env block number and engine sync target block number distance is too large")
+	ErrPreconfNotAvailable                                                    = errors.New("preconf is not available")
 )
 
 const (
@@ -48,10 +48,13 @@ type preconfChecker struct {
 
 	// clients
 	opnodeClient *http.Client
-	l1ethclient  *ethclient.Client
+	l1ethclient  ethereum.LogFilterer
 
+	snapEnv      *environment
+	snapTxHash   common.Hash
 	env          *environment
 	envUpdatedAt time.Time
+	lastPauseNow time.Time
 
 	optimismSyncStatus   *preconf.OptimismSyncStatus
 	optimismSyncStatusOk bool
@@ -59,6 +62,11 @@ type preconfChecker struct {
 	// need pre apply to env
 	depositTxs           []*types.Transaction
 	unSealedPreconfTxsCh chan []*types.Transaction
+}
+
+type updateDepositTxsHeader struct {
+	currentL1 uint64
+	headL1    uint64
 }
 
 func NewPreconfChecker(chainConfig *params.ChainConfig, chain *core.BlockChain, minerConfig *preconf.MinerConfig) *preconfChecker {
@@ -151,55 +159,70 @@ func (c *preconfChecker) GetDepositTxs(start, end uint64) ([]*types.Transaction,
 }
 
 func (c *preconfChecker) UpdateOptimismSyncStatus(newOptimismSyncStatus *preconf.OptimismSyncStatus) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	defer preconf.LogIfSlow(time.Now(), "UpdateOptimismSyncStatus", "newOptimismSyncStatus", newOptimismSyncStatus)
+	status, statusOk, header := func() (*preconf.OptimismSyncStatus, bool, *updateDepositTxsHeader) {
+		c.mu.Lock()
+		defer c.mu.Unlock()
 
-	// Initialization
-	if c.optimismSyncStatus == nil {
-		c.optimismSyncStatus = newOptimismSyncStatus
-		c.optimismSyncStatusOk = true
-		c.updateDepositTxs(newOptimismSyncStatus.UnsafeL2.L1Origin.Number, newOptimismSyncStatus.HeadL1.Number)
-		return
-	}
-
-	log.Debug("update optimism sync status",
-		"current_l1.number", c.optimismSyncStatus.CurrentL1.Number,
-		"head_l1.number", c.optimismSyncStatus.HeadL1.Number,
-		"unsafe_l2.l1_origin.number", c.optimismSyncStatus.UnsafeL2.L1Origin.Number,
-		"unsafe_l2.number", c.optimismSyncStatus.UnsafeL2.Number,
-		"engine_sync_target.number", c.optimismSyncStatus.EngineSyncTarget.Number,
-		"new_current_l1.number", newOptimismSyncStatus.CurrentL1.Number,
-		"new_head_l1.number", newOptimismSyncStatus.HeadL1.Number,
-		"new_unsafe_l2.l1_origin.number", newOptimismSyncStatus.UnsafeL2.L1Origin.Number,
-		"new_unsafe_l2.number", newOptimismSyncStatus.UnsafeL2.Number,
-		"new_engine_sync_target.number", newOptimismSyncStatus.EngineSyncTarget.Number,
-	)
-
-	// check optimism sync status
-	if c.isSyncStatusOk(newOptimismSyncStatus) {
-		// if l1 block changes, update depositTxs
-		if c.optimismSyncStatus.UnsafeL2.L1Origin.Number != newOptimismSyncStatus.UnsafeL2.L1Origin.Number ||
-			c.optimismSyncStatus.HeadL1.Number != newOptimismSyncStatus.HeadL1.Number {
-			c.updateDepositTxs(newOptimismSyncStatus.UnsafeL2.L1Origin.Number, newOptimismSyncStatus.HeadL1.Number)
+		// Initialization
+		if c.optimismSyncStatus == nil {
+			return newOptimismSyncStatus, true, &updateDepositTxsHeader{newOptimismSyncStatus.UnsafeL2.L1Origin.Number, newOptimismSyncStatus.HeadL1.Number}
 		}
-		c.optimismSyncStatus = newOptimismSyncStatus
-		c.optimismSyncStatusOk = true
-	} else {
-		c.optimismSyncStatusOk = false
-		log.Error("optimism sync status is not ok, l1 reorg?", "old", c.optimismSyncStatus, "new", newOptimismSyncStatus)
+
+		log.Debug("update optimism sync status",
+			"current_l1.number", c.optimismSyncStatus.CurrentL1.Number,
+			"head_l1.number", c.optimismSyncStatus.HeadL1.Number,
+			"unsafe_l2.l1_origin.number", c.optimismSyncStatus.UnsafeL2.L1Origin.Number,
+			"unsafe_l2.number", c.optimismSyncStatus.UnsafeL2.Number,
+			"engine_sync_target.number", c.optimismSyncStatus.EngineSyncTarget.Number,
+			"new_current_l1.number", newOptimismSyncStatus.CurrentL1.Number,
+			"new_head_l1.number", newOptimismSyncStatus.HeadL1.Number,
+			"new_unsafe_l2.l1_origin.number", newOptimismSyncStatus.UnsafeL2.L1Origin.Number,
+			"new_unsafe_l2.number", newOptimismSyncStatus.UnsafeL2.Number,
+			"new_engine_sync_target.number", newOptimismSyncStatus.EngineSyncTarget.Number,
+		)
+
+		// check optimism sync status
+		if c.isSyncStatusOk(newOptimismSyncStatus) {
+			// if l1 block changes, update depositTxs
+			if c.optimismSyncStatus.UnsafeL2.L1Origin.Number != newOptimismSyncStatus.UnsafeL2.L1Origin.Number ||
+				c.optimismSyncStatus.HeadL1.Number != newOptimismSyncStatus.HeadL1.Number {
+				return newOptimismSyncStatus, true, &updateDepositTxsHeader{newOptimismSyncStatus.UnsafeL2.L1Origin.Number, newOptimismSyncStatus.HeadL1.Number}
+			}
+			return newOptimismSyncStatus, true, nil
+		} else {
+			log.Error("optimism sync status is not ok, l1 reorg?", "old", c.optimismSyncStatus, "new", newOptimismSyncStatus)
+			return c.optimismSyncStatus, false, nil
+		}
+	}()
+
+	// two step lock to reduce lock time
+	if header != nil {
+		if err := c.updateDepositTxs(header.currentL1, header.headL1); err != nil {
+			log.Error("failed to update deposit txs", "err", err)
+			c.mu.Lock()
+			c.optimismSyncStatusOk = false
+			c.mu.Unlock()
+			return
+		}
 	}
+
+	c.mu.Lock()
+	c.optimismSyncStatus = status
+	c.optimismSyncStatusOk = statusOk
+	c.mu.Unlock()
+
+	log.Debug("update optimism sync status", "status", status, "statusOk", statusOk)
 }
 
 // check optimism sync status
 //
-// current_l1.number normal growth
 // head_l1.number normal growth
 // unsafe_l2.number normal growth
 // unsafe_l2.l1_origin.number normal growth
 // engine_sync_target.number normal growth
 func (c *preconfChecker) isSyncStatusOk(newStatus *preconf.OptimismSyncStatus) bool {
-	return c.optimismSyncStatus.CurrentL1.Number <= newStatus.CurrentL1.Number &&
-		c.optimismSyncStatus.HeadL1.Number <= newStatus.HeadL1.Number &&
+	return c.optimismSyncStatus.HeadL1.Number <= newStatus.HeadL1.Number &&
 		c.optimismSyncStatus.UnsafeL2.Number <= newStatus.UnsafeL2.Number &&
 		c.optimismSyncStatus.UnsafeL2.L1Origin.Number <= newStatus.UnsafeL2.L1Origin.Number &&
 		c.optimismSyncStatus.EngineSyncTarget.Number <= newStatus.EngineSyncTarget.Number
@@ -208,18 +231,22 @@ func (c *preconfChecker) isSyncStatusOk(newStatus *preconf.OptimismSyncStatus) b
 // update depositTxs
 // We cannot use `newOptimismSyncStatus.CurrentL1.Number` because it may not have been successfully derived yet, which could cause us to
 // miss the deposit transactions for this block. Therefore, we can only use `newOptimismSyncStatus.UnsafeL2.L1Origin.Number`
-func (c *preconfChecker) updateDepositTxs(currentL1, headL1 uint64) {
+func (c *preconfChecker) updateDepositTxs(currentL1, headL1 uint64) error {
+	defer preconf.LogIfSlow(time.Now(), "updateDepositTxs", "currentL1", currentL1, "headL1", headL1)
 	start, end := currentL1+1, headL1-1
 	depositTxs, err := c.GetDepositTxs(start, end)
 	if err != nil {
 		c.depositTxs = nil
 		log.Error("failed to get deposit txs", "err", err, "start", start, "end", end)
 		preconf.MetricsL1Deposit(false, 0)
-		return
+		return err
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.depositTxs = depositTxs
 	preconf.MetricsL1Deposit(true, len(depositTxs))
 	log.Debug("update deposit txs", "current_l1.number", currentL1, "head_l1.number", headL1, "start", start, "end", end, "deposit_txs", len(depositTxs))
+	return nil
 }
 
 func (c *preconfChecker) Preconf(tx *types.Transaction) (*types.Receipt, error) {
@@ -229,7 +256,7 @@ func (c *preconfChecker) Preconf(tx *types.Transaction) (*types.Receipt, error) 
 	defer c.mu.Unlock()
 
 	if err := c.precheck(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w because of %w", ErrPreconfNotAvailable, err)
 	}
 	log.Trace("preconf", "tx", tx.Hash().Hex(), "nonce", tx.Nonce(), "env.header.Number", c.env.header.Number)
 
@@ -245,9 +272,33 @@ func (c *preconfChecker) Preconf(tx *types.Transaction) (*types.Receipt, error) 
 		}
 	}
 
+	c.snapEnv = c.env
+	c.snapTxHash = tx.Hash()
+	c.env = c.env.copy()
 	// apply tx
 	log.Trace("apply tx", "tx", tx.Hash().Hex(), "nonce", tx.Nonce())
 	return c.applyTxWithResetEnv(c.env, tx)
+}
+
+func (c *preconfChecker) RevertTx(txHash common.Hash) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.snapEnv == nil || c.snapTxHash != txHash {
+		return fmt.Errorf("no snapshot env or tx hash not match")
+	}
+	c.env = c.snapEnv
+	c.snapEnv = nil
+	c.snapTxHash = common.Hash{}
+	return nil
+}
+
+func (c *preconfChecker) PrecheckStatus() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.precheck(); err != nil {
+		return fmt.Errorf("%w because of %w", ErrPreconfNotAvailable, err)
+	}
+	return nil
 }
 
 func (c *preconfChecker) precheck() error {
@@ -263,27 +314,22 @@ func (c *preconfChecker) precheck() error {
 		return ErrOptimismSyncNotOk
 	}
 
-	// Not more than MantleToleranceDuration(default 6s) from the last L2Block.
+	// Not more than MantleToleranceDuration(default 12s) from the last L2Block.
 	if time.Since(c.envUpdatedAt) > c.minerConfig.MantleToleranceDuration() {
-		log.Trace("envTooOld", "env.header.Number", c.env.header.Number.Uint64(), "envUpdatedAt", c.envUpdatedAt, "time.Since(envUpdatedAt)", time.Since(c.envUpdatedAt), "tolerance", c.minerConfig.MantleToleranceDuration())
+		log.Warn("envTooOld", "env.header.Number", c.env.header.Number.Uint64(), "envUpdatedAt", c.envUpdatedAt, "time.Since(envUpdatedAt)", time.Since(c.envUpdatedAt), "tolerance", c.minerConfig.MantleToleranceDuration())
 		return ErrEnvTooOld
 	}
 
-	// Not more than EthToleranceDuration(default 1m36s) from the last L1Block.
-	currentL1BlockTime := time.Unix(int64(c.optimismSyncStatus.CurrentL1.Time), 0)
-	if time.Since(currentL1BlockTime) > c.minerConfig.EthToleranceDuration() {
-		log.Trace("currentL1BlockTooOld", "currentL1Block.number", c.optimismSyncStatus.CurrentL1.Number, "currentL1BlockTime", currentL1BlockTime, "time.Since(currentL1BlockTime)", time.Since(currentL1BlockTime), "tolerance", c.minerConfig.EthToleranceDuration())
-		return ErrCurrentL1BlockTooOld
-	}
+	// Not more than EthToleranceDuration(default 1m48s) from the last L1Block.
 	headL1BlockTime := time.Unix(int64(c.optimismSyncStatus.HeadL1.Time), 0)
 	if time.Since(headL1BlockTime) > c.minerConfig.EthToleranceDuration() {
-		log.Trace("headL1BlockTooOld", "headL1Block.number", c.optimismSyncStatus.HeadL1.Number, "headL1BlockTime", headL1BlockTime, "time.Since(headL1BlockTime)", time.Since(headL1BlockTime), "tolerance", c.minerConfig.EthToleranceDuration())
+		log.Warn("headL1BlockTooOld", "headL1Block.number", c.optimismSyncStatus.HeadL1.Number, "headL1BlockTime", headL1BlockTime, "time.Since(headL1BlockTime)", time.Since(headL1BlockTime), "tolerance", c.minerConfig.EthToleranceDuration())
 		return ErrHeadL1BlockTooOld
 	}
 
 	// The distance between unsafe_l2.l1_origin.number and head_l1.number should not exceed EthToleranceBlock(default 6)
 	if c.optimismSyncStatus.HeadL1.Number-c.optimismSyncStatus.UnsafeL2.L1Origin.Number > c.minerConfig.EthToleranceBlock() {
-		log.Trace("currentL1NumberAndHeadL1NumberDistanceTooLarge", "unsafe_l2.l1_origin.number", c.optimismSyncStatus.UnsafeL2.L1Origin.Number, "headL1Number", c.optimismSyncStatus.HeadL1.Number, "tolerance", c.minerConfig.EthToleranceBlock())
+		log.Warn("currentL1NumberAndHeadL1NumberDistanceTooLarge", "unsafe_l2.l1_origin.number", c.optimismSyncStatus.UnsafeL2.L1Origin.Number, "headL1Number", c.optimismSyncStatus.HeadL1.Number, "tolerance", c.minerConfig.EthToleranceBlock())
 		return ErrCurrentL1NumberAndHeadL1NumberDistanceTooLarge
 	}
 
@@ -291,7 +337,7 @@ func (c *preconfChecker) precheck() error {
 	envBlockNumber := c.env.header.Number.Uint64()
 	engineSyncTargetBlockNumber, unsafeL2BlockNumber := c.optimismSyncStatus.EngineSyncTarget.Number, c.optimismSyncStatus.UnsafeL2.Number
 	if envBlockNumber < engineSyncTargetBlockNumber || envBlockNumber < unsafeL2BlockNumber {
-		log.Trace("envBlockNumberLessThanEngineSyncTargetBlockNumberOrUnsafeL2BlockNumber", "envBlockNumber", envBlockNumber, "engineSyncTargetBlockNumber", engineSyncTargetBlockNumber, "unsafeL2BlockNumber", unsafeL2BlockNumber)
+		log.Warn("envBlockNumberLessThanEngineSyncTargetBlockNumberOrUnsafeL2BlockNumber", "envBlockNumber", envBlockNumber, "engineSyncTargetBlockNumber", engineSyncTargetBlockNumber, "unsafeL2BlockNumber", unsafeL2BlockNumber)
 		return ErrEnvBlockNumberLessThanEngineSyncTargetBlockNumberOrUnsafeL2BlockNumber
 	}
 
@@ -302,7 +348,7 @@ func (c *preconfChecker) precheck() error {
 		// When there are a large number of preconfirmation transactions in the queue, it may cause the future 6 blocks to be
 		// filled with preconfirmation transactions. At this point, stop new preconfirmation transactions from entering,
 		// because there may be unblocked deposit transactions in future blocks, which cannot be predicted at this time.
-		log.Trace("envBlockNumberAndEngineSyncTargetBlockNumberDistanceTooLarge", "envBlockNumber", c.env.header.Number.Uint64(), "engineSyncTargetBlockNumber", c.optimismSyncStatus.EngineSyncTarget.Number, "unsafeL2BlockNumber", c.optimismSyncStatus.UnsafeL2.Number, "tolerance", c.minerConfig.EthToleranceBlock())
+		log.Warn("envBlockNumberAndEngineSyncTargetBlockNumberDistanceTooLarge", "envBlockNumber", c.env.header.Number.Uint64(), "engineSyncTargetBlockNumber", c.optimismSyncStatus.EngineSyncTarget.Number, "unsafeL2BlockNumber", c.optimismSyncStatus.UnsafeL2.Number, "tolerance", c.minerConfig.EthToleranceBlock())
 		return ErrEnvBlockNumberAndEngineSyncTargetBlockNumberDistanceTooLarge
 	}
 
@@ -311,6 +357,7 @@ func (c *preconfChecker) precheck() error {
 
 // applyTxWithResetEnv applies a transaction and resets the environment if a gas limit reached error occurs.
 func (c *preconfChecker) applyTxWithResetEnv(env *environment, tx *types.Transaction) (*types.Receipt, error) {
+	defer preconf.LogIfSlow(time.Now(), "applyTxWithResetEnv", "tx", tx.Hash().Hex(), "nonce", tx.Nonce())
 	receipt, err := c.applyTx(env, tx)
 	if err != nil {
 		if errors.Is(err, core.ErrGasLimitReached) {
@@ -356,19 +403,23 @@ func (c *preconfChecker) PausePreconf() chan<- []*types.Transaction {
 	}
 	c.unSealedPreconfTxsCh = make(chan []*types.Transaction, 1) // buffer 1 to avoid worker block
 
-	log.Debug("pause preconf")
+	c.lastPauseNow = time.Now()
 	return c.unSealedPreconfTxsCh
 }
 
 func (c *preconfChecker) UnpausePreconf(env *environment, preconfReady func()) {
+	defer preconf.LogIfSlow(c.lastPauseNow, "UnpausePreconf", "env.header.Number", env.header.Number.Int64())
+	defer preconf.MetricsPreconfMinerPauseCost(c.lastPauseNow)
 	defer c.mu.Unlock()
 	c.env = env
 	c.envUpdatedAt = time.Now()
-	log.Debug("unpause preconf", "env.header.Number", env.header.Number.Int64(), "env.gasPool", env.gasPool.Gas(), "envUpdatedAt", c.envUpdatedAt)
 	// reset env
+	log.Debug("unpause preconf", "env.header.Number", env.header.Number.Int64(), "env.gasPool", c.env.gasPool, "envUpdatedAt", c.envUpdatedAt)
 	c.env.header.Number = new(big.Int).Add(c.env.header.Number, common.Big1)
-	c.env.gasPool.SetGas(c.env.header.GasLimit)
-	log.Trace("reset env", "env.header.Number", c.env.header.Number.Int64(), "env.gasPool", c.env.gasPool.Gas())
+	if c.env.gasPool != nil {
+		c.env.gasPool.SetGas(c.env.header.GasLimit)
+		log.Trace("reset env", "env.header.Number", c.env.header.Number.Int64(), "env.gasPool", c.env.gasPool)
+	}
 
 	// Load deposit txs
 	log.Trace("apply deposit txs", "deposit_txs", len(c.depositTxs))
@@ -403,5 +454,5 @@ func (c *preconfChecker) UnpausePreconf(env *environment, preconfReady func()) {
 	// notify txpool that preconf is ready
 	preconfReady()
 
-	log.Info("ready to preconf", "env.header.Number", env.header.Number.Int64(), "env.gasPool", env.gasPool.Gas(), "envUpdatedAt", c.envUpdatedAt, "deposit_txs", len(c.depositTxs), "unsealed_preconf_txs", len(unsealedPreconfTxs))
+	log.Info("ready to preconf", "env.header.Number", env.header.Number.Int64(), "env.gasPool", env.gasPool, "envUpdatedAt", c.envUpdatedAt, "deposit_txs", len(c.depositTxs), "unsealed_preconf_txs", len(unsealedPreconfTxs))
 }

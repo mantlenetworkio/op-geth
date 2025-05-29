@@ -212,7 +212,7 @@ type worker struct {
 	chainSideSub event.Subscription
 
 	// Preconf Subscriptions
-	preconfTxRequestCh  chan core.NewPreconfTxRequest
+	preconfTxRequestCh  chan *core.NewPreconfTxRequest
 	preconfTxRequestSub event.Subscription
 	preconfChecker      *preconfChecker
 
@@ -293,7 +293,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		extra:              config.ExtraData,
 		pendingTasks:       make(map[common.Hash]*task),
 		txsCh:              make(chan core.NewTxsEvent, txChanSize),
-		preconfTxRequestCh: make(chan core.NewPreconfTxRequest, txChanSize),
+		preconfTxRequestCh: make(chan *core.NewPreconfTxRequest, txChanSize),
 		chainHeadCh:        make(chan core.ChainHeadEvent, chainHeadChanSize),
 		chainSideCh:        make(chan core.ChainSideEvent, chainSideChanSize),
 		newWorkCh:          make(chan *newWorkReq),
@@ -656,12 +656,39 @@ func (w *worker) mainLoop() {
 			now := time.Now()
 			log.Debug("worker received preconf tx request", "tx", ev.Tx.Hash())
 
+			status := ev.GetStatus()
+			if status == core.PreconfStatusTimeout {
+				log.Warn("preconf tx request timeout", "tx", ev.Tx.Hash())
+				ev.ClosePreconfResultFn()
+				continue
+			}
+
 			receipt, err := w.preconfChecker.Preconf(ev.Tx)
 			if err != nil {
-				// Not fatal, just warn to the log
-				log.Warn("preconf failed", "tx", ev.Tx.Hash(), "err", err)
+				// Not fatal, just trace to the log
+				log.Trace("preconf failed", "tx", ev.Tx.Hash(), "err", err)
+				if errors.Is(err, ErrPreconfNotAvailable) {
+					log.Warn("preconf is temporary not available, tx will be handled as timeout in txpool", "tx", ev.Tx.Hash())
+					continue
+				}
 			}
 			log.Trace("worker preconf tx executed", "tx", ev.Tx.Hash(), "duration", time.Since(now))
+
+			// set preconf status before txpool receive response, avoid successful txs not included in block
+			if err == nil && receipt != nil && receipt.Status == types.ReceiptStatusSuccessful {
+				status = ev.SetStatus(core.PreconfStatusWaiting, core.PreconfStatusSuccess)
+			} else {
+				status = ev.SetStatus(core.PreconfStatusWaiting, core.PreconfStatusFailed)
+			}
+
+			w.eth.TxPool().SetPreconfTxStatus(ev.Tx.Hash(), status)
+
+			if status == core.PreconfStatusTimeout {
+				err := w.preconfChecker.RevertTx(ev.Tx.Hash())
+				log.Warn("preconf tx request timeout after preconf executed", "tx", ev.Tx.Hash(), "revert err", err)
+				ev.ClosePreconfResultFn()
+				continue
+			}
 
 			select {
 			case ev.PreconfResult <- &core.PreconfResponse{Receipt: receipt, Err: err}:
@@ -1254,7 +1281,7 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 // into the given sealing block. The transaction selection and ordering strategy can
 // be customized with the plugin in the future.
 func (w *worker) fillTransactions(interrupt *int32, env *environment) error {
-	unsealedPreconfTxsCh := w.preconfChecker.PausePreconf()
+	unSealedPreconfTxsCh := w.preconfChecker.PausePreconf()
 	defer func() { w.preconfChecker.UnpausePreconf(env.copy(), w.eth.TxPool().PreconfReady) }()
 
 	// Split the pending transactions into locals and remotes
@@ -1270,7 +1297,7 @@ func (w *worker) fillTransactions(interrupt *int32, env *environment) error {
 		}
 		unsealedPreconfTxs = unsealedTxs
 	}
-	unsealedPreconfTxsCh <- unsealedPreconfTxs
+	unSealedPreconfTxsCh <- unsealedPreconfTxs
 	// If there are unsealed preconfirmation transactions, we cannot include new transactions
 	// as this could cause other transactions to be packaged before preconfirmation transactions,
 	// potentially causing successfully preconfirmed transactions to actually fail

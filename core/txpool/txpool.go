@@ -98,6 +98,9 @@ var (
 	// ErrOverdraft is returned if a transaction would cause the senders balance to go negative
 	// thus invalidating a potential large number of transactions.
 	ErrOverdraft = errors.New("transaction would cause overdraft")
+
+	// ErrPreconfInProcess is returned if a transaction is in process as an preconf transaction
+	ErrPreconfInProcess = errors.New("exist preconf transaction in process")
 )
 
 var (
@@ -487,7 +490,7 @@ func (pool *TxPool) SubscribeNewPreconfTxEvent(ch chan<- core.NewPreconfTxEvent)
 
 // SubscribeNewPreconfTxRequest registers a subscription of NewPreconfTxRequest and
 // starts sending event to the given channel.
-func (pool *TxPool) SubscribeNewPreconfTxRequestEvent(ch chan<- core.NewPreconfTxRequest) event.Subscription {
+func (pool *TxPool) SubscribeNewPreconfTxRequestEvent(ch chan<- *core.NewPreconfTxRequest) event.Subscription {
 	return pool.scope.Track(pool.preconfTxRequestFeed.Subscribe(ch))
 }
 
@@ -625,6 +628,14 @@ func (pool *TxPool) Locals() []common.Address {
 	return pool.locals.flatten()
 }
 
+func (pool *TxPool) cleanTimeoutPreconfTxs() int {
+	removed := pool.preconfTxs.CleanTimeout()
+	for _, tx := range removed {
+		pool.removeTx(tx.Tx.Hash(), true)
+	}
+	return len(removed)
+}
+
 // PendingPreconfTxs retrieves the preconf transactions and the pending transactions.
 func (pool *TxPool) PendingPreconfTxs(enforceTips bool) ([]*types.Transaction, map[common.Address]types.Transactions) {
 	defer preconf.MetricsPreconfTxPoolFilterCost(time.Now())
@@ -706,8 +717,13 @@ func (pool *TxPool) extractPreconfTxsFromPending(pending map[common.Address]type
 			pending[preconfTx.From] = newTxs // Replace with the new slice
 		}
 
-		preconfTxs = append(preconfTxs, preconfTx.Tx)
+		// preconf error tx will still be sealed to the block
+		if preconfTx.Status == core.PreconfStatusSuccess || preconfTx.Status == core.PreconfStatusFailed {
+			preconfTxs = append(preconfTxs, preconfTx.Tx)
+		}
 	}
+
+	_ = pool.cleanTimeoutPreconfTxs()
 	return preconfTxs
 }
 
@@ -1012,6 +1028,15 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (replaced bool, err e
 
 	// Try to replace an existing transaction in the pending pool
 	if list := pool.pending[from]; list != nil && list.Overlaps(tx) {
+		old := list.txs.Get(tx.Nonce())
+		if old != nil {
+			status := pool.preconfTxs.GetStatus(old.Hash())
+			// only timeout preconf tx can be replaced
+			if status != nil && *status != core.PreconfStatusTimeout {
+				return false, ErrPreconfInProcess
+			}
+		}
+
 		// Nonce already pending, check if required price bump is met
 		inserted, old := list.Add(tx, pool.config.PriceBump)
 		if !inserted {
@@ -1026,11 +1051,11 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (replaced bool, err e
 			pool.preconfTxs.Remove(old.Hash())
 			log.Trace("add: removed old tx", "hash", old.Hash())
 		}
-		pool.addPreconfTx(tx)
 		pool.all.Add(tx, isLocal)
 		pool.priced.Put(tx, isLocal)
 		pool.journalTx(from, tx)
 		pool.queueTxEvent(tx)
+		pool.addPreconfTx(tx)
 		log.Trace("Pooled new executable transaction", "hash", hash, "from", from, "to", tx.To())
 
 		// Successful promotion, bump the heartbeat
@@ -1115,12 +1140,26 @@ func (pool *TxPool) enqueueTx(hash common.Hash, tx *types.Transaction, local boo
 // journalTx adds the specified transaction to the local disk journal if it is
 // deemed to have been sent from a local account.
 func (pool *TxPool) journalTx(from common.Address, tx *types.Transaction) {
+	// preconf tx need to be journaled in journalPreconfTx
+	if pool.config.Preconf.IsPreconfTx(&from, tx.To()) {
+		return
+	}
+
 	// Only journal if it's enabled and the transaction is local
 	if pool.journal == nil || (!pool.config.JournalRemote && !pool.locals.contains(from)) {
 		return
 	}
 	if err := pool.journal.insert(tx); err != nil {
 		log.Warn("Failed to journal local transaction", "err", err)
+	}
+}
+
+// only for the preconf transaction
+func (pool *TxPool) journalPreconfTx(tx *types.Transaction) {
+	if err := pool.journal.insert(tx); err != nil {
+		log.Warn("Failed to journal local transaction", "err", err)
+	} else {
+		log.Trace("preconf success transaction journaled", "tx", tx.Hash())
 	}
 }
 
@@ -1219,8 +1258,24 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 	for i, tx := range txs {
 		// If the transaction is known, pre-set the error slot
 		if pool.all.Get(tx.Hash()) != nil {
-			errs[i] = ErrAlreadyKnown
-			knownTxMeter.Mark(1)
+			status := pool.preconfTxs.GetStatus(tx.Hash())
+			if status != nil {
+				if *status == core.PreconfStatusTimeout {
+					pool.mu.Lock()
+					pool.recoverTimeoutPreconfTx(tx)
+					pool.mu.Unlock()
+					errs[i] = nil
+				} else if *status == core.PreconfStatusWaiting {
+					log.Info("preconf tx is waiting", "tx", tx.Hash())
+					errs[i] = nil
+				} else {
+					errs[i] = ErrAlreadyKnown
+				}
+				knownTxMeter.Mark(1)
+			} else {
+				errs[i] = ErrAlreadyKnown
+				knownTxMeter.Mark(1)
+			}
 			continue
 		}
 		// Exclude transactions with invalid signatures as soon as
@@ -1270,7 +1325,19 @@ func (pool *TxPool) PreconfReady() {
 	})
 }
 
+func (pool *TxPool) SetPreconfTxStatus(txHash common.Hash, status core.PreconfStatus) {
+	// preconfTxs.SetStatus is thread safe
+	pool.preconfTxs.SetStatus(txHash, status)
+}
+
+func (pool *TxPool) recoverTimeoutPreconfTx(tx *types.Transaction) {
+	log.Trace("recoverTimeoutPreconfTx", "tx", tx.Hash())
+	pool.preconfTxs.Remove(tx.Hash())
+	pool.addPreconfTx(tx)
+}
+
 func (pool *TxPool) addPreconfTx(tx *types.Transaction) {
+	log.Trace("addPreconfTx", "tx", tx.Hash())
 	txHash := tx.Hash()
 
 	// check tx is preconf tx
@@ -1280,99 +1347,116 @@ func (pool *TxPool) addPreconfTx(tx *types.Transaction) {
 		return
 	}
 
-	pool.preconfTxs.Add(from, tx)
-
-	// handle preconf txs
-	pool.handlePreconfTxs([]*types.Transaction{tx})
+	// handle preconf tx
+	pool.handlePreconfTx(from, tx)
 }
 
-func (pool *TxPool) handlePreconfTxs(news []*types.Transaction) {
-	for _, tx := range news {
-		txHash := tx.Hash()
-		if !pool.preconfTxs.Contains(txHash) {
-			log.Debug("tx not in preconfTxs, skip handle", "tx", txHash)
-			continue
+func (pool *TxPool) handlePreconfTx(from common.Address, tx *types.Transaction) {
+	txHash := tx.Hash()
+
+	// send preconf request event
+	result := make(chan *core.PreconfResponse, 1) // buffer 1 to avoid worker blocking
+	preconfTxRequest := &core.NewPreconfTxRequest{
+		Tx:            tx,
+		PreconfResult: result,
+		Status:        core.PreconfStatusWaiting,
+		ClosePreconfResultFn: func() {
+			close(result)
+		},
+	}
+
+	// add tx to preconfTxs and send preconf request event should keep same order
+	pool.preconfTxs.Add(from, tx)
+	select {
+	case <-pool.initDoneCh:
+		pool.preconfTxRequestFeed.Send(preconfTxRequest)
+		log.Debug("txpool sent preconf tx request", "tx", txHash)
+	default:
+		// only success preconf tx can be restored from journal
+		pool.preconfTxs.SetStatus(txHash, core.PreconfStatusSuccess)
+		log.Debug("handle preconf tx from journal", "tx", txHash)
+		return
+	}
+
+	// goroutine to avoid blocking
+	go func() {
+		log.Trace("handlePreconfTxs", "tx", tx.Hash())
+		defer preconf.MetricsPreconfTxPoolHandleCost(time.Now())
+		tx := preconfTxRequest.Tx
+
+		// default preconf event
+		event := core.NewPreconfTxEvent{
+			TxHash:                 txHash,
+			PredictedL2BlockNumber: hexutil.Uint64(0),
+			Status:                 core.PreconfStatusWaiting,
 		}
 
-		// send preconf request event
-		result := make(chan *core.PreconfResponse, 1) // buffer 1 to avoid worker blocking
-		pool.preconfTxRequestFeed.Send(core.NewPreconfTxRequest{
-			Tx:            tx,
-			PreconfResult: result,
-			ClosePreconfResultFn: func() {
-				close(result)
-			},
-		})
-		log.Debug("txpool sent preconf tx request", "tx", txHash)
+		// If preconfReadyCh is not closed, it means this is a preconf tx restored from journal after system restart.
+		// In this case, we don't need to execute preconfirmation again to avoid resource contention with worker.
+		select {
+		case <-pool.preconfReadyCh:
+		default:
+			preconf.PreconfTxFailureMeter.Mark(1)
+			event.Status = core.PreconfStatusFailed
+			event.Reason = "preconf tx is not ready"
+			pool.preconfTxFeed.Send(event)
+			log.Info("preconf tx is not ready, can't handle", "tx", txHash)
+			return
+		}
 
-		// avoid race condition
-		tx := tx
-		// goroutine to avoid blocking
-		go func() {
-			defer preconf.MetricsPreconfTxPoolHandleCost(time.Now())
-
-			// If preconfReadyCh is not closed, it means this is a preconf tx restored from journal after system restart.
-			// In this case, we don't need to execute preconfirmation again to avoid resource contention with worker.
-			select {
-			case <-pool.preconfReadyCh:
-			default:
-				log.Info("preconf txs not ready, skip handle", "tx", txHash)
-				return
+		// timeout
+		timeout := time.NewTimer(pool.config.Preconf.PreconfTimeout)
+		defer timeout.Stop()
+		now := time.Now()
+		// wait for miner.worker preconf response
+		select {
+		case response := <-result:
+			log.Trace("txpool received preconf tx response", "tx", txHash, "duration", time.Since(now))
+			if response.Err == nil {
+				event.Status = core.PreconfStatusSuccess
+			} else {
+				event.Status = core.PreconfStatusFailed
+				event.Reason = response.Err.Error()
 			}
-
-			// default preconf event
-			event := core.NewPreconfTxEvent{
-				TxHash:                 txHash,
-				PredictedL2BlockNumber: hexutil.Uint64(0),
-			}
-			// timeout
-			timeout := time.NewTimer(pool.config.Preconf.PreconfTimeout)
-			defer timeout.Stop()
-			now := time.Now()
-			// wait for miner.worker preconf response
-			select {
-			case response := <-result:
-				log.Trace("txpool received preconf tx response", "tx", txHash, "duration", time.Since(now))
-				if response.Err == nil {
+			if response.Receipt != nil {
+				if response.Receipt.Status == types.ReceiptStatusSuccessful {
 					event.Status = core.PreconfStatusSuccess
+					event.Receipt = core.PreconfTxReceipt{Logs: core.NewLogs(response.Receipt.Logs)}
 				} else {
 					event.Status = core.PreconfStatusFailed
-					event.Reason = response.Err.Error()
+					event.Reason = vm.ErrExecutionReverted.Error()
 				}
-				if response.Receipt != nil {
-					if response.Receipt.Status == types.ReceiptStatusSuccessful {
-						event.Status = core.PreconfStatusSuccess
-					} else {
-						event.Status = core.PreconfStatusFailed
-						event.Reason = vm.ErrExecutionReverted.Error()
-					}
-					event.PredictedL2BlockNumber = hexutil.Uint64(response.Receipt.BlockNumber.Uint64())
-				}
-			case <-timeout.C:
-				event.Status = core.PreconfStatusFailed
+				event.PredictedL2BlockNumber = hexutil.Uint64(response.Receipt.BlockNumber.Uint64())
+			}
+		case <-timeout.C:
+			status := preconfTxRequest.SetStatus(core.PreconfStatusWaiting, core.PreconfStatusTimeout)
+			if status == core.PreconfStatusTimeout {
 				event.Reason = fmt.Sprintf("preconf timeout, over %s timeout", time.Since(now))
-			}
-
-			// send preconf event
-			pool.preconfTxFeed.Send(event)
-
-			// add preconf success tx to journal
-			if event.Status == core.PreconfStatusSuccess {
-				preconf.PreconfTxSuccessMeter.Mark(1)
-				log.Trace("preconf success", "tx", txHash)
-				if pool.journal != nil {
-					if err := pool.journal.insert(tx); err != nil {
-						log.Error("Failed to journal preconf success transaction", "tx", txHash, "err", err)
-					} else {
-						log.Trace("preconf success transaction journaled", "tx", txHash)
-					}
-				}
+				pool.preconfTxs.SetStatus(txHash, core.PreconfStatusTimeout)
+				event.Status = core.PreconfStatusTimeout
 			} else {
-				preconf.PreconfTxFailureMeter.Mark(1)
-				log.Trace("preconf failure", "tx", txHash, "reason", event.Reason)
+				event.Status = status
 			}
-		}()
-	}
+		}
+
+		// add preconf success tx to journal
+		if event.Status == core.PreconfStatusSuccess {
+			preconf.PreconfTxSuccessMeter.Mark(1)
+			log.Trace("preconf success", "tx", txHash)
+			if pool.journal != nil {
+				pool.mu.Lock()
+				pool.journalPreconfTx(tx)
+				pool.mu.Unlock()
+			}
+		} else {
+			preconf.PreconfTxFailureMeter.Mark(1)
+			log.Warn("preconf failure", "tx", txHash, "nonce", tx.Nonce(), "reason", event.Reason)
+		}
+
+		// send preconf event
+		pool.preconfTxFeed.Send(event)
+	}()
+
 }
 
 // addTxsLocked attempts to queue a batch of transactions if they are valid.
@@ -1852,6 +1936,7 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) []*types.Trans
 			hash := tx.Hash()
 			if pool.promoteTx(addr, hash, tx) {
 				promoted = append(promoted, tx)
+				log.Trace("Promoted transaction", "hash", hash)
 			}
 		}
 		log.Trace("Promoted queued transactions", "count", len(promoted))
