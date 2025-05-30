@@ -493,7 +493,7 @@ func (miner *Miner) commitTransactions(env *environment, plainTxs, blobTxs *tran
 // be customized with the plugin in the future.
 func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *environment) error {
 	miner.confMu.RLock()
-	tip := miner.config.GasPrice
+	tip := big.NewInt(0) // accept txs with 0 tip fee
 	prio := miner.prio
 	miner.confMu.RUnlock()
 

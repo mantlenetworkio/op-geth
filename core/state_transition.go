@@ -799,25 +799,30 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 
 	// Record the gas used excluding gas refunds. This value represents the actual
 	// gas allowance required to complete execution.
-	peakGasUsed := st.gasUsedWithTokenRatio(tokenRatio)
+	peakGasUsed := st.gasUsed()
 
 	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
+		peakGasUsed = st.initialGas - st.gasRemaining*tokenRatio
 		// Compute refund counter, capped to a refund quotient.
-		st.gasRemaining += st.calcRefund()
+		st.gasRemaining += st.calcRefund(tokenRatio, rules.IsMantleSkadi)
 		st.gasRemaining = st.gasRemaining * tokenRatio
-		if rules.IsPrague {
-			// After EIP-7623: Data-heavy transactions pay the floor gas.
-			if st.gasUsed() < floorDataGas {
-				prev := st.gasRemaining
-				st.gasRemaining = st.initialGas - floorDataGas
-				if t := st.evm.Config.Tracer; t != nil && t.OnGasChange != nil {
-					t.OnGasChange(prev, st.gasRemaining, tracing.GasChangeTxDataFloor)
-				}
-			}
-			if peakGasUsed < floorDataGas {
-				peakGasUsed = floorDataGas
+	}
+
+	if rules.IsPrague {
+		// After EIP-7623: Data-heavy transactions pay the floor gas.
+		if st.gasUsed() < floorDataGas {
+			prev := st.gasRemaining
+			st.gasRemaining = st.initialGas - floorDataGas
+			if t := st.evm.Config.Tracer; t != nil && t.OnGasChange != nil {
+				t.OnGasChange(prev, st.gasRemaining, tracing.GasChangeTxDataFloor)
 			}
 		}
+		if peakGasUsed < floorDataGas {
+			peakGasUsed = floorDataGas
+		}
+	}
+
+	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
 		st.returnGas(rules.IsMetaTxV3)
 	}
 
@@ -828,6 +833,7 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 		// Skip coinbase payments for deposit tx in Regolith
 		return &ExecutionResult{
 			UsedGas:    st.gasUsed(),
+			MaxUsedGas: peakGasUsed,
 			Err:        vmerr,
 			ReturnData: ret,
 		}, nil
@@ -937,14 +943,19 @@ func (st *stateTransition) applyAuthorization(auth *types.SetCodeAuthorization) 
 }
 
 // calcRefund computes refund counter, capped to a refund quotient.
-func (st *stateTransition) calcRefund() uint64 {
+func (st *stateTransition) calcRefund(tokenRatio uint64, isMantleSkadi bool) uint64 {
 	var refund uint64
+	gasUsed := st.gasUsed()
+	if isMantleSkadi {
+		// calc refund should remove token ratio in initialGas
+		gasUsed = st.originalGasUsed(tokenRatio)
+	}
 	if !st.evm.ChainConfig().IsLondon(st.evm.Context.BlockNumber) {
 		// Before EIP-3529: refunds were capped to gasUsed / 2
-		refund = st.gasUsed() / params.RefundQuotient
+		refund = gasUsed / params.RefundQuotient
 	} else {
 		// After EIP-3529: refunds are capped to gasUsed / 5
-		refund = st.gasUsed() / params.RefundQuotientEIP3529
+		refund = gasUsed / params.RefundQuotientEIP3529
 	}
 	if refund > st.state.GetRefund() {
 		refund = st.state.GetRefund()
@@ -958,6 +969,15 @@ func (st *stateTransition) calcRefund() uint64 {
 // returnGas returns ETH for remaining gas,
 // exchanged at the original rate.
 func (st *stateTransition) returnGas(metaTxV3 bool) {
+	if st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode || st.msg.RunMode == EthcallMode {
+		if st.evm.Config.Tracer != nil && st.evm.Config.Tracer.OnGasChange != nil && st.gasRemaining > 0 {
+			st.evm.Config.Tracer.OnGasChange(st.gasRemaining, 0, tracing.GasChangeTxLeftOverReturned)
+		}
+
+		st.gp.AddGas(st.gasRemaining)
+		return
+	}
+
 	if st.msg.MetaTxParams != nil {
 		remainingBigInt := new(big.Int).Mul(new(big.Int).SetUint64(st.gasRemaining), st.msg.GasPrice)
 		sponsorRefundAmount, selfRefundAmount := types.CalculateSponsorPercentAmount(st.msg.MetaTxParams, remainingBigInt)
@@ -989,8 +1009,11 @@ func (st *stateTransition) gasUsed() uint64 {
 	return st.initialGas - st.gasRemaining
 }
 
-func (st *stateTransition) gasUsedWithTokenRatio(tokenRatio uint64) uint64 {
-	return st.initialGas - st.gasRemaining*tokenRatio
+func (st *stateTransition) originalGasUsed(tokenRatio uint64) uint64 {
+	if tokenRatio > 0 {
+		return st.initialGas/tokenRatio - st.gasRemaining
+	}
+	return st.gasUsed()
 }
 
 // blobGasUsed returns the amount of blob gas used by the message.
