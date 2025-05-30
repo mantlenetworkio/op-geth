@@ -119,8 +119,7 @@ func NewOracle(backend OracleBackend, params Config, startPrice *big.Int) *Oracl
 		maxBlockHistory = 1
 		log.Warn("Sanitizing invalid gasprice oracle max block history", "provided", params.MaxBlockHistory, "updated", maxBlockHistory)
 	}
-	if startPrice == nil || startPrice.Int64() < 0 {
-		log.Warn("Sanitizing invalid gasprice oracle start price", "provided", startPrice, "updated", 0)
+	if startPrice == nil {
 		startPrice = new(big.Int)
 	}
 
