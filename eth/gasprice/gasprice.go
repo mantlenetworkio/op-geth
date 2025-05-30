@@ -121,7 +121,7 @@ func NewOracle(backend OracleBackend, params Config, startPrice *big.Int) *Oracl
 	}
 	if startPrice == nil || startPrice.Int64() < 0 {
 		log.Warn("Sanitizing invalid gasprice oracle start price", "provided", startPrice, "updated", 0)
-		startPrice = big.NewInt(0)
+		startPrice = new(big.Int)
 	}
 
 	cache := lru.NewCache[cacheKey, processedFees](2048)
