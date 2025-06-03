@@ -940,6 +940,12 @@ var (
 		Usage:    "By default the pending block equals the latest block to save resources and not leak txs from the tx-pool, this flag enables computing of the pending block from the tx-pool instead.",
 		Category: flags.RollupCategory,
 	}
+	RollupMantleUpgradesFlag = &cli.BoolFlag{
+		Name:     "rollup.mantle-upgrades",
+		Usage:    "Apply mantle config changes to the local chain-configuration",
+		Category: flags.RollupCategory,
+		Value:    true,
+	}
 
 	// Metrics flags
 	MetricsEnabledFlag = &cli.BoolFlag{
@@ -1838,6 +1844,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	}
 	cfg.RollupDisableTxPoolGossip = ctx.Bool(RollupDisableTxPoolGossipFlag.Name)
 	cfg.RollupDisableTxPoolAdmission = cfg.RollupSequencerHTTP != "" && !ctx.Bool(RollupEnableTxPoolAdmissionFlag.Name)
+	cfg.ApplyMantleUpgrades = ctx.Bool(RollupMantleUpgradesFlag.Name)
 
 	// Override any default configs for hard coded networks.
 	switch {

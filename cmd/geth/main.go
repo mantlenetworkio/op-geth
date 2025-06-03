@@ -157,6 +157,7 @@ var (
 		utils.RollupDisableTxPoolGossipFlag,
 		utils.RollupEnableTxPoolAdmissionFlag,
 		utils.RollupComputePendingBlock,
+		utils.RollupMantleUpgradesFlag,
 		configFileFlag,
 		utils.LogDebugFlag,
 		utils.LogBacktraceAtFlag,
