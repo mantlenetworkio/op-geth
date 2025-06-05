@@ -56,12 +56,6 @@ type StateGetter interface {
 // Returns nil if there is no cost.
 type L1CostFunc func(blockNum uint64, blockTime uint64, dataGas RollupCostData, isDepositTx bool, to *common.Address) *big.Int
 
-// A RollupTransaction provides all the input data needed to compute the total rollup cost.
-type RollupTransaction interface {
-	RollupCostData() RollupCostData
-	Gas() uint64
-}
-
 var (
 	L1BaseFeeSlot  = common.BigToHash(big.NewInt(1))
 	OverheadSlot   = common.BigToHash(big.NewInt(5))
