@@ -23,11 +23,11 @@ import (
 // Configuration
 const (
 	NumTransactions     = 10000
-	L1RpcEndpoint       = "http://127.0.0.1:8545"
+	L1RpcEndpoint       = "http://127.0.0.1:38545"
 	SequencerEndpoint   = "http://127.0.0.1:9545"
-	L2RpcEndpoint       = "http://127.0.0.1:10545"
+	L2RpcEndpoint       = "http://127.0.0.1:19545"
 	FundKeyHex          = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" // 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
-	OptimismPortalProxy = "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853"
+	OptimismPortalProxy = "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707"
 	ToAddressHex        = "0x71920E3cb420fbD8Ba9a495E6f801c50375ea127"
 	BatchSize           = 10
 	NonceInterval       = 20 * time.Millisecond

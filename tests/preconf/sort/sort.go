@@ -138,21 +138,30 @@ func sortTest(endpoint string) {
 		defer wg.Done()
 		time.Sleep(12 * time.Second) // wait for deposit tx to be sent
 		sendBatchTxs(ctx, l2client, addr3Auth, config.Addr2, oneMNT, config.NumTransactions, &addr3Txs)
+		var wg1 sync.WaitGroup
+		sem := make(chan struct{}, 8)
+		wg1.Add(len(addr3Txs))
 		for i, tx := range addr3Txs {
-			ctx, cancel := context.WithTimeout(ctx, config.WaitTime)
-			defer cancel()
-			receipt, err := bind.WaitMined(ctx, l2client, tx)
-			if err != nil {
-				if strings.Contains(err.Error(), "context deadline exceeded") {
-					log.Printf("transfer tx replaced by deposit tx, from: %s, nonce: %d, tx: %s", addr3Auth.From.Hex(), tx.Nonce(), tx.Hash().Hex())
-					continue
+			sem <- struct{}{}
+			go func() {
+				defer wg1.Done()
+				defer func() { <-sem }()
+				ctx, cancel := context.WithTimeout(ctx, config.WaitTime)
+				defer cancel()
+				receipt, err := bind.WaitMined(ctx, l2client, tx)
+				if err != nil {
+					if strings.Contains(err.Error(), "context deadline exceeded") {
+						log.Printf("transfer tx replaced by deposit tx, from: %s, nonce: %d, tx: %s", addr3Auth.From.Hex(), tx.Nonce(), tx.Hash().Hex())
+						return
+					}
+					log.Fatalf("failed to wait for transfer tx %d: %v, tx: %s", i, err, tx.Hash().Hex())
 				}
-				log.Fatalf("failed to wait for transfer tx %d: %v, tx: %s", i, err, tx.Hash().Hex())
-			}
-			if receipt.Status != types.ReceiptStatusSuccessful {
-				log.Fatalf("transfer tx %d failed: %v, tx: %s", i, receipt.Status, tx.Hash().Hex())
-			}
+				if receipt.Status != types.ReceiptStatusSuccessful {
+					log.Fatalf("transfer tx %d failed: %v, tx: %s", i, receipt.Status, tx.Hash().Hex())
+				}
+			}()
 		}
+		wg1.Wait()
 	}()
 
 	// Wait for transactions to complete

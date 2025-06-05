@@ -53,6 +53,7 @@ defer func() {
 */
 
 func ERC20Test() {
+	time.Sleep(30 * time.Second) // wait for sequencer to sync
 	erc20Test(config.SequencerEndpoint)
 	time.Sleep(30 * time.Second) // wait for sequencer to sync
 	erc20Test(config.L2RpcEndpoint)
@@ -93,6 +94,7 @@ func erc20Test(endpoint string) {
 	}
 
 	// mint 1e18 ERC20 to addr3
+	time.Sleep(time.Second)
 	err = sendERC20Tx(ctx, client, addr3Auth, config.MINTDATA)
 	if err != nil {
 		log.Fatalf("failed to send mint transaction: %v", err)
@@ -121,6 +123,7 @@ func erc20Test(endpoint string) {
 	var addr1Txs, addr1PreconfFailedTx, addr3Txs []*types.Transaction
 	wg.Add(3)
 
+	// 3 deposit to funder
 	go func() {
 		defer wg.Done()
 
@@ -134,7 +137,7 @@ func erc20Test(endpoint string) {
 
 		depositTxs := make([]*types.Transaction, 0)
 		for i := 0; i < config.NumTransactions/20+1; i++ {
-			if i%config.PrintMod == 0 {
+			if i%(config.PrintMod/20) == 0 {
 				log.Printf("depositTx %d", i)
 			}
 			datastring := fmt.Sprintf(config.TRANSFERDATA, config.FundAddr.Hex()[2:], hex.EncodeToString(common.LeftPadBytes(transferAmount.Bytes(), 32)))
@@ -144,27 +147,40 @@ func erc20Test(endpoint string) {
 			}
 			depositTxs = append(depositTxs, tx)
 
-			time.Sleep(1 * time.Second)
+			time.Sleep(300 * time.Millisecond)
 		}
+		time.Sleep(3 * config.WaitTime)
+		fmt.Println("deposit txs", len(depositTxs))
+		var wg1 sync.WaitGroup
+		wg1.Add(len(depositTxs))
+		sem := make(chan struct{}, 8)
 		for _, tx := range depositTxs {
-			ctx, cancel := context.WithTimeout(ctx, 6*config.WaitTime)
-			defer cancel()
-			receipt, err := bind.WaitMined(ctx, l1client, tx)
-			if err != nil {
-				log.Fatalf("failed to wait for deposit transaction: %v", err)
-			}
-			if receipt.Status != types.ReceiptStatusSuccessful {
-				log.Fatalf("deposit transaction failed: %v, tx: %s", receipt.Status, tx.Hash().Hex())
-			}
-			// fmt.Println("deposit tx success", tx.Hash().Hex(), "block number", receipt.BlockNumber.Uint64())
+			sem <- struct{}{}
+			go func() {
+				defer wg1.Done()
+				defer func() { <-sem }()
+				ctx, cancel := context.WithTimeout(ctx, 6*config.WaitTime)
+				defer cancel()
+				receipt, err := bind.WaitMined(ctx, l1client, tx)
+				if err != nil {
+					log.Fatalf("failed to wait for deposit transaction: tx: %s, %v", tx.Hash().Hex(), err)
+				}
+				if receipt.Status != types.ReceiptStatusSuccessful {
+					log.Fatalf("deposit transaction failed: %v, tx: %s", receipt.Status, tx.Hash().Hex())
+				}
+				// fmt.Println("deposit tx success", tx.Hash().Hex(), "block number", receipt.BlockNumber.Uint64())
+			}()
 		}
+		wg1.Wait()
+		fmt.Println("deposit txs done")
 	}()
 
+	// 3 pay 1e18 to 1
 	go func() {
 		defer wg.Done()
 
 		log.Printf("waiting for deposit tx and user transfer go first, and then pay")
-		time.Sleep(48 * time.Second) // let deposit tx and user transfer go first
+		time.Sleep(50 * time.Second) // let deposit tx and user transfer go first
 		nonce := config.GetNonce(ctx, client, addr1Auth.From)
 		for i := 0; i < config.NumTransactions; i++ {
 			if i%config.PrintMod == 0 {
@@ -182,36 +198,58 @@ func erc20Test(endpoint string) {
 				log.Fatalf("failed to pay: %v", err)
 			}
 		}
+		time.Sleep(config.WaitTime)
+		fmt.Println("pay txs", len(addr1Txs))
+		var wg1 sync.WaitGroup
+		wg1.Add(len(addr1Txs))
+		sem := make(chan struct{}, 8)
 		for _, tx := range addr1Txs {
-			ctx, cancel := context.WithTimeout(ctx, config.WaitTime)
-			defer cancel()
-			receipt, err := bind.WaitMined(ctx, client, tx)
-			if err == nil && receipt != nil {
-				if receipt.Status != types.ReceiptStatusSuccessful {
-					log.Fatalf("Preconf Transaction %s failed but preconf succeed - Status: %d, Actual Block: %d\n", tx.Hash(), receipt.Status, receipt.BlockNumber.Uint64())
+			sem <- struct{}{}
+			go func() {
+				defer wg1.Done()
+				defer func() { <-sem }()
+				ctx, cancel := context.WithTimeout(ctx, config.WaitTime)
+				defer cancel()
+				receipt, err := bind.WaitMined(ctx, client, tx)
+				if err == nil && receipt != nil {
+					if receipt.Status != types.ReceiptStatusSuccessful {
+						log.Fatalf("Preconf Transaction %s failed but preconf succeed - Status: %d, Actual Block: %d\n", tx.Hash(), receipt.Status, receipt.BlockNumber.Uint64())
+					}
 				}
-			}
-			// if receipt != nil && receipt.Status == types.ReceiptStatusSuccessful {
-			// 	log.Printf("preconf success block: %d", receipt.BlockNumber.Uint64())
-			// }
+			}()
 		}
+		wg1.Wait()
+		fmt.Println("pay txs done")
+
+		fmt.Println("preconf failed txs", len(addr1PreconfFailedTx))
+		var wg2 sync.WaitGroup
+		wg2.Add(len(addr1PreconfFailedTx))
+		sem = make(chan struct{}, 8)
 		for _, tx := range addr1PreconfFailedTx {
-			ctx, cancel := context.WithTimeout(ctx, config.WaitTime)
-			defer cancel()
-			receipt, err := bind.WaitMined(ctx, client, tx)
-			if err == nil && receipt != nil {
-				if receipt.Status == types.ReceiptStatusSuccessful {
-					log.Printf("Preconf Transaction %s succeed but preconf failed - Status: %d, Actual Block: %d\n", tx.Hash(), receipt.Status, receipt.BlockNumber.Uint64())
+			sem <- struct{}{}
+			go func() {
+				defer wg2.Done()
+				defer func() { <-sem }()
+				ctx, cancel := context.WithTimeout(ctx, config.WaitTime)
+				defer cancel()
+				receipt, err := bind.WaitMined(ctx, client, tx)
+				if err == nil && receipt != nil {
+					if receipt.Status == types.ReceiptStatusSuccessful {
+						log.Printf("Preconf Transaction %s succeed but preconf failed - Status: %d, Actual Block: %d\n", tx.Hash(), receipt.Status, receipt.BlockNumber.Uint64())
+					}
 				}
-			}
+			}()
 		}
+		wg2.Wait()
+		fmt.Println("preconf failed txs done")
 	}()
 
+	// 3 transfer 1e18 to 2
 	go func() {
 		defer wg.Done()
 
 		log.Printf("waiting for deposit tx go first, and then transfer")
-		time.Sleep(46 * time.Second) // let deposit tx go first
+		time.Sleep(48 * time.Second) // let deposit tx go first
 		nonce := config.GetNonce(ctx, client, addr3Auth.From)
 		for i := 0; i < config.NumTransactions; i++ {
 			if i%config.PrintMod == 0 {
@@ -227,22 +265,30 @@ func erc20Test(endpoint string) {
 		}
 
 		// wait for 2 minute to make sure all the txs are in the txpool
-		time.Sleep(2 * time.Minute)
+		time.Sleep(config.WaitTime)
+		fmt.Println("transfer txs", len(addr3Txs))
+		var wg1 sync.WaitGroup
+		wg1.Add(len(addr3Txs))
+		sem := make(chan struct{}, 8)
 		for _, tx := range addr3Txs {
-			ctx, cancel := context.WithTimeout(ctx, config.WaitTime)
-			defer cancel()
-			_, err := bind.WaitMined(ctx, client, tx)
-			if err != nil {
-				if strings.Contains(err.Error(), "context deadline exceeded") {
-					log.Printf("transfer tx replaced by deposit tx, from: %s, nonce: %d, tx: %s", addr3Auth.From.Hex(), tx.Nonce(), tx.Hash().Hex())
-					continue
+			sem <- struct{}{}
+			go func() {
+				defer wg1.Done()
+				defer func() { <-sem }()
+				ctx, cancel := context.WithTimeout(ctx, config.WaitTime)
+				defer cancel()
+				_, err := bind.WaitMined(ctx, client, tx)
+				if err != nil {
+					if strings.Contains(err.Error(), "context deadline exceeded") {
+						log.Printf("transfer tx replaced by deposit tx, from: %s, nonce: %d, tx: %s", addr3Auth.From.Hex(), tx.Nonce(), tx.Hash().Hex())
+						return
+					}
+					log.Fatalf("failed to wait for transfer transaction: %v, tx: %s", err, tx.Hash().Hex())
 				}
-				log.Fatalf("failed to wait for transfer transaction: %v, tx: %s", err, tx.Hash().Hex())
-			}
-			// if receipt != nil && receipt.Status == types.ReceiptStatusSuccessful {
-			// 	log.Printf("transfer success block: %d", receipt.BlockNumber.Uint64())
-			// }
+			}()
 		}
+		wg1.Wait()
+		fmt.Println("transfer txs done")
 	}()
 
 	// Wait for transactions to complete
@@ -263,7 +309,7 @@ func erc20Test(endpoint string) {
 	add := big.NewInt(0).Add(addr1AfterBalance, addr2AfterBalance)
 	add.Add(add, addrFundAfterBalance)
 	if add.Cmp(addr3AfterBalance) != 0 {
-		log.Fatalf("addr1 + addr2 + addrFund is not equal to addr3 sub")
+		log.Fatalf("addrFund + addr1 + addr2 is not equal to addr3 sub, %s + %s + %s != %s", addrFundAfterBalance.String(), addr1AfterBalance.String(), addr2AfterBalance.String(), addr3AfterBalance.String())
 	}
 	fmt.Println("erc20 test completed✅")
 }
@@ -272,6 +318,7 @@ func erc20Balance(ctx context.Context, client *ethclient.Client, addr common.Add
 	balance := callERC20(ctx, client, fmt.Sprintf(config.BALANCEOFDATA, addr.Hex()[2:]))
 	var balanceInt big.Int
 	balanceInt.SetBytes(balance)
+	fmt.Println("addr", addr.Hex(), "balance", balanceInt.String())
 	log.Printf("addr %s erc20 balance: %s TestERC20", addr.Hex(), config.BalanceString(&balanceInt))
 	return &balanceInt
 }
@@ -338,16 +385,16 @@ func callERC20(ctx context.Context, client *ethclient.Client, data string) []byt
 func pay(ctx context.Context, client *ethclient.Client, auth *bind.TransactOpts, i int, nonce uint64, amount *big.Int, txs *[]*types.Transaction, preconfFailedTx *[]*types.Transaction) error {
 	datastring := fmt.Sprintf("0xa5f2a152000000000000000000000000%s000000000000000000000000%s%s", config.Addr3.Hex()[2:], config.Addr1.Hex()[2:], hex.EncodeToString(common.LeftPadBytes(amount.Bytes(), 32)))
 	data := hexutil.MustDecode(datastring)
-	// gas, err := client.EstimateGas(ctx, ethereum.CallMsg{
-	// 	From:  auth.From,
-	// 	To:    &config.TestPay,
-	// 	Data:  data,
-	// 	Value: big.NewInt(0),
-	// })
-	// if err != nil {
-	// 	return fmt.Errorf("failed to estimate gas: %v", err)
-	// }
-	// fmt.Println("gas", gas) //138875846
+	gas, err := client.EstimateGas(ctx, ethereum.CallMsg{
+		From:  auth.From,
+		To:    &config.TestPay,
+		Data:  data,
+		Value: big.NewInt(0),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to estimate gas: %v", err)
+	}
+	// fmt.Println("gas", gas) // 138875846, 302704189
 
 	gasPrice, err := client.SuggestGasPrice(ctx)
 	if err != nil {
@@ -358,8 +405,7 @@ func pay(ctx context.Context, client *ethclient.Client, auth *bind.TransactOpts,
 		nonce,
 		config.TestPay,
 		big.NewInt(0),
-		// gas,
-		1400000000,
+		gas,
 		gasPrice,
 		data,
 	)

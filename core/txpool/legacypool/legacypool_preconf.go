@@ -140,6 +140,20 @@ func (pool *LegacyPool) addPreconfTx(tx *types.Transaction) {
 func (pool *LegacyPool) handlePreconfTx(from common.Address, tx *types.Transaction) {
 	txHash := tx.Hash()
 
+	// add tx to preconfTxs and send preconf request event should keep same order
+	pool.preconfTxs.Add(from, tx)
+
+	// If preconfReadyCh is not closed, it means this is a preconf tx restored from journal after system restart.
+	// In this case, we don't need to execute preconfirmation again to avoid resource contention with worker.
+	select {
+	case <-pool.preconfReadyCh:
+	default:
+		// only success preconf tx can be restored from journal
+		pool.preconfTxs.SetStatus(txHash, core.PreconfStatusSuccess)
+		log.Debug("handle preconf tx from journal", "tx", txHash)
+		return
+	}
+
 	// send preconf request event
 	result := make(chan *core.PreconfResponse, 1) // buffer 1 to avoid worker blocking
 	preconfTxRequest := &core.NewPreconfTxRequest{
@@ -150,19 +164,8 @@ func (pool *LegacyPool) handlePreconfTx(from common.Address, tx *types.Transacti
 			close(result)
 		},
 	}
-
-	// add tx to preconfTxs and send preconf request event should keep same order
-	pool.preconfTxs.Add(from, tx)
-	select {
-	case <-pool.initDoneCh:
-		pool.preconfTxRequestFeed.Send(preconfTxRequest)
-		log.Debug("txpool sent preconf tx request", "tx", txHash)
-	default:
-		// only success preconf tx can be restored from journal
-		pool.preconfTxs.SetStatus(txHash, core.PreconfStatusSuccess)
-		log.Debug("handle preconf tx from journal", "tx", txHash)
-		return
-	}
+	pool.preconfTxRequestFeed.Send(preconfTxRequest)
+	log.Debug("txpool sent preconf tx request", "tx", txHash)
 
 	// goroutine to avoid blocking
 	go func() {
@@ -175,19 +178,6 @@ func (pool *LegacyPool) handlePreconfTx(from common.Address, tx *types.Transacti
 			TxHash:                 txHash,
 			PredictedL2BlockNumber: hexutil.Uint64(0),
 			Status:                 core.PreconfStatusWaiting,
-		}
-
-		// If preconfReadyCh is not closed, it means this is a preconf tx restored from journal after system restart.
-		// In this case, we don't need to execute preconfirmation again to avoid resource contention with worker.
-		select {
-		case <-pool.preconfReadyCh:
-		default:
-			preconf.PreconfTxFailureMeter.Mark(1)
-			event.Status = core.PreconfStatusFailed
-			event.Reason = "preconf tx is not ready"
-			pool.preconfTxFeed.Send(event)
-			log.Info("preconf tx is not ready, can't handle", "tx", txHash)
-			return
 		}
 
 		// timeout

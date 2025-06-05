@@ -16,6 +16,10 @@ import (
 	"github.com/ethereum/go-ethereum/tests/preconf/stress"
 )
 
+// There are three tests that require manual modification of op-geth configuration to cover:
+// 1. Set txpool.preconftimeout to a very small value (e.g. 1ms) to test timeout handling.
+// 2. Manually restart op-geth while processing a large number of preconfirmation transactions to test journal handling.
+// 3. Manually modify op-geth's gaslimit upper bound (e.g. 200000000000) to test handling when preconfirmation transactions fill up the block.
 func main() {
 	precheck()
 	checkPreconfRPCValid()
@@ -127,11 +131,11 @@ func sendRawTransactionWithPreconf(
 	tx := &types.DynamicFeeTx{
 		ChainID:   chainID,
 		Nonce:     nonce,
-		To:        &config.TestERC20,
+		To:        &config.TestPay,
 		GasTipCap: gasTipCap,
 		GasFeeCap: gasFeeCap,
 		Gas:       config.TransferGasLimit,
-		Data:      common.Hex2Bytes("40c10f19000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb922660000000000000000000000000000000000000000000000000000000000000064"),
+		Data:      common.Hex2Bytes("f7e94bbb000000000000000000000000" + config.TestERC20.Hex()[2:]),
 	}
 
 	signedTx, err := auth.Signer(auth.From, types.NewTx(tx))

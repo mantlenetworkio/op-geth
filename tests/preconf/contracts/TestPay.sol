@@ -10,11 +10,7 @@ contract TestPay {
         erc20 = TestERC20(_erc20);
     }
 
-    function transferTo(
-        address sender,
-        address recipient,
-        uint256 amount
-    ) external returns (bool) {
+    function transferTo(address sender, address recipient, uint256 amount) external returns (bool) {
         erc20.transferFrom(sender, recipient, amount);
         return true;
     }

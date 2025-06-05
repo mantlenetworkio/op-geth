@@ -28,6 +28,7 @@ type PreconfTxTracker struct {
 
 func NewPreconfTxTracker(journalPath string, journalTime time.Duration, pool *txpool.TxPool) *PreconfTxTracker {
 	return &PreconfTxTracker{
+		all:        make(map[common.Hash]*types.Transaction),
 		journal:    newTxJournal(journalPath),
 		rejournal:  journalTime,
 		pool:       pool,
@@ -62,7 +63,12 @@ func (tracker *PreconfTxTracker) TrackAll(txs []*types.Transaction, clean bool) 
 		tracker.all[tx.Hash()] = tx
 
 		if tracker.journal != nil {
-			_ = tracker.journal.insert(tx)
+			err := tracker.journal.insert(tx)
+			if err != nil {
+				log.Error("PreconfTxTracker: Failed to insert transaction into journal", "tx", tx.Hash(), "err", err)
+			} else {
+				log.Trace("PreconfTxTracker: Inserted transaction into journal", "tx", tx.Hash())
+			}
 		}
 	}
 	preconf.PreconfTxJournalGauge.Update(int64(len(tracker.all)))
@@ -90,16 +96,22 @@ func (tracker *PreconfTxTracker) loop() {
 	defer log.Info("PreconfTxTracker: Stopped")
 	defer tracker.wg.Done()
 
-	start := time.Now()
+	start, journalPreconfTxs := time.Now(), make([]*types.Transaction, 0)
 	log.Info("PreconfTxTracker: Start loading transactions from journal...")
 	if err := tracker.journal.load(func(transactions []*types.Transaction) []error {
 		log.Info("PreconfTxTracker: Start adding transactions to pool", "count", len(transactions), "loading_duration", time.Since(start))
 		errs := tracker.pool.Add(transactions, true)
 		log.Info("PreconfTxTracker: Done adding transactions to pool", "total_duration", time.Since(start))
+		journalPreconfTxs = transactions
 		return errs
 	}); err != nil {
 		log.Error("PreconfTxTracker: Transaction journal loading failed. Exiting.", "err", err)
 		return
+	}
+	// rotate to initialize journal writer, so preconf txs can be tracked
+	tojournal := map[common.Address]types.Transactions{common.BytesToAddress([]byte("preconf")): journalPreconfTxs}
+	if err := tracker.journal.rotate(tojournal); err != nil {
+		log.Error("PreconfTxTracker: Transaction journal rotation failed", "err", err)
 	}
 	defer tracker.journal.close()
 

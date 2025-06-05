@@ -300,7 +300,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		stack.RegisterLifecycle(pj)
 	}
 	if config.Miner.PreconfConfig.EnablePreconfChecker {
-		eth.preconfTxTracker = locals.NewPreconfTxTracker(config.TxPool.Journal, rejournal, eth.txPool)
+		eth.preconfTxTracker = locals.NewPreconfTxTracker(config.TxPool.Journal+".preconf", rejournal, eth.txPool)
 		stack.RegisterLifecycle(eth.preconfTxTracker)
 	}
 
