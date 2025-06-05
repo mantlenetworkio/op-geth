@@ -32,7 +32,9 @@ import (
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/eth/tracers"
+	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/preconf"
 )
 
 // Backend wraps all methods required for mining. Only full node is capable
@@ -58,6 +60,7 @@ type Config struct {
 	RollupComputePendingBlock bool // Compute the pending block from tx-pool, instead of copying the latest-block
 
 	EffectiveGasCeil uint64 // if non-zero, a gas ceiling to apply independent of the header's gaslimit value
+	PreconfConfig    *preconf.MinerConfig
 }
 
 // DefaultConfig contains default settings for miner.
@@ -70,6 +73,8 @@ var DefaultConfig = Config{
 	// for payload generation. It should be enough for Geth to
 	// run 3 rounds.
 	Recommit: 2 * time.Second,
+
+	PreconfConfig: &preconf.DefaultMinerConfig,
 }
 
 // Miner is the main object which takes care of submitting new work to consensus
@@ -86,18 +91,31 @@ type Miner struct {
 	pendingMu   sync.Mutex // Lock protects the pending block
 
 	backend Backend
+
+	// Preconf Subscriptions
+	preconfTxRequestCh  chan *core.NewPreconfTxRequest
+	preconfTxRequestSub event.Subscription
+	preconfChecker      *preconfChecker
 }
 
 // New creates a new miner with provided config.
 func New(eth Backend, config Config, engine consensus.Engine) *Miner {
-	return &Miner{
+	preconfTxRequestCh := make(chan *core.NewPreconfTxRequest, txChanSize)
+	miner := &Miner{
 		config:      &config,
 		chainConfig: eth.BlockChain().Config(),
 		engine:      engine,
 		txpool:      eth.TxPool(),
 		chain:       eth.BlockChain(),
 		pending:     &pending{},
+		backend:     eth,
+		// preconf init
+		preconfTxRequestCh:  preconfTxRequestCh,
+		preconfChecker:      NewPreconfChecker(eth.BlockChain(), config.PreconfConfig),
+		preconfTxRequestSub: eth.TxPool().SubscribeNewPreconfTxRequestEvent(preconfTxRequestCh),
 	}
+	go miner.preconfLoop()
+	return miner
 }
 
 // Pending returns the currently pending block and associated receipts, logs
@@ -195,3 +213,4 @@ func (miner *Miner) getPending() *newPayloadResult {
 	miner.pending.update(header.Hash(), ret)
 	return ret
 }
+

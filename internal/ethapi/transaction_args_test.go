@@ -380,6 +380,9 @@ func (b *backendMock) SubscribeChainHeadEvent(ch chan<- core.ChainHeadEvent) eve
 	return nil
 }
 func (b *backendMock) SendTx(ctx context.Context, signedTx *types.Transaction) error { return nil }
+func (b *backendMock) SendTxWithPreconf(ctx context.Context, signedTx *types.Transaction) (*core.NewPreconfTxEvent, error) {
+	return nil, nil
+}
 func (b *backendMock) GetTransaction(txHash common.Hash) (bool, *types.Transaction, common.Hash, uint64, uint64) {
 	return false, nil, [32]byte{}, 0, 0
 }
@@ -397,12 +400,15 @@ func (b *backendMock) TxPoolContentFrom(addr common.Address) ([]*types.Transacti
 	return nil, nil
 }
 func (b *backendMock) SubscribeNewTxsEvent(chan<- core.NewTxsEvent) event.Subscription { return nil }
-func (b *backendMock) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscription    { return nil }
+func (b *backendMock) SubscribeNewPreconfTxEvent(ch chan<- core.NewPreconfTxEvent) event.Subscription {
+	return nil
+}
+func (b *backendMock) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscription { return nil }
 func (b *backendMock) SubscribeRemovedLogsEvent(ch chan<- core.RemovedLogsEvent) event.Subscription {
 	return nil
 }
 
-func (b *backendMock) Engine() consensus.Engine          { return nil }
+func (b *backendMock) Engine() consensus.Engine { return nil }
 
 func (b *backendMock) CurrentView() *filtermaps.ChainView           { return nil }
 func (b *backendMock) NewMatcherBackend() filtermaps.MatcherBackend { return nil }

@@ -66,6 +66,7 @@ type Backend interface {
 	CurrentHeader() *types.Header
 	ChainConfig() *params.ChainConfig
 	HistoryPruningCutoff() uint64
+	SubscribeNewPreconfTxEvent(ch chan<- core.NewPreconfTxEvent) event.Subscription
 	SubscribeNewTxsEvent(chan<- core.NewTxsEvent) event.Subscription
 	SubscribeChainEvent(ch chan<- core.ChainEvent) event.Subscription
 	SubscribeRemovedLogsEvent(ch chan<- core.RemovedLogsEvent) event.Subscription
@@ -154,6 +155,9 @@ const (
 	// PendingTransactionsSubscription queries for pending transactions entering
 	// the pending state
 	PendingTransactionsSubscription
+	// PreconfTransactionsSubscription queries for preconf transactions entering
+	// the pending state
+	PreconfTransactionsSubscription
 	// BlocksSubscription queries hashes for blocks that are imported
 	BlocksSubscription
 	// LastIndexSubscription keeps track of the last index
@@ -179,6 +183,7 @@ type subscription struct {
 	logsCrit  ethereum.FilterQuery
 	logs      chan []*types.Log
 	txs       chan []*types.Transaction
+	preconfTx chan core.NewPreconfTxEvent
 	headers   chan *types.Header
 	installed chan struct{} // closed when the filter is installed
 	err       chan error    // closed when the filter is uninstalled
@@ -191,18 +196,20 @@ type EventSystem struct {
 	sys     *FilterSystem
 
 	// Subscriptions
-	txsSub    event.Subscription // Subscription for new transaction event
-	logsSub   event.Subscription // Subscription for new log event
-	rmLogsSub event.Subscription // Subscription for removed log event
-	chainSub  event.Subscription // Subscription for new chain event
+	txsSub       event.Subscription // Subscription for new transaction event
+	logsSub      event.Subscription // Subscription for new log event
+	rmLogsSub    event.Subscription // Subscription for removed log event
+	chainSub     event.Subscription // Subscription for new chain event
+	preconfTxSub event.Subscription // Subscription for new preconf transaction event
 
 	// Channels
-	install   chan *subscription         // install filter for event notification
-	uninstall chan *subscription         // remove filter for event notification
-	txsCh     chan core.NewTxsEvent      // Channel to receive new transactions event
-	logsCh    chan []*types.Log          // Channel to receive new log event
-	rmLogsCh  chan core.RemovedLogsEvent // Channel to receive removed log event
-	chainCh   chan core.ChainEvent       // Channel to receive new chain event
+	install     chan *subscription          // install filter for event notification
+	uninstall   chan *subscription          // remove filter for event notification
+	txsCh       chan core.NewTxsEvent       // Channel to receive new transactions event
+	logsCh      chan []*types.Log           // Channel to receive new log event
+	rmLogsCh    chan core.RemovedLogsEvent  // Channel to receive removed log event
+	chainCh     chan core.ChainEvent        // Channel to receive new chain event
+	preconfTxCh chan core.NewPreconfTxEvent // Channel to receive new preconf transaction event
 }
 
 // NewEventSystem creates a new manager that listens for event on the given mux,
@@ -213,24 +220,26 @@ type EventSystem struct {
 // or by stopping the given mux.
 func NewEventSystem(sys *FilterSystem) *EventSystem {
 	m := &EventSystem{
-		sys:       sys,
-		backend:   sys.backend,
-		install:   make(chan *subscription),
-		uninstall: make(chan *subscription),
-		txsCh:     make(chan core.NewTxsEvent, txChanSize),
-		logsCh:    make(chan []*types.Log, logsChanSize),
-		rmLogsCh:  make(chan core.RemovedLogsEvent, rmLogsChanSize),
-		chainCh:   make(chan core.ChainEvent, chainEvChanSize),
+		sys:         sys,
+		backend:     sys.backend,
+		install:     make(chan *subscription),
+		uninstall:   make(chan *subscription),
+		txsCh:       make(chan core.NewTxsEvent, txChanSize),
+		logsCh:      make(chan []*types.Log, logsChanSize),
+		rmLogsCh:    make(chan core.RemovedLogsEvent, rmLogsChanSize),
+		chainCh:     make(chan core.ChainEvent, chainEvChanSize),
+		preconfTxCh: make(chan core.NewPreconfTxEvent, txChanSize),
 	}
 
 	// Subscribe events
 	m.txsSub = m.backend.SubscribeNewTxsEvent(m.txsCh)
+	m.preconfTxSub = m.backend.SubscribeNewPreconfTxEvent(m.preconfTxCh)
 	m.logsSub = m.backend.SubscribeLogsEvent(m.logsCh)
 	m.rmLogsSub = m.backend.SubscribeRemovedLogsEvent(m.rmLogsCh)
 	m.chainSub = m.backend.SubscribeChainEvent(m.chainCh)
 
 	// Make sure none of the subscriptions are empty
-	if m.txsSub == nil || m.logsSub == nil || m.rmLogsSub == nil || m.chainSub == nil {
+	if m.txsSub == nil || m.logsSub == nil || m.rmLogsSub == nil || m.chainSub == nil || m.preconfTxSub == nil {
 		log.Crit("Subscribe for event system failed")
 	}
 
@@ -265,6 +274,7 @@ func (sub *Subscription) Unsubscribe() {
 				break uninstallLoop
 			case <-sub.f.logs:
 			case <-sub.f.txs:
+			case <-sub.f.preconfTx:
 			case <-sub.f.headers:
 			}
 		}
@@ -340,6 +350,7 @@ func (es *EventSystem) subscribeLogs(crit ethereum.FilterQuery, logs chan []*typ
 		created:   time.Now(),
 		logs:      logs,
 		txs:       make(chan []*types.Transaction),
+		preconfTx: make(chan core.NewPreconfTxEvent),
 		headers:   make(chan *types.Header),
 		installed: make(chan struct{}),
 		err:       make(chan error),
@@ -356,6 +367,7 @@ func (es *EventSystem) SubscribeNewHeads(headers chan *types.Header) *Subscripti
 		created:   time.Now(),
 		logs:      make(chan []*types.Log),
 		txs:       make(chan []*types.Transaction),
+		preconfTx: make(chan core.NewPreconfTxEvent),
 		headers:   headers,
 		installed: make(chan struct{}),
 		err:       make(chan error),
@@ -372,6 +384,26 @@ func (es *EventSystem) SubscribePendingTxs(txs chan []*types.Transaction) *Subsc
 		created:   time.Now(),
 		logs:      make(chan []*types.Log),
 		txs:       txs,
+		preconfTx: make(chan core.NewPreconfTxEvent),
+		headers:   make(chan *types.Header),
+		installed: make(chan struct{}),
+		err:       make(chan error),
+	}
+	return es.subscribe(sub)
+}
+
+// SubscribePreconfTxs creates a subscription that writes transactions for
+// pre-confirmed transactions that enter the transaction pool in FIFO order.
+// These transactions are processed in the order they were received, ensuring
+// deterministic execution order for pre-confirmed transactions.
+func (es *EventSystem) SubscribePreconfTxs(preconfTx chan core.NewPreconfTxEvent) *Subscription {
+	sub := &subscription{
+		id:        rpc.NewID(),
+		typ:       PreconfTransactionsSubscription,
+		created:   time.Now(),
+		logs:      make(chan []*types.Log),
+		txs:       make(chan []*types.Transaction),
+		preconfTx: preconfTx,
 		headers:   make(chan *types.Header),
 		installed: make(chan struct{}),
 		err:       make(chan error),
@@ -393,6 +425,12 @@ func (es *EventSystem) handleLogs(filters filterIndex, ev []*types.Log) {
 	}
 }
 
+func (es *EventSystem) handlePreconfTxEvent(filters filterIndex, ev core.NewPreconfTxEvent) {
+	for _, f := range filters[PreconfTransactionsSubscription] {
+		f.preconfTx <- ev
+	}
+}
+
 func (es *EventSystem) handleTxsEvent(filters filterIndex, ev core.NewTxsEvent) {
 	for _, f := range filters[PendingTransactionsSubscription] {
 		f.txs <- ev.Txs
@@ -410,6 +448,7 @@ func (es *EventSystem) eventLoop() {
 	// Ensure all subscriptions get cleaned up
 	defer func() {
 		es.txsSub.Unsubscribe()
+		es.preconfTxSub.Unsubscribe()
 		es.logsSub.Unsubscribe()
 		es.rmLogsSub.Unsubscribe()
 		es.chainSub.Unsubscribe()
@@ -424,6 +463,8 @@ func (es *EventSystem) eventLoop() {
 		select {
 		case ev := <-es.txsCh:
 			es.handleTxsEvent(index, ev)
+		case ev := <-es.preconfTxCh:
+			es.handlePreconfTxEvent(index, ev)
 		case ev := <-es.logsCh:
 			es.handleLogs(index, ev)
 		case ev := <-es.rmLogsCh:
@@ -441,6 +482,8 @@ func (es *EventSystem) eventLoop() {
 
 		// System stopped
 		case <-es.txsSub.Err():
+			return
+		case <-es.preconfTxSub.Err():
 			return
 		case <-es.logsSub.Err():
 			return

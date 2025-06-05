@@ -144,6 +144,8 @@ func (journal *journal) rotate(all map[common.Address]types.Transactions) error 
 		return err
 	}
 	journaled := 0
+
+	// add all txs to the journal
 	for _, txs := range all {
 		for _, tx := range txs {
 			if err = rlp.Encode(replacement, tx); err != nil {
@@ -153,6 +155,7 @@ func (journal *journal) rotate(all map[common.Address]types.Transactions) error 
 		}
 		journaled += len(txs)
 	}
+
 	replacement.Close()
 
 	// Replace the live journal with the newly generated one

@@ -326,6 +326,10 @@ type BlobPool struct {
 	txValidationFn txpool.ValidationFunction
 
 	lock sync.RWMutex // Mutex protecting the pool during reorg handling
+
+	// Preconf variables
+	preconfTxRequestFeed event.Feed
+	preconfTxFeed        event.Feed
 }
 
 // New creates a new blob transaction pool to gather, sort and filter inbound

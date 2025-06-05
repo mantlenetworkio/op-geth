@@ -45,6 +45,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/preconf"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/ethereum/go-ethereum/trie"
@@ -1809,6 +1810,54 @@ func (api *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil
 		return common.Hash{}, err
 	}
 	return SubmitTransaction(ctx, api.b, tx)
+}
+
+// SendRawTransactionWithPreconf will add the signed preconf transaction to the transaction pool and return the preconf result.
+// The sender is responsible for signing the transaction and using the correct nonce.
+func (s *TransactionAPI) SendRawTransactionWithPreconf(ctx context.Context, input hexutil.Bytes) (*core.NewPreconfTxEvent, error) {
+	defer preconf.MetricsPreconfAPIHandleCost(time.Now())
+
+	tx := new(types.Transaction)
+	if err := tx.UnmarshalBinary(input); err != nil {
+		return nil, err
+	}
+
+	// SubmitTransaction(ctx, s.b, tx)
+	// If the transaction fee cap is already specified, ensure the
+	// fee of the given transaction is _reasonable_.
+	if err := checkTxFee(tx.GasPrice(), tx.Gas(), s.b.RPCTxFeeCap()); err != nil {
+		return nil, err
+	}
+	if !s.b.UnprotectedAllowed() && !tx.Protected() {
+		// Ensure only eip155 signed transactions are submitted if EIP155Required is set.
+		return nil, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
+	}
+
+	now := time.Now()
+	log.Trace("ethapi sendRawTransactionWithPreconf", "tx", tx.Hash())
+
+	// Send the transaction with preconf
+	result, err := s.b.SendTxWithPreconf(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Print a log with full tx details for manual investigations and interventions
+	head := s.b.CurrentBlock()
+	signer := types.MakeSigner(s.b.ChainConfig(), head.Number, head.Time)
+	from, err := types.Sender(signer, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	if tx.To() == nil {
+		addr := crypto.CreateAddress(from, tx.Nonce())
+		log.Info("Submitted preconf contract creation", "hash", tx.Hash().Hex(), "from", from, "nonce", tx.Nonce(), "contract", addr.Hex(), "value", tx.Value())
+	} else {
+		log.Info("Submitted preconf transaction", "hash", tx.Hash().Hex(), "from", from, "nonce", tx.Nonce(), "recipient", tx.To(), "value", tx.Value(), "duration", time.Since(now))
+	}
+
+	return result, nil
 }
 
 // Sign calculates an ECDSA signature for:

@@ -105,6 +105,8 @@ type Ethereum struct {
 	lock sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
 
 	shutdownTracker *shutdowncheck.ShutdownTracker // Tracks if and when the node has shutdown ungracefully
+
+	preconfTxTracker *locals.PreconfTxTracker
 }
 
 // New creates a new Ethereum object (including the initialisation of the common Ethereum object),
@@ -297,6 +299,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	} else if config.TxPool.JournalRemote {
 		pj := locals.NewPoolJournaler(config.TxPool.Journal, rejournal, eth.txPool)
 		stack.RegisterLifecycle(pj)
+	}
+	if config.Miner.PreconfConfig.EnablePreconfChecker {
+		eth.preconfTxTracker = locals.NewPreconfTxTracker(config.TxPool.Journal+".preconf", rejournal, eth.txPool)
+		stack.RegisterLifecycle(eth.preconfTxTracker)
 	}
 
 	// Permit the downloader to use the trie cache allowance during fast sync
