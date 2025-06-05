@@ -280,6 +280,7 @@ type ChainOverrides struct {
 	OverrideOptimismBedrock  *big.Int
 	OverrideOptimismRegolith *uint64
 	OverrideOptimism         *bool
+	ApplyMantleUpgrades      bool
 }
 
 // apply applies the chain overrides on the supplied chain config.
@@ -312,7 +313,7 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 
 	// mantle
 	mantleUpgradeChainConfig := params.GetUpgradeConfigForMantle(cfg.ChainID)
-	if mantleUpgradeChainConfig != nil {
+	if o.ApplyMantleUpgrades && mantleUpgradeChainConfig != nil {
 		cfg.BaseFeeTime = mantleUpgradeChainConfig.BaseFeeTime
 		cfg.BVMETHMintUpgradeTime = mantleUpgradeChainConfig.BVMETHMintUpgradeTime
 		cfg.MetaTxV2UpgradeTime = mantleUpgradeChainConfig.MetaTxV2UpgradeTime

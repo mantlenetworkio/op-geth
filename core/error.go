@@ -106,10 +106,6 @@ var (
 	// base fee of the block.
 	ErrFeeCapTooLow = errors.New("max fee per gas less than block base fee")
 
-	// ErrGasPriceTooLow is returned if the transaction gasPrice is less than the
-	// base fee of the block for legacy tx
-	ErrGasPriceTooLow = errors.New("legacy tx's gasPrice less than block base fee")
-
 	// ErrSenderNoEOA is returned if the sender of a transaction is a contract.
 	ErrSenderNoEOA = errors.New("sender not an eoa")
 

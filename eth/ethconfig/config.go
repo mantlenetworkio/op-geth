@@ -40,12 +40,13 @@ import (
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gasprice.Config{
-	Blocks:           20,
-	Percentile:       60,
-	MaxHeaderHistory: 1024,
-	MaxBlockHistory:  1024,
-	MaxPrice:         gasprice.DefaultMaxPrice,
-	IgnorePrice:      gasprice.DefaultIgnorePrice,
+	Blocks:                  20,
+	Percentile:              60,
+	MaxHeaderHistory:        1024,
+	MaxBlockHistory:         1024,
+	MaxPrice:                gasprice.DefaultMaxPrice,
+	IgnorePrice:             gasprice.DefaultIgnorePrice,
+	MinSuggestedPriorityFee: gasprice.DefaultMinSuggestedPriorityFee,
 }
 
 // Defaults contains default settings for use on the Ethereum main net.
@@ -167,6 +168,9 @@ type Config struct {
 	OverrideOptimismBedrock  *big.Int
 	OverrideOptimismRegolith *uint64 `toml:",omitempty"`
 	OverrideOptimism         *bool
+
+	// ApplyMantleUpgrades requests the node to update chain-configuration from the mantle config.
+	ApplyMantleUpgrades bool `toml:",omitempty"`
 
 	RollupSequencerHTTP          string
 	RollupHistoricalRPC          string

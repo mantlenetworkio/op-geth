@@ -59,6 +59,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		OverrideOptimismBedrock      *big.Int
 		OverrideOptimismRegolith     *uint64 `toml:",omitempty"`
 		OverrideOptimism             *bool
+		ApplyMantleUpgrades          bool `toml:",omitempty"`
 		RollupSequencerHTTP          string
 		RollupHistoricalRPC          string
 		RollupHistoricalRPCTimeout   time.Duration
@@ -107,6 +108,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.OverrideOptimismBedrock = c.OverrideOptimismBedrock
 	enc.OverrideOptimismRegolith = c.OverrideOptimismRegolith
 	enc.OverrideOptimism = c.OverrideOptimism
+	enc.ApplyMantleUpgrades = c.ApplyMantleUpgrades
 	enc.RollupSequencerHTTP = c.RollupSequencerHTTP
 	enc.RollupHistoricalRPC = c.RollupHistoricalRPC
 	enc.RollupHistoricalRPCTimeout = c.RollupHistoricalRPCTimeout
@@ -159,6 +161,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		OverrideOptimismBedrock      *big.Int
 		OverrideOptimismRegolith     *uint64 `toml:",omitempty"`
 		OverrideOptimism             *bool
+		ApplyMantleUpgrades          *bool `toml:",omitempty"`
 		RollupSequencerHTTP          *string
 		RollupHistoricalRPC          *string
 		RollupHistoricalRPCTimeout   *time.Duration
@@ -291,6 +294,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.OverrideOptimism != nil {
 		c.OverrideOptimism = dec.OverrideOptimism
+	}
+	if dec.ApplyMantleUpgrades != nil {
+		c.ApplyMantleUpgrades = *dec.ApplyMantleUpgrades
 	}
 	if dec.RollupSequencerHTTP != nil {
 		c.RollupSequencerHTTP = *dec.RollupSequencerHTTP

@@ -264,8 +264,13 @@ func ValidateTransactionWithState(tx *types.Transaction, head *types.Header, sig
 		return fmt.Errorf("%w: balance %v, tx cost %v, overshot %v", core.ErrInsufficientFunds, balance, cost, new(big.Int).Sub(cost, balance))
 	}
 
-	// Ensure the transaction has more gas than the bare minimum needed to cover
-	// the transaction metadata
+	// When feecap is smaller than basefee, submission is meaningless.
+	// Report an error quickly instead of getting stuck in txpool.
+	if tx.GasFeeCap().Cmp(head.BaseFee) < 0 {
+		return core.ErrFeeCapTooLow
+	}
+
+	// Ensure the transaction has more gas than the bare minimum needed to cover the transaction metadata
 	intrGas, err := core.IntrinsicGas(tx.Data(), tx.AccessList(), tx.SetCodeAuthorizations(), tx.To() == nil, true, rules.IsIstanbul, rules.IsShanghai)
 	if err != nil {
 		return err
@@ -273,6 +278,8 @@ func ValidateTransactionWithState(tx *types.Transaction, head *types.Header, sig
 	if tx.Gas() < intrGas*tokenRatio {
 		return fmt.Errorf("%w: gas %v, minimum needed %v", core.ErrIntrinsicGas, tx.Gas(), intrGas*tokenRatio)
 	}
+
+	gasRemaining := big.NewInt(int64(tx.Gas() - intrGas*tokenRatio))
 
 	// Ensure the transaction can cover floor data gas.
 	if opts.Config.IsPrague(head.Number, head.Time) {
@@ -283,36 +290,19 @@ func ValidateTransactionWithState(tx *types.Transaction, head *types.Header, sig
 		if tx.Gas() < floorDataGas*tokenRatio {
 			return fmt.Errorf("%w: gas %v, minimum needed %v", core.ErrFloorDataGas, tx.Gas(), floorDataGas*tokenRatio)
 		}
+
+		if floorDataGas > intrGas {
+			gasRemaining = big.NewInt(int64(tx.Gas() - floorDataGas*tokenRatio))
+		}
 	}
 
-	// validate tx fee
-	var (
-		gasRemaining = big.NewInt(int64(tx.Gas() - intrGas*tokenRatio))
-		baseFee      = head.BaseFee
-		l1Cost       = opts.L1CostFn(tx.RollupDataGas(), tx.IsDepositTx(), tx.To())
-	)
-
-	if tx.Type() == types.LegacyTxType {
-		if tx.GasPrice().Cmp(baseFee) < 0 {
-			return core.ErrGasPriceTooLow
-		}
-
-		txCost := new(big.Int).Mul(tx.GasPrice(), gasRemaining)
-		if l1Cost != nil && txCost.Cmp(l1Cost) <= 0 {
-			return core.ErrInsufficientGasForL1Cost
-		}
-	} else if tx.Type() == types.DynamicFeeTxType {
-		// When feecap is smaller than basefee, submission is meaningless.
-		// Report an error quickly instead of getting stuck in txpool.
-		if tx.GasFeeCap().Cmp(baseFee) < 0 { // Consistent with legacy tx verification
-			return fmt.Errorf("%w: address %v, maxFeePerGas: %s baseFee: %s", core.ErrFeeCapTooLow,
-				from.Hex(), tx.GasFeeCap(), baseFee)
-		}
-
-		effectiveGas := BigMin(new(big.Int).Add(tx.GasTipCap(), baseFee), tx.GasFeeCap())
-		txCost := new(big.Int).Mul(effectiveGas, gasRemaining)
-		if l1Cost != nil && txCost.Cmp(l1Cost) <= 0 {
-			return core.ErrInsufficientGasForL1Cost
+	// Using gas remaining to validate l1 cost
+	if opts.L1CostFn != nil {
+		if l1Cost := opts.L1CostFn(tx.RollupCostData(), tx.IsDepositTx(), tx.To()); l1Cost != nil {
+			txCost := new(big.Int).Mul(tx.GasPrice(), gasRemaining)
+			if txCost.Cmp(l1Cost) < 0 {
+				return core.ErrInsufficientGasForL1Cost
+			}
 		}
 	}
 
@@ -340,12 +330,4 @@ func ValidateTransactionWithState(tx *types.Transaction, head *types.Header, sig
 		}
 	}
 	return nil
-}
-
-// BigMin returns the smaller of x or y.
-func BigMin(x, y *big.Int) *big.Int {
-	if x.Cmp(y) > 0 {
-		return y
-	}
-	return x
 }

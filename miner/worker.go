@@ -542,7 +542,7 @@ func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *environment) 
 	}()
 
 	miner.confMu.RLock()
-	tip := miner.config.GasPrice
+	tip := big.NewInt(0) // accept txs with 0 tip fee
 	prio := miner.prio
 	miner.confMu.RUnlock()
 
