@@ -198,13 +198,13 @@ type Message struct {
 	// When SkipFromEOACheck is true, the message sender is not checked to be an EOA.
 	SkipFromEOACheck bool
 
-	IsSystemTx    bool                // IsSystemTx indicates the message, if also a deposit, does not emit gas usage.
-	IsDepositTx   bool                // IsDepositTx indicates the message is force-included and can persist a mint.
-	Mint          *big.Int            // Mint is the amount to mint before EVM processing, or nil if there is no minting.
-	ETHValue      *big.Int            // ETHValue is the amount to mint BVM_ETH before EVM processing, or nil if there is no minting.
-	ETHTxValue    *big.Int            // ETHTxValue is the amount to be transferred to msg.To before EVM processing, and the transfer will be reverted if EVM failed
-	MetaTxParams  *types.MetaTxParams // MetaTxParams contains necessary parameter to sponsor gas fee for msg.From.
-	RollupDataGas types.RollupGasData // RollupDataGas indicates the rollup cost of the message, 0 if not a rollup or no cost.
+	IsSystemTx     bool                 // IsSystemTx indicates the message, if also a deposit, does not emit gas usage.
+	IsDepositTx    bool                 // IsDepositTx indicates the message is force-included and can persist a mint.
+	Mint           *big.Int             // Mint is the amount to mint before EVM processing, or nil if there is no minting.
+	ETHValue       *big.Int             // ETHValue is the amount to mint BVM_ETH before EVM processing, or nil if there is no minting.
+	ETHTxValue     *big.Int             // ETHTxValue is the amount to be transferred to msg.To before EVM processing, and the transfer will be reverted if EVM failed
+	MetaTxParams   *types.MetaTxParams  // MetaTxParams contains necessary parameter to sponsor gas fee for msg.From.
+	RollupCostData types.RollupCostData // RollupCostData indicates the rollup cost of the message, 0 if not a rollup or no cost.
 
 	// runMode
 	RunMode RunMode
@@ -234,14 +234,15 @@ func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.In
 		SkipFromEOACheck:      false,
 		BlobHashes:            tx.BlobHashes(),
 		BlobGasFeeCap:         tx.BlobGasFeeCap(),
-		IsSystemTx:            tx.IsSystemTx(),
-		IsDepositTx:           tx.IsDepositTx(),
-		Mint:                  tx.Mint(),
-		RollupDataGas:         tx.RollupDataGas(),
-		ETHValue:              tx.ETHValue(),
-		ETHTxValue:            tx.ETHTxValue(),
-		MetaTxParams:          metaTxParams,
-		RunMode:               CommitMode,
+
+		IsSystemTx:     tx.IsSystemTx(),
+		IsDepositTx:    tx.IsDepositTx(),
+		Mint:           tx.Mint(),
+		RollupCostData: tx.RollupCostData(),
+		ETHValue:       tx.ETHValue(),
+		ETHTxValue:     tx.ETHTxValue(),
+		MetaTxParams:   metaTxParams,
+		RunMode:        CommitMode,
 	}
 	// If baseFee provided, set gasPrice to effectiveGasPrice.
 	if baseFee != nil {
@@ -319,8 +320,8 @@ func (st *stateTransition) to() common.Address {
 	return *st.msg.To
 }
 
-// CalculateRollupGasDataFromMessage calculate RollupGasData from message.
-func (st *stateTransition) CalculateRollupGasDataFromMessage() {
+// CalculateRollupCostDataFromMessage calculate RollupCostData from message.
+func (st *stateTransition) CalculateRollupCostDataFromMessage() {
 	tx := types.NewTx(&types.DynamicFeeTx{
 		Nonce:     st.msg.Nonce,
 		Value:     st.msg.Value,
@@ -330,15 +331,15 @@ func (st *stateTransition) CalculateRollupGasDataFromMessage() {
 		Data:      st.msg.Data,
 	})
 
-	st.msg.RollupDataGas = tx.RollupDataGas()
+	st.msg.RollupCostData = tx.RollupCostData()
 
 	// add a constant to cover sigs(V,R,S) and other data to make sure that the gasLimit from eth_estimateGas can cover L1 cost
 	// just used for estimateGas and the actual L1 cost depends on users' tx when executing
-	st.msg.RollupDataGas.Ones += 80
+	st.msg.RollupCostData.Ones += 80
 
 	// add a constant to cover meta tx sigs(V,R,S)
 	if st.msg.MetaTxParams != nil {
-		st.msg.RollupDataGas.Ones += 80
+		st.msg.RollupCostData.Ones += 80
 	}
 }
 
@@ -354,11 +355,11 @@ func (st *stateTransition) buyGas(metaTxV3 bool) (*big.Int, error) {
 
 	var l1Cost *big.Int
 	if st.msg.RunMode == GasEstimationMode || st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode {
-		st.CalculateRollupGasDataFromMessage()
+		st.CalculateRollupCostDataFromMessage()
 	}
 
 	if st.evm.Context.L1CostFunc != nil && st.msg.RunMode != EthcallMode {
-		l1Cost = st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupDataGas, st.msg.IsDepositTx, st.msg.To)
+		l1Cost = st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupCostData, st.msg.IsDepositTx, st.msg.To)
 	}
 
 	balanceCheck := new(big.Int).Set(mgval)

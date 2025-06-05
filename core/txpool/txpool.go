@@ -32,7 +32,7 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 )
 
-type L1CostFunc func(dataGas types.RollupGasData, isDepositTx bool, to *common.Address) *big.Int
+type L1CostFunc func(dataGas types.RollupCostData, isDepositTx bool, to *common.Address) *big.Int
 
 // TxStatus is the current status of a transaction as seen by the pool.
 type TxStatus uint

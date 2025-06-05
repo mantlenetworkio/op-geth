@@ -207,7 +207,7 @@ func MakeReceipt(msg *Message, evm *vm.EVM, result *ExecutionResult, statedb *st
 
 	// used to record calculating l1 fee for txs from Layer2
 	if !msg.IsDepositTx {
-		gas := tx.RollupDataGas().DataGas(evm.Context.Time, config)
+		gas := tx.RollupCostData().DataGas(evm.Context.Time, config)
 		receipt.L1GasUsed = new(big.Int).Add(new(big.Int).SetUint64(gas), overhead)
 		receipt.L1GasPrice = l1BaseFee
 		receipt.L1Fee = types.L1Cost(gas, l1BaseFee, overhead, scalar, tokenRatio)

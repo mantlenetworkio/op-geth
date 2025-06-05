@@ -292,6 +292,7 @@ func New(config Config, chain BlockChain) *LegacyPool {
 		initDoneCh:      make(chan struct{}),
 	}
 	pool.priced = newPricedList(pool.all)
+	pool.reset(nil, chain.CurrentBlock())
 
 	return pool
 }
@@ -606,7 +607,7 @@ func (pool *LegacyPool) validateTx(tx *types.Transaction) error {
 				if tx := list.txs.Get(nonce); tx != nil {
 					cost := tx.Cost()
 					if pool.l1CostFn != nil {
-						if l1Cost := pool.l1CostFn(tx.RollupDataGas(), tx.IsDepositTx(), tx.To()); l1Cost != nil { // add rollup cost
+						if l1Cost := pool.l1CostFn(tx.RollupCostData(), tx.IsDepositTx(), tx.To()); l1Cost != nil { // add rollup cost
 							cost = cost.Add(cost, l1Cost)
 						}
 					}
@@ -1448,8 +1449,8 @@ func (pool *LegacyPool) reset(oldHead, newHead *types.Header) {
 	pool.pendingNonces = newNoncer(statedb)
 
 	if costFn := types.NewL1CostFunc(pool.chainconfig, statedb); costFn != nil {
-		pool.l1CostFn = func(dataGas types.RollupGasData, isDepositTx bool, to *common.Address) *big.Int {
-			return costFn(newHead.Number.Uint64(), newHead.Time, dataGas, isDepositTx, to)
+		pool.l1CostFn = func(rollupCostData types.RollupCostData, isDepositTx bool, to *common.Address) *big.Int {
+			return costFn(newHead.Number.Uint64(), newHead.Time, rollupCostData, isDepositTx, to)
 		}
 	}
 

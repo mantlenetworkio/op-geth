@@ -8,12 +8,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRollupGasData(t *testing.T) {
+func TestRollupCostData(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		zeroes := rand.Uint64()
 		ones := rand.Uint64()
 
-		r := RollupGasData{
+		r := RollupCostData{
 			Zeroes: zeroes,
 			Ones:   ones,
 		}

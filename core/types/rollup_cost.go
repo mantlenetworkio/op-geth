@@ -23,11 +23,22 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 )
 
-type RollupGasData struct {
+type RollupCostData struct {
 	Zeroes, Ones uint64
 }
 
-func (r RollupGasData) DataGas(time uint64, cfg *params.ChainConfig) (gas uint64) {
+func NewRollupCostData(data []byte) (out RollupCostData) {
+	for _, b := range data {
+		if b == 0 {
+			out.Zeroes++
+		} else {
+			out.Ones++
+		}
+	}
+	return out
+}
+
+func (r RollupCostData) DataGas(time uint64, cfg *params.ChainConfig) (gas uint64) {
 	gas = r.Zeroes * params.TxDataZeroGas
 	if cfg.IsRegolith(time) {
 		gas += r.Ones * params.TxDataNonZeroGasEIP2028
@@ -43,7 +54,13 @@ type StateGetter interface {
 
 // L1CostFunc is used in the state transition to determine the cost of a rollup message.
 // Returns nil if there is no cost.
-type L1CostFunc func(blockNum uint64, blockTime uint64, dataGas RollupGasData, isDepositTx bool, to *common.Address) *big.Int
+type L1CostFunc func(blockNum uint64, blockTime uint64, dataGas RollupCostData, isDepositTx bool, to *common.Address) *big.Int
+
+// A RollupTransaction provides all the input data needed to compute the total rollup cost.
+type RollupTransaction interface {
+	RollupCostData() RollupCostData
+	Gas() uint64
+}
 
 var (
 	L1BaseFeeSlot  = common.BigToHash(big.NewInt(1))
@@ -62,8 +79,8 @@ var (
 func NewL1CostFunc(config *params.ChainConfig, statedb StateGetter) L1CostFunc {
 	cacheBlockNum := ^uint64(0)
 	var l1BaseFee, overhead, scalar, tokenRatio *big.Int
-	return func(blockNum uint64, blockTime uint64, dataGas RollupGasData, isDepositTx bool, to *common.Address) *big.Int {
-		rollupDataGas := dataGas.DataGas(blockTime, config) // Only fake txs for RPC view-calls are 0.
+	return func(blockNum uint64, blockTime uint64, rollupCostData RollupCostData, isDepositTx bool, to *common.Address) *big.Int {
+		rollupDataGas := rollupCostData.DataGas(blockTime, config) // Only fake txs for RPC view-calls are 0.
 		if config.Optimism == nil || isDepositTx || rollupDataGas == 0 {
 			return common.Big0
 		}
