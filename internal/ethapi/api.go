@@ -815,7 +815,7 @@ func applyMessage(ctx context.Context, b Backend, args TransactionArgs, state *s
 	if err := args.CallDefaults(gp.Gas(), blockContext.BaseFee, b.ChainConfig().ChainID); err != nil {
 		return nil, err
 	}
-	msg := args.ToMessage(header.BaseFee, skipChecks, skipChecks, runMode)
+	msg := args.ToMessage(header.BaseFee, skipChecks, skipChecks, runMode, args.GasPrice)
 	// Lower the basefee to 0 to avoid breaking EVM
 	// invariants (basefee < feecap).
 	if msg.GasPrice.Sign() == 0 {
@@ -960,14 +960,25 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 	if err := overrides.Apply(state, nil); err != nil {
 		return 0, err
 	}
+
+	// Normalize the gasPrice used for estimateGas
+	gasPriceForEstimate, err := b.SuggestGasTipCap(ctx)
+	if err != nil {
+		return 0, errors.New("failed to get suggest gas tip cap")
+	}
+	if header.BaseFee != nil {
+		gasPriceForEstimate.Add(gasPriceForEstimate, header.BaseFee)
+	}
+
 	// Construct the gas estimator option from the user input
 	opts := &gasestimator.Options{
-		Config:         b.ChainConfig(),
-		Chain:          NewChainContext(ctx, b),
-		Header:         header,
-		BlockOverrides: blockOverrides,
-		State:          state,
-		ErrorRatio:     estimateGasErrorRatio,
+		Config:                     b.ChainConfig(),
+		Chain:                      NewChainContext(ctx, b),
+		Header:                     header,
+		BlockOverrides:             blockOverrides,
+		State:                      state,
+		ErrorRatio:                 estimateGasErrorRatio,
+		DefaultGasPriceForEstimate: gasPriceForEstimate,
 	}
 	// Set any required transaction default, but make sure the gas cap itself is not messed with
 	// if it was not specified in the original argument list.
@@ -989,7 +1000,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 	if err := args.CallDefaults(gasCap, header.BaseFee, b.ChainConfig().ChainID); err != nil {
 		return 0, err
 	}
-	call := args.ToMessage(header.BaseFee, true, true, runMode)
+	call := args.ToMessage(header.BaseFee, true, true, runMode, (*hexutil.Big)(gasPriceForEstimate))
 
 	// Run the gas estimation and wrap any revertals into a custom return
 	estimate, revert, err := gasestimator.Estimate(ctx, call, opts, gasCap)
@@ -1445,7 +1456,7 @@ func AccessList(ctx context.Context, b Backend, blockNrOrHash rpc.BlockNumberOrH
 		statedb := db.Copy()
 		// Set the accesslist to the last al
 		args.AccessList = &accessList
-		msg := args.ToMessage(header.BaseFee, true, true, core.EthcallMode)
+		msg := args.ToMessage(header.BaseFee, true, true, core.EthcallMode, args.GasPrice)
 
 		// Apply the transaction with the access list tracer
 		tracer := logger.NewAccessListTracer(accessList, addressesToExclude)

@@ -825,7 +825,7 @@ func (api *API) standardTraceBlockToFile(ctx context.Context, block *types.Block
 	rules := chainConfig.Rules(block.Number(), false, block.Time())
 	for i, tx := range block.Transactions() {
 		// Prepare the transaction for un-traced execution
-		msg, _ := core.TransactionToMessage(tx, signer, block.BaseFee(),&rules)
+		msg, _ := core.TransactionToMessage(tx, signer, block.BaseFee(), &rules)
 		if txHash != (common.Hash{}) && tx.Hash() != txHash {
 			// Process the tx to update state, but don't trace it.
 			_, err := core.ApplyMessage(evm, msg, new(core.GasPool).AddGas(msg.GasLimit))
@@ -1028,7 +1028,7 @@ func (api *API) TraceCall(ctx context.Context, args ethapi.TransactionArgs, bloc
 		return nil, err
 	}
 	var (
-		msg         = args.ToMessage(vmctx.BaseFee, true, true, core.EthcallMode)
+		msg         = args.ToMessage(vmctx.BaseFee, true, true, core.EthcallMode, args.GasPrice)
 		tx          = args.ToTransaction(types.LegacyTxType)
 		traceConfig *TraceConfig
 	)

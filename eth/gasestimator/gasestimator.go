@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -45,6 +44,8 @@ type Options struct {
 	BlockOverrides *override.BlockOverrides // Block overrides to apply during the estimation
 
 	ErrorRatio float64 // Allowed overestimation ratio for faster estimation termination
+
+	DefaultGasPriceForEstimate *big.Int
 }
 
 // Estimate returns the lowest possible gas limit that allows the transaction to
@@ -68,7 +69,7 @@ func Estimate(ctx context.Context, call *core.Message, opts *Options, gasCap uin
 	} else if call.GasPrice != nil {
 		feeCap = call.GasPrice
 	} else {
-		feeCap = common.Big0
+		feeCap = opts.DefaultGasPriceForEstimate
 	}
 	// Recap the highest gas limit with account's available balance.
 	if feeCap.BitLen() != 0 {

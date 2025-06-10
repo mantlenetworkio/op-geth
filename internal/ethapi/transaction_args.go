@@ -414,7 +414,7 @@ func (args *TransactionArgs) CallDefaults(globalGasCap uint64, baseFee *big.Int,
 // core evm. This method is used in calls and traces that do not require a real
 // live transaction.
 // Assumes that fields are not nil, i.e. setDefaults or CallDefaults has been called.
-func (args *TransactionArgs) ToMessage(baseFee *big.Int, skipNonceCheck, skipEoACheck bool, runMode core.RunMode) *core.Message {
+func (args *TransactionArgs) ToMessage(baseFee *big.Int, skipNonceCheck, skipEoACheck bool, runMode core.RunMode, gasPriceForEstimate *hexutil.Big) *core.Message {
 	var (
 		gasPrice  *big.Int
 		gasFeeCap *big.Int
@@ -443,6 +443,18 @@ func (args *TransactionArgs) ToMessage(baseFee *big.Int, skipNonceCheck, skipEoA
 			}
 		}
 	}
+
+	// use suggested gasPrice for estimateGas to calculate gasUsed
+	if runMode == core.GasEstimationMode || runMode == core.GasEstimationWithSkipCheckBalanceMode {
+		// user don't set price, set all price to default min value
+		if gasPrice.BitLen() == 0 && gasFeeCap.BitLen() == 0 && gasTipCap.BitLen() == 0 {
+			gasPrice, gasFeeCap, gasTipCap = gasPriceForEstimate.ToInt(), gasPriceForEstimate.ToInt(), gasPriceForEstimate.ToInt()
+		} else if args.GasPrice == nil {
+			// eip1559 tx, use min value as gas price
+			gasPrice = gasPriceForEstimate.ToInt()
+		}
+	}
+
 	var accessList types.AccessList
 	if args.AccessList != nil {
 		accessList = *args.AccessList

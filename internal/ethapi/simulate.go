@@ -79,8 +79,8 @@ type simBlockResult struct {
 	Block       *types.Block
 	Calls       []simCallResult
 	// senders is a map of transaction hashes to their senders.
-	senders map[common.Hash]common.Address
-	Receipts    types.Receipts
+	senders  map[common.Hash]common.Address
+	Receipts types.Receipts
 }
 
 // preparedReceipts implements GetReceipts with already-set receipts.
@@ -297,7 +297,7 @@ func (sim *simulator) processBlock(ctx context.Context, block *simBlock, header,
 		tracer.reset(txHash, uint(i))
 		sim.state.SetTxContext(txHash, i)
 		// EoA check is always skipped, even in validation mode.
-		msg := call.ToMessage(header.BaseFee, !sim.validate, true, core.EthcallMode)
+		msg := call.ToMessage(header.BaseFee, !sim.validate, true, core.EthcallMode, call.GasPrice)
 		result, err := applyMessageWithEVM(ctx, evm, msg, timeout, sim.gp)
 		if err != nil {
 			txErr := txValidationError(err)
