@@ -77,11 +77,14 @@ type Receipt struct {
 	TransactionIndex uint        `json:"transactionIndex"`
 
 	// OVM legacy: extend receipts with their L1 price (if a rollup tx)
-	L1GasPrice *big.Int   `json:"l1GasPrice,omitempty"`
-	L1GasUsed  *big.Int   `json:"l1GasUsed,omitempty"`
-	L1Fee      *big.Int   `json:"l1Fee,omitempty"`
-	FeeScalar  *big.Float `json:"l1FeeScalar,omitempty"`
-	TokenRatio *big.Int   `json:"tokenRatio,omitempty"`
+	L1GasPrice          *big.Int   `json:"l1GasPrice,omitempty"`
+	L1GasUsed           *big.Int   `json:"l1GasUsed,omitempty"`
+	L1Fee               *big.Int   `json:"l1Fee,omitempty"`
+	FeeScalar           *big.Float `json:"l1FeeScalar,omitempty"`
+	TokenRatio          *big.Int   `json:"tokenRatio,omitempty"`
+	OperatorFeeConstant *uint64    `json:"operatorFeeConstant,omitempty"`
+	OperatorFeeScalar   *uint64    `json:"operatorFeeScalar,omitempty"`
+	OperatorFee         *uint64    `json:"operatorFee,omitempty"`
 }
 
 type receiptMarshaling struct {
@@ -97,11 +100,14 @@ type receiptMarshaling struct {
 	TransactionIndex  hexutil.Uint
 
 	// Optimism: extend receipts with their L1 price (if a rollup tx)
-	L1GasPrice *hexutil.Big
-	L1GasUsed  *hexutil.Big
-	L1Fee      *hexutil.Big
-	FeeScalar  *big.Float
-	TokenRatio *hexutil.Big
+	L1GasPrice          *hexutil.Big
+	L1GasUsed           *hexutil.Big
+	L1Fee               *hexutil.Big
+	FeeScalar           *big.Float
+	TokenRatio          *hexutil.Big
+	OperatorFeeConstant *hexutil.Uint64
+	OperatorFeeScalar   *hexutil.Uint64
+	OperatorFee         *hexutil.Uint64
 }
 
 // receiptRLP is the consensus encoding of a receipt.
@@ -132,11 +138,14 @@ type storedReceiptRLP struct {
 	DepositNonce *uint64 `rlp:"optional"`
 
 	// used to record calculating l1 fee for txs from Layer2
-	L1GasUsed  *big.Int `rlp:"optional"`
-	L1GasPrice *big.Int `rlp:"optional"`
-	L1Fee      *big.Int `rlp:"optional"`
-	FeeScalar  string   `rlp:"optional"`
-	TokenRatio *big.Int `rlp:"optional"`
+	L1GasUsed           *big.Int `rlp:"optional"`
+	L1GasPrice          *big.Int `rlp:"optional"`
+	L1Fee               *big.Int `rlp:"optional"`
+	FeeScalar           string   `rlp:"optional"`
+	TokenRatio          *big.Int `rlp:"optional"`
+	OperatorFeeConstant *uint64  `rlp:"optional"`
+	OperatorFeeScalar   *uint64  `rlp:"optional"`
+	OperatorFee         *uint64  `rlp:"optional"`
 }
 
 // LegacyOptimismStoredReceiptRLP is the pre bedrock storage encoding of a
@@ -394,15 +403,18 @@ func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 		feeScalar = r.FeeScalar.String()
 	}
 	enc := &storedReceiptRLP{
-		PostStateOrStatus: (*Receipt)(r).statusEncoding(),
-		CumulativeGasUsed: r.CumulativeGasUsed,
-		Logs:              make([]*LogForStorage, len(r.Logs)),
-		DepositNonce:      r.DepositNonce,
-		L1GasUsed:         r.L1GasUsed,
-		L1GasPrice:        r.L1GasPrice,
-		L1Fee:             r.L1Fee,
-		FeeScalar:         feeScalar,
-		TokenRatio:        r.TokenRatio,
+		PostStateOrStatus:   (*Receipt)(r).statusEncoding(),
+		CumulativeGasUsed:   r.CumulativeGasUsed,
+		Logs:                make([]*LogForStorage, len(r.Logs)),
+		DepositNonce:        r.DepositNonce,
+		L1GasUsed:           r.L1GasUsed,
+		L1GasPrice:          r.L1GasPrice,
+		L1Fee:               r.L1Fee,
+		FeeScalar:           feeScalar,
+		TokenRatio:          r.TokenRatio,
+		OperatorFeeScalar:   r.OperatorFeeScalar,
+		OperatorFeeConstant: r.OperatorFeeConstant,
+		OperatorFee:         r.OperatorFee,
 	}
 
 	for i, log := range r.Logs {
@@ -489,6 +501,9 @@ func decodeStoredReceiptRLP(r *ReceiptForStorage, blob []byte) error {
 	r.L1Fee = stored.L1Fee
 	r.FeeScalar = scalar
 	r.TokenRatio = stored.TokenRatio
+	r.OperatorFeeScalar = stored.OperatorFeeScalar
+	r.OperatorFeeConstant = stored.OperatorFeeConstant
+	r.OperatorFee = stored.OperatorFee
 	return nil
 }
 

@@ -57,6 +57,9 @@ type BlockContext struct {
 	GetHash GetHashFunc
 	// L1CostFunc returns the L1 cost of the rollup message, the function may be nil, or return nil
 	L1CostFunc types.L1CostFunc
+	// OperatorCostFunc returns the operator fee, currently pointing th the ZKP gas cost.
+	// the function may be nil, or return nil
+	OperatorCostFunc types.OperatorCostFunc
 
 	// Block information
 	Coinbase    common.Address // Provides information for COINBASE

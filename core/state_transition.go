@@ -354,12 +354,16 @@ func (st *stateTransition) buyGas(metaTxV3 bool) (*big.Int, error) {
 	mgval.Mul(mgval, st.msg.GasPrice)
 
 	var l1Cost *big.Int
+	var operatorCost *uint256.Int
 	if st.msg.RunMode == GasEstimationMode || st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode {
 		st.CalculateRollupCostDataFromMessage()
 	}
 
 	if st.evm.Context.L1CostFunc != nil && st.msg.RunMode != EthcallMode {
 		l1Cost = st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupCostData, st.msg.IsDepositTx, st.msg.To)
+	}
+	if st.evm.Context.OperatorCostFunc != nil && st.msg.RunMode != EthcallMode {
+		operatorCost = st.evm.Context.OperatorCostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.GasLimit, st.msg.IsDepositTx, st.msg.To)
 	}
 
 	balanceCheck := new(big.Int).Set(mgval)
@@ -450,7 +454,7 @@ func (st *stateTransition) buyGas(metaTxV3 bool) (*big.Int, error) {
 		}
 	}
 
-	return l1Cost, nil
+	return new(big.Int).Add(l1Cost, operatorCost.ToBig()), nil
 }
 
 func (st *stateTransition) applyMetaTransaction() error {
@@ -663,7 +667,7 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 
 	// Check clauses 1-3, buy gas if everything is correct
 	tokenRatio := st.state.GetState(types.GasOracleAddr, types.TokenRatioSlot).Big().Uint64()
-	l1Cost, err := st.preCheck(rules.IsMetaTxV3)
+	l1AndOperatorCost, err := st.preCheck(rules.IsMetaTxV3)
 	if err != nil {
 		return nil, err
 	}
@@ -710,15 +714,15 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 	}
 	st.gasRemaining -= gas
 
-	var l1Gas uint64
+	var l1AndOperatorGas uint64
 	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
-		if st.msg.GasPrice.Cmp(common.Big0) > 0 && l1Cost != nil {
-			l1Gas = new(big.Int).Div(l1Cost, st.msg.GasPrice).Uint64()
+		if st.msg.GasPrice.Cmp(common.Big0) > 0 && l1AndOperatorCost != nil {
+			l1AndOperatorGas = new(big.Int).Div(l1AndOperatorCost, st.msg.GasPrice).Uint64()
 		}
-		if st.gasRemaining < l1Gas {
-			return nil, fmt.Errorf("%w: have %d, want %d", ErrInsufficientGasForL1Cost, st.gasRemaining, l1Gas)
+		if st.gasRemaining < l1AndOperatorGas {
+			return nil, fmt.Errorf("%w: have %d, want %d", ErrInsufficientGasForL1Cost, st.gasRemaining, l1AndOperatorGas)
 		}
-		st.gasRemaining -= l1Gas
+		st.gasRemaining -= l1AndOperatorGas
 		if tokenRatio > 0 {
 			st.gasRemaining = st.gasRemaining / tokenRatio
 		}
@@ -875,6 +879,10 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 		//if cost := st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupDataGas, st.msg.IsDepositTx); cost != nil {
 		//	st.state.AddBalance(params.OptimismL1FeeRecipient, cost)
 		//}
+		//TODO
+		if rules.IsMantleOperatorFee {
+			st.refundIsMantleOperatorFeeCost()
+		}
 	}
 
 	return &ExecutionResult{
@@ -1163,4 +1171,16 @@ func (st *stateTransition) generateMetaTxSponsorEvent(sponsor, txSender common.A
 		// core/state doesn't know the current block number.
 		BlockNumber: st.evm.Context.BlockNumber.Uint64(),
 	})
+}
+
+func (st *stateTransition) refundIsMantleOperatorFeeCost() {
+
+	operatorCostGasLimit := st.evm.Context.OperatorCostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.GasLimit, st.msg.IsDepositTx, st.msg.To)
+	operatorCostGasUsed := st.evm.Context.OperatorCostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.gasUsed(), st.msg.IsDepositTx, st.msg.To)
+
+	if operatorCostGasUsed.Cmp(operatorCostGasLimit) > 0 { // Sanity check.
+		panic(fmt.Sprintf("operator cost gas used (%d) > operator cost gas limit (%d)", operatorCostGasUsed, operatorCostGasLimit))
+	}
+
+	st.state.AddBalance(st.msg.From, new(uint256.Int).Sub(operatorCostGasLimit, operatorCostGasUsed), tracing.BalanceIncreaseGasReturn)
 }

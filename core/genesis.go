@@ -321,6 +321,7 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 		cfg.ProxyOwnerUpgradeTime = mantleUpgradeChainConfig.ProxyOwnerUpgradeTime
 		cfg.MantleEverestTime = mantleUpgradeChainConfig.MantleEverestTime
 		cfg.MantleSkadiTime = mantleUpgradeChainConfig.MantleSkadiTime
+		cfg.MantleOperatorFeeTime = mantleUpgradeChainConfig.MantleOperatorFeeTime
 
 		// active standard EVM version (shanghai/cancun/prague)  in mantle skadi time
 		cfg.ShanghaiTime = mantleUpgradeChainConfig.MantleSkadiTime
