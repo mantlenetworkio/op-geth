@@ -136,6 +136,9 @@ func NewOperatorCostFunc(config *params.ChainConfig, statedb StateGetter) Operat
 		if config.Optimism == nil || isDepositTx {
 			return uint256.NewInt(0)
 		}
+		if !config.IsMantleOperatorFee(blockTime) {
+			return uint256.NewInt(0)
+		}
 		if blockNum != cacheBlockNum {
 			tokenRatio = statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
 			operatorFeeConstant = statedb.GetState(GasOracleAddr, OperatorFeeConstantSlot).Big()

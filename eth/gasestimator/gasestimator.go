@@ -206,7 +206,7 @@ func execute(ctx context.Context, call *core.Message, opts *Options, gasLimit ui
 	// other non-fixable conditions
 	result, err := run(ctx, call, opts)
 	if err != nil {
-		if errors.Is(err, core.ErrIntrinsicGas) || errors.Is(err, core.ErrInsufficientGasForL1Cost) {
+		if errors.Is(err, core.ErrIntrinsicGas) || errors.Is(err, core.ErrInsufficientGasForL1CostAndOperatorFee) {
 			return true, nil, nil // Special case, raise gas limit
 		}
 		return true, nil, err // Bail out

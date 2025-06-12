@@ -19,6 +19,7 @@ package txpool
 import (
 	"errors"
 	"fmt"
+	"github.com/holiman/uint256"
 	"math/big"
 	"sync"
 
@@ -33,6 +34,7 @@ import (
 )
 
 type L1CostFunc func(dataGas types.RollupCostData, isDepositTx bool, to *common.Address) *big.Int
+type OperatorCostFunc func(gasUsed uint64, isDepositTx bool, to *common.Address) *uint256.Int
 
 // TxStatus is the current status of a transaction as seen by the pool.
 type TxStatus uint

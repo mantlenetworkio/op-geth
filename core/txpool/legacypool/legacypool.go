@@ -268,7 +268,8 @@ type LegacyPool struct {
 
 	changesSinceReorg int // A counter for how many drops we've performed in-between reorg.
 
-	l1CostFn txpool.L1CostFunc // To apply L1 costs as rollup, optional field, may be nil.
+	l1CostFn       txpool.L1CostFunc       // To apply L1 costs as rollup, optional field, may be nil.
+	operatorCostFn txpool.OperatorCostFunc // To apply Operator fee, optional field, may be nil.
 
 	// Preconf variables
 	preconfReadyCh       chan struct{}
@@ -635,12 +636,18 @@ func (pool *LegacyPool) validateTx(tx *types.Transaction) error {
 							cost = cost.Add(cost, l1Cost)
 						}
 					}
+					if pool.operatorCostFn != nil {
+						if operatorCost := pool.operatorCostFn(tx.Gas(), tx.IsDepositTx(), tx.To()); operatorCost != nil {
+							cost = cost.Add(cost, operatorCost.ToBig())
+						}
+					}
 					return cost
 				}
 			}
 			return nil
 		},
-		L1CostFn: pool.l1CostFn,
+		L1CostFn:       pool.l1CostFn,
+		OperatorCostFn: pool.operatorCostFn,
 	}
 	if err := txpool.ValidateTransactionWithState(tx, pool.currentHead.Load(), pool.signer, opts); err != nil {
 		return err
@@ -1507,6 +1514,11 @@ func (pool *LegacyPool) reset(oldHead, newHead *types.Header) {
 	if costFn := types.NewL1CostFunc(pool.chainconfig, statedb); costFn != nil {
 		pool.l1CostFn = func(rollupCostData types.RollupCostData, isDepositTx bool, to *common.Address) *big.Int {
 			return costFn(newHead.Number.Uint64(), newHead.Time, rollupCostData, isDepositTx, to)
+		}
+	}
+	if operatorCostFn := types.NewOperatorCostFunc(pool.chainconfig, statedb); operatorCostFn != nil {
+		pool.operatorCostFn = func(gasUsed uint64, isDepositTx bool, to *common.Address) *uint256.Int {
+			return operatorCostFn(newHead.Number.Uint64(), newHead.Time, gasUsed, isDepositTx, to)
 		}
 	}
 

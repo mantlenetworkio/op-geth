@@ -720,7 +720,7 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 			l1AndOperatorGas = new(big.Int).Div(l1AndOperatorCost, st.msg.GasPrice).Uint64()
 		}
 		if st.gasRemaining < l1AndOperatorGas {
-			return nil, fmt.Errorf("%w: have %d, want %d", ErrInsufficientGasForL1Cost, st.gasRemaining, l1AndOperatorGas)
+			return nil, fmt.Errorf("%w: have %d, want %d", ErrInsufficientGasForL1CostAndOperatorFee, st.gasRemaining, l1AndOperatorGas)
 		}
 		st.gasRemaining -= l1AndOperatorGas
 		if tokenRatio > 0 {
