@@ -46,7 +46,7 @@ func EffectiveGasLimit(chainConfig *params.ChainConfig, gasLimit uint64, effecti
 	if effectiveLimit != 0 && effectiveLimit < gasLimit {
 		gasLimit = effectiveLimit
 	}
-	if chainConfig.Optimism != nil {
+	if chainConfig.IsOptimism() {
 		if l1InfoGasOverhead < gasLimit {
 			gasLimit -= l1InfoGasOverhead
 		} else {
@@ -124,7 +124,7 @@ func ValidateTransaction(tx *types.Transaction, head *types.Header, signer types
 		return ErrNegativeValue
 	}
 	// Ensure the transaction doesn't exceed the current block limit gas
-	if head.GasLimit < tx.Gas() {
+	if EffectiveGasLimit(opts.Config, head.GasLimit, opts.EffectiveGasCeil) < tx.Gas() {
 		return ErrGasLimit
 	}
 	// Sanity check for extremely large numbers (supported by RLP or RPC)
