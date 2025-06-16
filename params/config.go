@@ -431,7 +431,7 @@ type ChainConfig struct {
 	ProxyOwnerUpgradeTime *uint64 `json:"proxyOwnerUpgradeTime,omitempty"` // ProxyOwnerUpgradeTime switch time ( nil = no fork, 0 = already forked)
 	MantleEverestTime     *uint64 `json:"mantleEverestTime,omitempty"`     // MantleEverestTime switch time ( nil = no fork, 0 = already forked)
 	MantleSkadiTime       *uint64 `json:"mantleSkadiTime,omitempty"`       // MantleSkadiTime switch time ( nil = no fork, 0 = already forked)
-	MantleOperatorFeeTime *uint64 `json:"mantleOperatorFeeTime,omitempty"` // MantleOperatorFeeTime switch time ( nil = no fork, 0 = already forked)
+	MantleLimbTime        *uint64 `json:"mantleLimbTime,omitempty"`        // MantleLimbTime switch time ( nil = no fork, 0 = already forked)
 
 	// TerminalTotalDifficulty is the amount of total difficulty reached by
 	// the network that triggers the consensus upgrade.
@@ -771,9 +771,9 @@ func (c *ChainConfig) IsMantleSkadi(time uint64) bool {
 	return isTimestampForked(c.MantleSkadiTime, time)
 }
 
-// IsMantleOperatorFee returns whether time is either equal to the Mantle Operator fee fork time or greater.
-func (c *ChainConfig) IsMantleOperatorFee(time uint64) bool {
-	return isTimestampForked(c.MantleOperatorFeeTime, time)
+// IsMantleLimb returns whether time is either equal to the Mantle Operator fee fork time or greater.
+func (c *ChainConfig) IsMantleLimb(time uint64) bool {
+	return isTimestampForked(c.MantleLimbTime, time)
 }
 
 func (c *ChainConfig) IsOptimismWithSkadi(time uint64) bool {
@@ -1208,7 +1208,7 @@ type Rules struct {
 	IsMantleBaseFee, IsMantleBVMETHMintUpgrade              bool
 	IsMetaTxV2, IsMetaTxV3                                  bool
 	IsMantleEverest, IsMantleSkadi                          bool
-	IsMantleOperatorFee                                     bool
+	IsMantleLimb                                            bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -1248,6 +1248,6 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		IsMetaTxV3:                c.IsMetaTxV3(timestamp),
 		IsMantleEverest:           c.IsMantleEverest(timestamp),
 		IsMantleSkadi:             c.IsMantleSkadi(timestamp),
-		IsMantleOperatorFee:       c.IsMantleOperatorFee(timestamp),
+		IsMantleLimb:              c.IsMantleLimb(timestamp),
 	}
 }

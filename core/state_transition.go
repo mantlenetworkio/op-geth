@@ -362,8 +362,14 @@ func (st *stateTransition) buyGas(metaTxV3 bool) (*big.Int, error) {
 	if st.evm.Context.L1CostFunc != nil && st.msg.RunMode != EthcallMode {
 		l1Cost = st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupCostData, st.msg.IsDepositTx, st.msg.To)
 	}
-	if st.evm.Context.OperatorCostFunc != nil && st.msg.RunMode != EthcallMode {
-		operatorCost = st.evm.Context.OperatorCostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.GasLimit, st.msg.IsDepositTx, st.msg.To)
+
+	if st.evm.ChainConfig().IsMantleLimb(st.evm.Context.Time) {
+		if st.evm.Context.OperatorCostFunc != nil && st.msg.RunMode != EthcallMode {
+			operatorCost = st.evm.Context.OperatorCostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.GasLimit, st.msg.IsDepositTx, st.msg.To)
+			if l1Cost != nil && operatorCost != nil {
+				l1Cost.Add(l1Cost, operatorCost.ToBig())
+			}
+		}
 	}
 
 	balanceCheck := new(big.Int).Set(mgval)
@@ -454,7 +460,8 @@ func (st *stateTransition) buyGas(metaTxV3 bool) (*big.Int, error) {
 		}
 	}
 
-	return new(big.Int).Add(l1Cost, operatorCost.ToBig()), nil
+	// if mantle limb upgraded. l1Cost = l1Cost fee + operator fee
+	return l1Cost, nil
 }
 
 func (st *stateTransition) applyMetaTransaction() error {
@@ -879,10 +886,6 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 		//if cost := st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupDataGas, st.msg.IsDepositTx); cost != nil {
 		//	st.state.AddBalance(params.OptimismL1FeeRecipient, cost)
 		//}
-		//TODO
-		if rules.IsMantleOperatorFee {
-			st.refundIsMantleOperatorFeeCost()
-		}
 	}
 
 	return &ExecutionResult{
@@ -1171,16 +1174,4 @@ func (st *stateTransition) generateMetaTxSponsorEvent(sponsor, txSender common.A
 		// core/state doesn't know the current block number.
 		BlockNumber: st.evm.Context.BlockNumber.Uint64(),
 	})
-}
-
-func (st *stateTransition) refundIsMantleOperatorFeeCost() {
-
-	operatorCostGasLimit := st.evm.Context.OperatorCostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.GasLimit, st.msg.IsDepositTx, st.msg.To)
-	operatorCostGasUsed := st.evm.Context.OperatorCostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.gasUsed(), st.msg.IsDepositTx, st.msg.To)
-
-	if operatorCostGasUsed.Cmp(operatorCostGasLimit) > 0 { // Sanity check.
-		panic(fmt.Sprintf("operator cost gas used (%d) > operator cost gas limit (%d)", operatorCostGasUsed, operatorCostGasLimit))
-	}
-
-	st.state.AddBalance(st.msg.From, new(uint256.Int).Sub(operatorCostGasLimit, operatorCostGasUsed), tracing.BalanceIncreaseGasReturn)
 }

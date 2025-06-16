@@ -67,7 +67,7 @@ func NewEVMBlockContext(header *types.Header, chain ChainContext, author *common
 	if header.Difficulty.Sign() == 0 {
 		random = &header.MixDigest
 	}
-	if config.IsMantleOperatorFee(header.Time) {
+	if config.IsMantleLimb(header.Time) {
 		operatorCostFunc = types.NewOperatorCostFunc(config, statedb)
 	}
 	return vm.BlockContext{

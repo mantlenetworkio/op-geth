@@ -91,7 +91,7 @@ func NewL1CostFunc(config *params.ChainConfig, statedb StateGetter) L1CostFunc {
 			overhead = statedb.GetState(L1BlockAddr, OverheadSlot).Big()
 			scalar = statedb.GetState(L1BlockAddr, ScalarSlot).Big()
 			tokenRatio = statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
-			if config.IsMantleOperatorFee(blockTime) {
+			if config.IsMantleLimb(blockTime) {
 				averageL1GasCost = statedb.GetState(GasOracleAddr, AverageL1GasCostSlot).Big()
 			}
 			cacheBlockNum = blockNum
@@ -101,7 +101,7 @@ func NewL1CostFunc(config *params.ChainConfig, statedb StateGetter) L1CostFunc {
 		if to != nil && *to == GasOracleAddr {
 			cacheBlockNum = ^uint64(0)
 		}
-		if config.IsMantleOperatorFee(blockTime) {
+		if config.IsMantleLimb(blockTime) {
 			return L1CostMantleOperatorFee(rollupDataGas, l1BaseFee, tokenRatio, averageL1GasCost)
 		}
 
@@ -136,7 +136,7 @@ func NewOperatorCostFunc(config *params.ChainConfig, statedb StateGetter) Operat
 		if config.Optimism == nil || isDepositTx {
 			return uint256.NewInt(0)
 		}
-		if !config.IsMantleOperatorFee(blockTime) {
+		if !config.IsMantleLimb(blockTime) {
 			return uint256.NewInt(0)
 		}
 		if blockNum != cacheBlockNum {

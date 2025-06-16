@@ -216,7 +216,7 @@ func MakeReceipt(msg *Message, evm *vm.EVM, result *ExecutionResult, statedb *st
 		receipt.FeeScalar = scaled
 		receipt.TokenRatio = tokenRatio
 
-		if config.IsMantleOperatorFee(evm.Context.Time) {
+		if config.IsMantleLimb(evm.Context.Time) {
 			receipt.L1GasUsed = averageL1GasCost
 			receipt.L1Fee = types.L1CostMantleOperatorFee(gas, l1BaseFee, tokenRatio, averageL1GasCost)
 			if operatorFeeConstant != nil {
