@@ -582,8 +582,8 @@ func parseDumpConfig(ctx *cli.Context, db ethdb.Database) (*state.DumpConfig, co
 		if err != nil {
 			return nil, common.Hash{}, fmt.Errorf("failed to load preimages from genesis file: %v", err)
 		}
-		log.Info("Loaded preimages from genesis file", "count", len(preimages))
 		preimages = genesisPreimages
+		log.Info("Loaded preimages from genesis file", "count", len(preimages))
 	}
 
 	conf := &state.DumpConfig{
@@ -612,7 +612,6 @@ func dump(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-
 	triedb := utils.MakeTrieDatabase(ctx, db, true, true, false) // always enable preimage lookup
 	defer triedb.Close()
 

@@ -186,15 +186,11 @@ func (s *StateDB) DumpToCollector(c DumpCollector, conf *DumpConfig) (nextKey []
 					log.Error("Failed to decode the value returned by iterator", "error", err)
 					continue
 				}
-				var key []byte
+				key := s.trie.GetKey(storageIt.Key)
 				if conf.Preimages != nil {
 					if preimage, ok := conf.Preimages[hexutil.Encode(storageIt.Key)]; ok {
 						key = preimage
-					} else {
-						key = s.trie.GetKey(storageIt.Key)
 					}
-				} else {
-					key = s.trie.GetKey(storageIt.Key)
 				}
 				account.Storage[common.BytesToHash(key)] = common.Bytes2Hex(content)
 			}
