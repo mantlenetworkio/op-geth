@@ -184,6 +184,7 @@ It's deprecated, please use "geth db import" instead.
 			utils.IncludeIncompletesFlag,
 			utils.StartKeyFlag,
 			utils.DumpLimitFlag,
+			utils.DumpGenesisFlag,
 		}, utils.DatabaseFlags),
 		Description: `
 This command dumps out the state for a given block (or latest, if none provided).
@@ -573,16 +574,30 @@ func parseDumpConfig(ctx *cli.Context, db ethdb.Database) (*state.DumpConfig, co
 	default:
 		return nil, common.Hash{}, fmt.Errorf("invalid start argument: %x. 20 or 32 hex-encoded bytes required", startArg)
 	}
+
+	// preimages
+	preimages := make(map[string][]byte)
+	if path := ctx.String(utils.DumpGenesisFlag.Name); path != "" {
+		genesisPreimages, err := getGenesisPreimages(path)
+		if err != nil {
+			return nil, common.Hash{}, fmt.Errorf("failed to load preimages from genesis file: %v", err)
+		}
+		log.Info("Loaded preimages from genesis file", "count", len(preimages))
+		preimages = genesisPreimages
+	}
+
 	conf := &state.DumpConfig{
 		SkipCode:          ctx.Bool(utils.ExcludeCodeFlag.Name),
 		SkipStorage:       ctx.Bool(utils.ExcludeStorageFlag.Name),
 		OnlyWithAddresses: !ctx.Bool(utils.IncludeIncompletesFlag.Name),
 		Start:             start.Bytes(),
 		Max:               ctx.Uint64(utils.DumpLimitFlag.Name),
+		Preimages:         preimages,
 	}
 	log.Info("State dump configured", "block", header.Number, "hash", header.Hash().Hex(),
 		"skipcode", conf.SkipCode, "skipstorage", conf.SkipStorage,
-		"start", hexutil.Encode(conf.Start), "limit", conf.Max)
+		"start", hexutil.Encode(conf.Start), "limit", conf.Max,
+		"genesis", ctx.String(utils.DumpGenesisFlag.Name))
 	return conf, header.Root, nil
 }
 
@@ -597,6 +612,7 @@ func dump(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+
 	triedb := utils.MakeTrieDatabase(ctx, db, true, true, false) // always enable preimage lookup
 	defer triedb.Close()
 
@@ -664,4 +680,24 @@ func pruneHistory(ctx *cli.Context) error {
 	// TODO(s1na): what if there is a crash between the two prune operations?
 
 	return nil
+}
+
+func getGenesisPreimages(filename string) (map[string][]byte, error) {
+	chainConfig, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("read file error: %v", err)
+	}
+	var gen core.Genesis
+	if err := json.Unmarshal(chainConfig, &gen); err != nil {
+		return nil, fmt.Errorf("unmarshal genesis error: %v", err)
+	}
+
+	preimages := make(map[string][]byte)
+	for addr, account := range gen.Alloc {
+		preimages[crypto.Keccak256Hash(addr.Bytes()).Hex()] = addr.Bytes()
+		for key := range account.Storage {
+			preimages[crypto.Keccak256Hash(key.Bytes()).Hex()] = key.Bytes()
+		}
+	}
+	return preimages, nil
 }

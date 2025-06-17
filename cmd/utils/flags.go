@@ -216,6 +216,11 @@ var (
 		Usage: "Max number of elements (0 = no limit)",
 		Value: 0,
 	}
+	DumpGenesisFlag = &cli.StringFlag{
+		Name:  "genesis",
+		Usage: "Path to the genesis file for preimage lookup",
+		Value: "",
+	}
 
 	SnapshotFlag = &cli.BoolFlag{
 		Name:     "snapshot",

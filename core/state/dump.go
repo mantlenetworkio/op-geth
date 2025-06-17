@@ -37,6 +37,7 @@ type DumpConfig struct {
 	OnlyWithAddresses bool
 	Start             []byte
 	Max               uint64
+	Preimages         map[string][]byte // Path to the genesis file for preimage lookup
 }
 
 // DumpCollector interface which the state trie calls during iteration
@@ -149,6 +150,9 @@ func (s *StateDB) DumpToCollector(c DumpCollector, conf *DumpConfig) (nextKey []
 			addr      common.Address
 			addrBytes = s.trie.GetKey(it.Key)
 		)
+		if addrBytes == nil && conf.Preimages != nil {
+			addrBytes = conf.Preimages[hexutil.Encode(it.Key)]
+		}
 		if addrBytes == nil {
 			missingPreimages++
 			if conf.OnlyWithAddresses {
@@ -182,7 +186,17 @@ func (s *StateDB) DumpToCollector(c DumpCollector, conf *DumpConfig) (nextKey []
 					log.Error("Failed to decode the value returned by iterator", "error", err)
 					continue
 				}
-				account.Storage[common.BytesToHash(s.trie.GetKey(storageIt.Key))] = common.Bytes2Hex(content)
+				var key []byte
+				if conf.Preimages != nil {
+					if preimage, ok := conf.Preimages[hexutil.Encode(storageIt.Key)]; ok {
+						key = preimage
+					} else {
+						key = s.trie.GetKey(storageIt.Key)
+					}
+				} else {
+					key = s.trie.GetKey(storageIt.Key)
+				}
+				account.Storage[common.BytesToHash(key)] = common.Bytes2Hex(content)
 			}
 		}
 		c.OnAccount(address, account)
