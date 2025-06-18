@@ -184,7 +184,6 @@ func (s *StateDB) DumpToCollector(c DumpCollector, conf *DumpConfig) (nextKey []
 				}
 				key := s.trie.GetKey(storageIt.Key)
 				if key == nil {
-					missingPreimages++
 					continue
 				}
 				account.Storage[common.BytesToHash(key)] = common.Bytes2Hex(content)
