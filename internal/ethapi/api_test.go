@@ -706,6 +706,12 @@ func (b testBackend) SubscribeChainHeadEvent(ch chan<- core.ChainHeadEvent) even
 func (b testBackend) SendTx(ctx context.Context, signedTx *types.Transaction) error {
 	panic("implement me")
 }
+func (b testBackend) SendTxWithPreconf(ctx context.Context, signedTx *types.Transaction) (*core.NewPreconfTxEvent, error) {
+	panic("implement me")
+}
+func (b testBackend) SubscribeNewPreconfTxEvent(ch chan<- core.NewPreconfTxEvent) event.Subscription {
+	panic("implement me")
+}
 func (b testBackend) GetTransaction(txHash common.Hash) (bool, *types.Transaction, common.Hash, uint64, uint64) {
 	tx, blockHash, blockNumber, index := rawdb.ReadTransaction(b.db, txHash)
 	return true, tx, blockHash, blockNumber, index
