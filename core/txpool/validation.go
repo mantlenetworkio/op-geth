@@ -87,6 +87,10 @@ func ValidateTransaction(tx *types.Transaction, head *types.Header, signer types
 		return core.ErrTxTypeNotSupported
 	}
 
+	if opts.Config.IsOptimism() && tx.Type() == types.BlobTxType {
+		return core.ErrTxTypeNotSupported
+	}
+
 	if err := types.MetaTxCheck(tx.Data()); err != nil {
 		return err
 	}

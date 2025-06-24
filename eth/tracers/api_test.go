@@ -23,9 +23,9 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"os"
 	"net"
 	"net/http"
+	"os"
 	"reflect"
 	"slices"
 	"sync/atomic"
@@ -666,7 +666,7 @@ func TestTraceTransactionHistorical(t *testing.T) {
 		logger.ExecutionResult{
 			Gas:         params.TxGas,
 			Failed:      false,
-			ReturnValue: "",
+			ReturnValue: []byte{},
 			StructLogs:  []json.RawMessage{},
 		},
 		nil)
@@ -683,7 +683,7 @@ func TestTraceTransactionHistorical(t *testing.T) {
 	if !reflect.DeepEqual(have, &logger.ExecutionResult{
 		Gas:         params.TxGas,
 		Failed:      false,
-		ReturnValue: "",
+		ReturnValue: []byte{},
 		StructLogs:  []json.RawMessage{},
 	}) {
 		t.Error("Transaction tracing result is different")
