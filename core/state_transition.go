@@ -871,7 +871,7 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 		if overflow {
 			return nil, fmt.Errorf("base fee value exceeds uint256: %d", feeU256)
 		}
-		st.state.AddBalance(params.OptimismBaseFeeRecipient, feeU256, tracing.BalanceMint)
+		st.state.AddBalance(params.OptimismBaseFeeRecipient, feeU256, tracing.BalanceIncreaseRewardTransactionFee)
 		//if cost := st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupDataGas, st.msg.IsDepositTx); cost != nil {
 		//	st.state.AddBalance(params.OptimismL1FeeRecipient, cost)
 		//}
