@@ -67,7 +67,6 @@ var (
 
 	OperatorFeeConstantSlot = common.BigToHash(big.NewInt(3))
 	OperatorFeeScalarSlot   = common.BigToHash(big.NewInt(4))
-	AverageL1GasCostSlot    = common.BigToHash(big.NewInt(5))
 
 	L1BlockAddr   = common.HexToAddress("0x4200000000000000000000000000000000000015")
 	GasOracleAddr = common.HexToAddress("0x420000000000000000000000000000000000000F")
@@ -80,7 +79,7 @@ var (
 // It returns nil if there is no applicable cost function.
 func NewL1CostFunc(config *params.ChainConfig, statedb StateGetter) L1CostFunc {
 	cacheBlockNum := ^uint64(0)
-	var l1BaseFee, overhead, scalar, tokenRatio, averageL1GasCost *big.Int
+	var l1BaseFee, overhead, scalar, tokenRatio *big.Int
 	return func(blockNum uint64, blockTime uint64, rollupCostData RollupCostData, isDepositTx bool, to *common.Address) *big.Int {
 		rollupDataGas := rollupCostData.DataGas(blockTime, config) // Only fake txs for RPC view-calls are 0.
 		if config.Optimism == nil || isDepositTx || rollupDataGas == 0 {
@@ -91,18 +90,12 @@ func NewL1CostFunc(config *params.ChainConfig, statedb StateGetter) L1CostFunc {
 			overhead = statedb.GetState(L1BlockAddr, OverheadSlot).Big()
 			scalar = statedb.GetState(L1BlockAddr, ScalarSlot).Big()
 			tokenRatio = statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
-			if config.IsMantleLimb(blockTime) {
-				averageL1GasCost = statedb.GetState(GasOracleAddr, AverageL1GasCostSlot).Big()
-			}
 			cacheBlockNum = blockNum
 		}
 
 		// update the tokenRatio, so set the cacheBlockNum as default value and query the latest tokenRatio next time
 		if to != nil && *to == GasOracleAddr {
 			cacheBlockNum = ^uint64(0)
-		}
-		if config.IsMantleLimb(blockTime) {
-			return L1CostMantleOperatorFee(rollupDataGas, l1BaseFee, tokenRatio, averageL1GasCost)
 		}
 
 		return L1Cost(rollupDataGas, l1BaseFee, overhead, scalar, tokenRatio)
@@ -114,15 +107,6 @@ func L1Cost(rollupDataGas uint64, l1BaseFee, overhead, scalar, tokenRatio *big.I
 	l1GasUsed = l1GasUsed.Add(l1GasUsed, overhead)
 	l1Cost := l1GasUsed.Mul(l1GasUsed, l1BaseFee)
 	l1Cost = l1Cost.Mul(l1Cost, scalar)
-	l1Cost = l1Cost.Mul(l1Cost, tokenRatio)
-	return l1Cost.Div(l1Cost, Decimals)
-}
-
-func L1CostMantleOperatorFee(rollupDataGas uint64, l1BaseFee, tokenRatio, averageL1GasCost *big.Int) *big.Int {
-	daGasUsed := new(big.Int).SetUint64(rollupDataGas)
-	daGasCost := new(big.Int).Mul(daGasUsed, EigenDaPrice)
-	l1GasCost := new(big.Int).Mul(averageL1GasCost, l1BaseFee)
-	l1Cost := new(big.Int).Add(l1GasCost, daGasCost)
 	l1Cost = l1Cost.Mul(l1Cost, tokenRatio)
 	return l1Cost.Div(l1Cost, Decimals)
 }
@@ -155,8 +139,8 @@ func NewOperatorCostFunc(config *params.ChainConfig, statedb StateGetter) Operat
 func OperatorCost(gasUsed uint64, tokenRation, operatorFeeConstant, operatorFeeScalar *big.Int) *uint256.Int {
 	operatorGasUsed := new(big.Int).SetUint64(gasUsed)
 	operatorCost := operatorGasUsed.Mul(operatorGasUsed, operatorFeeScalar)
-	operatorCost = operatorCost.Div(operatorCost, tokenRation)
 	operatorCost = operatorCost.Add(operatorCost, operatorFeeConstant)
+	operatorCost = operatorCost.Mul(operatorCost, tokenRation)
 	operatorCost.Div(operatorCost, Decimals)
 	operatorFeeU256, overflow := uint256.FromBig(operatorCost)
 	if overflow {
@@ -170,13 +154,13 @@ func OperatorCost(gasUsed uint64, tokenRation, operatorFeeConstant, operatorFeeS
 // on the receipt
 func DeriveL1GasInfo(state StateGetter) (*big.Int, *big.Int, *big.Int, *big.Float, *big.Int) {
 	l1BaseFee, overhead, scalar, scaled := readL1BlockStorageSlots(L1BlockAddr, state)
-	tokenRatio, _, _, _ := readGPOStorageSlots(GasOracleAddr, state)
+	tokenRatio, _, _ := readGPOStorageSlots(GasOracleAddr, state)
 	return l1BaseFee, overhead, scalar, scaled, tokenRatio
 }
 
-func DeriveGOInfo(state StateGetter) (*big.Int, *big.Int, *big.Int, *big.Int) {
-	tokenRatio, operatorFeeConstant, operatorFeeScalar, averageL1GasCost := readGPOStorageSlots(GasOracleAddr, state)
-	return tokenRatio, operatorFeeConstant, operatorFeeScalar, averageL1GasCost
+func DeriveGOInfo(state StateGetter) (*big.Int, *big.Int, *big.Int) {
+	tokenRatio, operatorFeeConstant, operatorFeeScalar := readGPOStorageSlots(GasOracleAddr, state)
+	return tokenRatio, operatorFeeConstant, operatorFeeScalar
 }
 
 func readL1BlockStorageSlots(addr common.Address, state StateGetter) (*big.Int, *big.Int, *big.Int, *big.Float) {
@@ -187,12 +171,11 @@ func readL1BlockStorageSlots(addr common.Address, state StateGetter) (*big.Int, 
 	return l1BaseFee.Big(), overhead.Big(), scalar.Big(), scaled
 }
 
-func readGPOStorageSlots(addr common.Address, state StateGetter) (*big.Int, *big.Int, *big.Int, *big.Int) {
+func readGPOStorageSlots(addr common.Address, state StateGetter) (*big.Int, *big.Int, *big.Int) {
 	tokenRatio := state.GetState(addr, TokenRatioSlot)
 	operatorFeeConstant := state.GetState(addr, OperatorFeeConstantSlot)
 	operatorFeeScalar := state.GetState(addr, OperatorFeeScalarSlot)
-	averageL1GasCost := state.GetState(addr, AverageL1GasCostSlot)
-	return tokenRatio.Big(), operatorFeeConstant.Big(), operatorFeeScalar.Big(), averageL1GasCost.Big()
+	return tokenRatio.Big(), operatorFeeConstant.Big(), operatorFeeScalar.Big()
 }
 
 // scaleDecimals will scale a value by decimals

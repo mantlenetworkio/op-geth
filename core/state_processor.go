@@ -205,7 +205,7 @@ func MakeReceipt(msg *Message, evm *vm.EVM, result *ExecutionResult, statedb *st
 	// used to record l1 fee
 	l1BaseFee, overhead, scalar, scaled, tokenRatio := types.DeriveL1GasInfo(statedb)
 
-	_, operatorFeeConstant, operatorFeeScalar, averageL1GasCost := types.DeriveGOInfo(statedb)
+	_, operatorFeeConstant, operatorFeeScalar := types.DeriveGOInfo(statedb)
 
 	// used to record calculating l1 fee for txs from Layer2
 	if !msg.IsDepositTx {
@@ -217,8 +217,6 @@ func MakeReceipt(msg *Message, evm *vm.EVM, result *ExecutionResult, statedb *st
 		receipt.TokenRatio = tokenRatio
 
 		if config.IsMantleLimb(evm.Context.Time) {
-			receipt.L1GasUsed = averageL1GasCost
-			receipt.L1Fee = types.L1CostMantleOperatorFee(gas, l1BaseFee, tokenRatio, averageL1GasCost)
 			if operatorFeeConstant != nil {
 				// The value of operatorFeeConstant will not exceed the uint64 limit.
 				operatorFeeConstantU64 := operatorFeeConstant.Uint64()
@@ -228,7 +226,7 @@ func MakeReceipt(msg *Message, evm *vm.EVM, result *ExecutionResult, statedb *st
 				operatorFeeScalarU64 := operatorFeeScalar.Uint64()
 				receipt.OperatorFeeScalar = &operatorFeeScalarU64
 			}
-			operatorCost := types.OperatorCost(tx.Gas(), tokenRatio, operatorFeeConstant, operatorFeeScalar)
+			operatorCost := types.OperatorCost(result.UsedGas, tokenRatio, operatorFeeConstant, operatorFeeScalar)
 			if operatorCost != nil {
 				operatorCostU64 := operatorCost.Uint64()
 				receipt.OperatorFee = &operatorCostU64
