@@ -85,6 +85,7 @@ type Receipt struct {
 	OperatorFeeConstant *uint64    `json:"operatorFeeConstant,omitempty"`
 	OperatorFeeScalar   *uint64    `json:"operatorFeeScalar,omitempty"`
 	OperatorFee         *uint64    `json:"operatorFee,omitempty"`
+	L2GasUsed           *uint64    `json:"l2GasUsed,omitempty"`
 }
 
 type receiptMarshaling struct {
@@ -108,6 +109,7 @@ type receiptMarshaling struct {
 	OperatorFeeConstant *hexutil.Uint64
 	OperatorFeeScalar   *hexutil.Uint64
 	OperatorFee         *hexutil.Uint64
+	L2GasUsed           *hexutil.Uint64
 }
 
 // receiptRLP is the consensus encoding of a receipt.
@@ -146,6 +148,7 @@ type storedReceiptRLP struct {
 	OperatorFeeConstant *uint64  `rlp:"optional"`
 	OperatorFeeScalar   *uint64  `rlp:"optional"`
 	OperatorFee         *uint64  `rlp:"optional"`
+	L2GasUsed           *uint64  `rlp:"optional"`
 }
 
 // LegacyOptimismStoredReceiptRLP is the pre bedrock storage encoding of a
@@ -415,6 +418,7 @@ func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 		OperatorFeeScalar:   r.OperatorFeeScalar,
 		OperatorFeeConstant: r.OperatorFeeConstant,
 		OperatorFee:         r.OperatorFee,
+		L2GasUsed:           r.L2GasUsed,
 	}
 
 	for i, log := range r.Logs {
@@ -504,6 +508,7 @@ func decodeStoredReceiptRLP(r *ReceiptForStorage, blob []byte) error {
 	r.OperatorFeeScalar = stored.OperatorFeeScalar
 	r.OperatorFeeConstant = stored.OperatorFeeConstant
 	r.OperatorFee = stored.OperatorFee
+	r.L2GasUsed = stored.L2GasUsed
 	return nil
 }
 

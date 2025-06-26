@@ -60,6 +60,7 @@ var (
 type ExecutionResult struct {
 	UsedGas    uint64 // Total used gas, not including the refunded gas
 	MaxUsedGas uint64 // Maximum gas consumed during execution, excluding gas refunds.
+	L2UseGas   uint64 // L2 evm used gas
 	Err        error  // Any error encountered during the execution(listed in core/vm/errors.go)
 	ReturnData []byte // Returned data from evm(function result or data supplied with revert opcode)
 }
@@ -864,6 +865,7 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
 		st.returnGas(rules.IsMetaTxV3)
 	}
+	log.Info("------gas", "gasuse", st.gasUsed())
 
 	// Note for deposit tx there is no ETH refunded for unused gas, but that's taken care of by the fact that gasPrice
 	// is always 0 for deposit tx. So calling refundGas will ensure the gasUsed accounting is correct without actually
@@ -918,6 +920,7 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 	return &ExecutionResult{
 		UsedGas:    st.gasUsed(),
 		MaxUsedGas: peakGasUsed,
+		L2UseGas:   l2GasUsed,
 		Err:        vmerr,
 		ReturnData: ret,
 	}, nil

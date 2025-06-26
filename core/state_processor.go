@@ -226,12 +226,12 @@ func MakeReceipt(msg *Message, evm *vm.EVM, result *ExecutionResult, statedb *st
 				operatorFeeScalarU64 := operatorFeeScalar.Uint64()
 				receipt.OperatorFeeScalar = &operatorFeeScalarU64
 			}
-			operatorCost := types.OperatorCost(result.UsedGas, tokenRatio, operatorFeeConstant, operatorFeeScalar)
+			operatorCost := types.OperatorCost(result.L2UseGas, tokenRatio, operatorFeeConstant, operatorFeeScalar)
 			if operatorCost != nil {
 				operatorCostU64 := operatorCost.Uint64()
 				receipt.OperatorFee = &operatorCostU64
 			}
-
+			receipt.L2GasUsed = &result.L2UseGas
 		}
 	}
 
