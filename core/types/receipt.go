@@ -97,11 +97,12 @@ type receiptMarshaling struct {
 	TransactionIndex  hexutil.Uint
 
 	// Optimism: extend receipts with their L1 price (if a rollup tx)
-	L1GasPrice *hexutil.Big
-	L1GasUsed  *hexutil.Big
-	L1Fee      *hexutil.Big
-	FeeScalar  *big.Float
-	TokenRatio *hexutil.Big
+	DepositNonce *hexutil.Uint64
+	L1GasPrice   *hexutil.Big
+	L1GasUsed    *hexutil.Big
+	L1Fee        *hexutil.Big
+	FeeScalar    *big.Float
+	TokenRatio   *hexutil.Big
 }
 
 // receiptRLP is the consensus encoding of a receipt.
