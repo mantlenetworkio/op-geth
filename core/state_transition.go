@@ -829,22 +829,24 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 		st.gasRemaining = st.gasRemaining * tokenRatio
 	}
 
-	// Recalculate the operator gas cost according to the L2 gas used.
 	var l2GasUsed uint64
 	gasUsed := st.initialGas - st.gasRemaining
 	l1AndOperatorGas := l1Gas + operatorGas
 	l2GasUsed = gasUsed - l1AndOperatorGas
-	operatorCostL2 := st.evm.Context.OperatorCostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, l2GasUsed, st.msg.IsDepositTx, st.msg.To)
-	var operatorGasL2 uint64
-	if st.msg.GasPrice.Cmp(common.Big0) > 0 && operatorCostL2 != nil {
-		operatorGasL2 = new(big.Int).Div(operatorCostL2.ToBig(), st.msg.GasPrice).Uint64()
-	}
-	if operatorGas > operatorGasL2 {
-		returnOperatorGas := operatorGas - operatorGasL2
-		prev := st.gasRemaining
-		st.gasRemaining += returnOperatorGas
-		if t := st.evm.Config.Tracer; t != nil && t.OnGasChange != nil {
-			t.OnGasChange(prev, st.gasRemaining, tracing.GasChangeTxDataFloor)
+	// Recalculate the operator gas cost according to the L2 gas used.
+	if operatorFeeCost != nil {
+		operatorCostL2 := st.evm.Context.OperatorCostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, l2GasUsed, st.msg.IsDepositTx, st.msg.To)
+		var operatorGasL2 uint64
+		if st.msg.GasPrice.Cmp(common.Big0) > 0 && operatorCostL2 != nil {
+			operatorGasL2 = new(big.Int).Div(operatorCostL2.ToBig(), st.msg.GasPrice).Uint64()
+		}
+		if operatorGas > operatorGasL2 {
+			returnOperatorGas := operatorGas - operatorGasL2
+			prev := st.gasRemaining
+			st.gasRemaining += returnOperatorGas
+			if t := st.evm.Config.Tracer; t != nil && t.OnGasChange != nil {
+				t.OnGasChange(prev, st.gasRemaining, tracing.GasChangeTxDataFloor)
+			}
 		}
 	}
 
@@ -865,7 +867,6 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
 		st.returnGas(rules.IsMetaTxV3)
 	}
-	log.Info("------gas", "gasuse", st.gasUsed())
 
 	// Note for deposit tx there is no ETH refunded for unused gas, but that's taken care of by the fact that gasPrice
 	// is always 0 for deposit tx. So calling refundGas will ensure the gasUsed accounting is correct without actually
