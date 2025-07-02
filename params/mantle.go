@@ -9,7 +9,7 @@ var (
 	MantleMainnetChainId  = big.NewInt(5000)
 	MantleSepoliaChainId  = big.NewInt(5003)
 	MantleHoodiQA3ChainId = big.NewInt(561113)
-	MantleLocalChainId    = big.NewInt(1337)
+	MantleLocalChainId    = big.NewInt(17)
 )
 
 var (
@@ -55,7 +55,7 @@ var (
 		ProxyOwnerUpgradeTime: nil,
 		MantleEverestTime:     u64Ptr(0),
 		MantleSkadiTime:       u64Ptr(0),
-		MantleLimbTime:        u64Ptr(0),
+		MantleLimbTime:        u64Ptr(1_751_449_854),
 	}
 	MantleDefaultUpgradeConfig = MantleUpgradeChainConfig{
 		BaseFeeTime:           u64Ptr(0),
