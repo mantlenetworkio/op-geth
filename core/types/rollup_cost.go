@@ -139,9 +139,10 @@ func NewOperatorCostFunc(config *params.ChainConfig, statedb StateGetter) Operat
 func OperatorCost(gasUsed uint64, tokenRation, operatorFeeConstant, operatorFeeScalar *big.Int) *uint256.Int {
 	operatorGasUsed := new(big.Int).SetUint64(gasUsed)
 	operatorCost := operatorGasUsed.Mul(operatorGasUsed, operatorFeeScalar)
-	operatorCost.Div(operatorCost, Decimals)
-	operatorCost = operatorCost.Add(operatorCost, operatorFeeConstant)
 	operatorCost = operatorCost.Mul(operatorCost, tokenRation)
+	operatorCost.Div(operatorCost, Decimals)
+	operatorFeeConstant = operatorFeeConstant.Mul(operatorFeeConstant, tokenRation)
+	operatorCost = operatorCost.Add(operatorCost, operatorFeeConstant)
 	operatorFeeU256, overflow := uint256.FromBig(operatorCost)
 	if overflow {
 		// This should never happen, as (u64.max * u32.max / 1e6) + u64.max is an int of bit length 77
