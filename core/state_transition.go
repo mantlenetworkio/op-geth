@@ -834,7 +834,7 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 	l1AndOperatorGas := l1Gas + operatorGas
 	l2GasUsed = gasUsed - l1AndOperatorGas
 	// Recalculate the operator gas cost according to the L2 gas used.
-	if operatorFeeCost != nil {
+	if operatorFeeCost != nil && st.evm.Context.OperatorCostFunc != nil {
 		operatorCostL2 := st.evm.Context.OperatorCostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, l2GasUsed, st.msg.IsDepositTx, st.msg.To)
 		var operatorGasL2 uint64
 		if st.msg.GasPrice.Cmp(common.Big0) > 0 && operatorCostL2 != nil {
