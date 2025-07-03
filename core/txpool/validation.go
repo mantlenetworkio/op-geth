@@ -231,6 +231,9 @@ type ValidationOptionsWithState struct {
 
 	// L1CostFn is an optional extension, to validate L1 rollup costs of a tx
 	L1CostFn L1CostFunc
+
+	// OperatorCostFn to validate operator fee of a tx
+	OperatorCostFn OperatorCostFunc
 }
 
 // ValidateTransactionWithState is a helper method to check whether a transaction
@@ -306,6 +309,15 @@ func ValidateTransactionWithState(tx *types.Transaction, head *types.Header, sig
 			txCost := new(big.Int).Mul(tx.GasPrice(), gasRemaining)
 			if txCost.Cmp(l1Cost) < 0 {
 				return core.ErrInsufficientGasForL1Cost
+			}
+		}
+	}
+	// Using gas remaining to validate operate fee
+	if opts.OperatorCostFn != nil {
+		if operatorCost := opts.OperatorCostFn(tx.Gas(), tx.IsDepositTx(), tx.To()); operatorCost != nil {
+			txCost := new(big.Int).Mul(tx.GasPrice(), gasRemaining)
+			if txCost.Cmp(operatorCost.ToBig()) < 0 {
+				return core.ErrInsufficientGasForOperatorFee
 			}
 		}
 	}

@@ -82,6 +82,14 @@ var (
 	// than required for l1Cost.
 	ErrInsufficientGasForL1Cost = errors.New("insufficient gas for l1Cost. Please use estimateGas to get gasLimit")
 
+	//ErrInsufficientGasForOperatorFee is returned if the transaction is specified to use less gas
+	// than required for operator fee
+	ErrInsufficientGasForOperatorFee = errors.New("insufficient gas for operator fee. Please use estimateGas to get gasLimit")
+
+	//ErrInsufficientGasForL1CostAndOperatorFee is returned if the transaction is specified to use less gas
+	// than required for sum of l1Cost and operator fee
+	ErrInsufficientGasForL1CostAndOperatorFee = errors.New("insufficient gas for l1Cost and operator fee. Please use estimateGas to get gasLimit")
+
 	// ErrFloorDataGas is returned if the transaction is specified to use less gas
 	// than required for the data floor cost.
 	ErrFloorDataGas = errors.New("insufficient gas for floor data gas cost")

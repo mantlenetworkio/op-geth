@@ -17,6 +17,7 @@
 package types
 
 import (
+	"github.com/holiman/uint256"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -56,15 +57,21 @@ type StateGetter interface {
 // Returns nil if there is no cost.
 type L1CostFunc func(blockNum uint64, blockTime uint64, dataGas RollupCostData, isDepositTx bool, to *common.Address) *big.Int
 
+type OperatorCostFunc func(blockNum uint64, blockTime uint64, gasUsed uint64, isDepositTx bool, to *common.Address) *uint256.Int
+
 var (
 	L1BaseFeeSlot  = common.BigToHash(big.NewInt(1))
 	OverheadSlot   = common.BigToHash(big.NewInt(5))
 	ScalarSlot     = common.BigToHash(big.NewInt(6))
 	TokenRatioSlot = common.BigToHash(big.NewInt(0))
 
+	OperatorFeeConstantSlot = common.BigToHash(big.NewInt(3))
+	OperatorFeeScalarSlot   = common.BigToHash(big.NewInt(4))
+
 	L1BlockAddr   = common.HexToAddress("0x4200000000000000000000000000000000000015")
 	GasOracleAddr = common.HexToAddress("0x420000000000000000000000000000000000000F")
 	Decimals      = big.NewInt(1_000_000)
+	EigenDaPrice  = new(big.Int).Mul(big.NewInt(15), big.NewInt(1e6))
 )
 
 // NewL1CostFunc returns a function used for calculating L1 fee cost.
@@ -104,12 +111,57 @@ func L1Cost(rollupDataGas uint64, l1BaseFee, overhead, scalar, tokenRatio *big.I
 	return l1Cost.Div(l1Cost, Decimals)
 }
 
+// NewOperatorCostFunc returns a function used for calculating operator fees, or nil if this is
+// not an op-stack chain.
+func NewOperatorCostFunc(config *params.ChainConfig, statedb StateGetter) OperatorCostFunc {
+	cacheBlockNum := ^uint64(0)
+	var tokenRatio, operatorFeeConstant, operatorFeeScalar *big.Int
+	return func(blockNum uint64, blockTime uint64, gasUsed uint64, isDepositTx bool, to *common.Address) *uint256.Int {
+		if config.Optimism == nil || isDepositTx {
+			return uint256.NewInt(0)
+		}
+		if !config.IsMantleLimb(blockTime) {
+			return uint256.NewInt(0)
+		}
+		if blockNum != cacheBlockNum {
+			tokenRatio = statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
+			operatorFeeConstant = statedb.GetState(GasOracleAddr, OperatorFeeConstantSlot).Big()
+			operatorFeeScalar = statedb.GetState(GasOracleAddr, OperatorFeeScalarSlot).Big()
+			cacheBlockNum = blockNum
+		}
+		if to != nil && *to == GasOracleAddr {
+			cacheBlockNum = ^uint64(0)
+		}
+		return OperatorCost(gasUsed, tokenRatio, operatorFeeConstant, operatorFeeScalar)
+	}
+}
+
+func OperatorCost(gasUsed uint64, tokenRation, operatorFeeConstant, operatorFeeScalar *big.Int) *uint256.Int {
+	operatorGasUsed := new(big.Int).SetUint64(gasUsed)
+	operatorCost := operatorGasUsed.Mul(operatorGasUsed, operatorFeeScalar)
+	operatorCost = operatorCost.Mul(operatorCost, tokenRation)
+	operatorCost.Div(operatorCost, Decimals)
+	operatorFeeConstant = operatorFeeConstant.Mul(operatorFeeConstant, tokenRation)
+	operatorCost = operatorCost.Add(operatorCost, operatorFeeConstant)
+	operatorFeeU256, overflow := uint256.FromBig(operatorCost)
+	if overflow {
+		// This should never happen, as (u64.max * u32.max / 1e6) + u64.max is an int of bit length 77
+		panic("overflow in operator cost calculation")
+	}
+	return operatorFeeU256
+}
+
 // DeriveL1GasInfo reads L1 gas related information to be included
 // on the receipt
 func DeriveL1GasInfo(state StateGetter) (*big.Int, *big.Int, *big.Int, *big.Float, *big.Int) {
 	l1BaseFee, overhead, scalar, scaled := readL1BlockStorageSlots(L1BlockAddr, state)
-	tokenRatio := readGPOStorageSlots(GasOracleAddr, state)
+	tokenRatio, _, _ := readGPOStorageSlots(GasOracleAddr, state)
 	return l1BaseFee, overhead, scalar, scaled, tokenRatio
+}
+
+func DeriveGOInfo(state StateGetter) (*big.Int, *big.Int, *big.Int) {
+	tokenRatio, operatorFeeConstant, operatorFeeScalar := readGPOStorageSlots(GasOracleAddr, state)
+	return tokenRatio, operatorFeeConstant, operatorFeeScalar
 }
 
 func readL1BlockStorageSlots(addr common.Address, state StateGetter) (*big.Int, *big.Int, *big.Int, *big.Float) {
@@ -120,9 +172,11 @@ func readL1BlockStorageSlots(addr common.Address, state StateGetter) (*big.Int, 
 	return l1BaseFee.Big(), overhead.Big(), scalar.Big(), scaled
 }
 
-func readGPOStorageSlots(addr common.Address, state StateGetter) *big.Int {
+func readGPOStorageSlots(addr common.Address, state StateGetter) (*big.Int, *big.Int, *big.Int) {
 	tokenRatio := state.GetState(addr, TokenRatioSlot)
-	return tokenRatio.Big()
+	operatorFeeConstant := state.GetState(addr, OperatorFeeConstantSlot)
+	operatorFeeScalar := state.GetState(addr, OperatorFeeScalarSlot)
+	return tokenRatio.Big(), operatorFeeConstant.Big(), operatorFeeScalar.Big()
 }
 
 // scaleDecimals will scale a value by decimals

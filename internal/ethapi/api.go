@@ -1688,7 +1688,20 @@ func marshalReceipt(receipt *types.Receipt, blockHash common.Hash, blockNumber u
 		if receipt.TokenRatio != nil {
 			fields["tokenRatio"] = (*hexutil.Big)(receipt.TokenRatio)
 		}
+		if receipt.OperatorFeeConstant != nil {
+			fields["operatorFeeConstant"] = hexutil.Uint64(*receipt.OperatorFeeConstant)
+		}
+		if receipt.OperatorFeeScalar != nil {
+			fields["operatorFeeScalar"] = hexutil.Uint64(*receipt.OperatorFeeScalar)
+		}
+		if receipt.OperatorFee != nil {
+			fields["operatorFee"] = hexutil.Uint64(*receipt.OperatorFee)
+		}
+		if receipt.L2GasUsed != nil {
+			fields["l2GasUsed"] = hexutil.Uint64(*receipt.L2GasUsed)
+		}
 	}
+
 	if chainConfig.Optimism != nil && tx.IsDepositTx() && receipt.DepositNonce != nil {
 		fields["depositNonce"] = hexutil.Uint64(*receipt.DepositNonce)
 	}

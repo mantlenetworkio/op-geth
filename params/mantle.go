@@ -9,7 +9,7 @@ var (
 	MantleMainnetChainId  = big.NewInt(5000)
 	MantleSepoliaChainId  = big.NewInt(5003)
 	MantleHoodiQA3ChainId = big.NewInt(561113)
-	MantleLocalChainId    = big.NewInt(1337)
+	MantleLocalChainId    = big.NewInt(17)
 )
 
 var (
@@ -22,6 +22,7 @@ var (
 		ProxyOwnerUpgradeTime: u64Ptr(1_742_367_600),
 		MantleEverestTime:     u64Ptr(1_742_367_600),
 		MantleSkadiTime:       nil,
+		MantleLimbTime:        nil,
 	}
 	MantleSepoliaUpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               MantleSepoliaChainId,
@@ -32,6 +33,7 @@ var (
 		ProxyOwnerUpgradeTime: nil,
 		MantleEverestTime:     u64Ptr(1_737_010_800),
 		MantleSkadiTime:       nil,
+		MantleLimbTime:        nil,
 	}
 	MantleHoodiQA3UpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               MantleHoodiQA3ChainId,
@@ -41,7 +43,8 @@ var (
 		MetaTxV3UpgradeTime:   u64Ptr(0),
 		ProxyOwnerUpgradeTime: nil,
 		MantleEverestTime:     u64Ptr(0),
-		MantleSkadiTime:       u64Ptr(1_749_798_000),
+		MantleSkadiTime:       u64Ptr(1_749_625_200),
+		MantleLimbTime:        u64Ptr(1_751_538_600),
 	}
 	MantleLocalUpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               MantleLocalChainId,
@@ -52,6 +55,7 @@ var (
 		ProxyOwnerUpgradeTime: nil,
 		MantleEverestTime:     u64Ptr(0),
 		MantleSkadiTime:       u64Ptr(0),
+		MantleLimbTime:        u64Ptr(1_751_449_854),
 	}
 	MantleDefaultUpgradeConfig = MantleUpgradeChainConfig{
 		BaseFeeTime:           u64Ptr(0),
@@ -61,6 +65,7 @@ var (
 		ProxyOwnerUpgradeTime: nil,
 		MantleEverestTime:     u64Ptr(0),
 		MantleSkadiTime:       u64Ptr(0),
+		MantleLimbTime:        u64Ptr(0),
 	}
 )
 
@@ -74,6 +79,7 @@ type MantleUpgradeChainConfig struct {
 	ProxyOwnerUpgradeTime *uint64 `json:"proxyOwnerUpgradeTime"` // ProxyOwnerUpgradeBlock identifies the current block time is ensuring the L2ProxyAdmin contract owner is set to NewProxyAdminOwnerAddress
 	MantleEverestTime     *uint64 `json:"mantleEverestTime"`     // MantleEverestTime identifies the current block time is ensuring eip-7212 & disable MetaTx
 	MantleSkadiTime       *uint64 `json:"mantleSkadiTime"`       // MantleSkadiTime identifies the current block time is ensuring prague upgrade
+	MantleLimbTime        *uint64 `json:"mantleOperatorFeeTime"` // MantleOperatorFeeTime identifies the current block time is using operator fee
 }
 
 func GetUpgradeConfigForMantle(chainID *big.Int) *MantleUpgradeChainConfig {
