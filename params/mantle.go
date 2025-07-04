@@ -31,7 +31,7 @@ var (
 		MetaTxV3UpgradeTime:   u64Ptr(1_720_594_800),
 		ProxyOwnerUpgradeTime: nil,
 		MantleEverestTime:     u64Ptr(1_737_010_800),
-		MantleSkadiTime:       nil,
+		MantleSkadiTime:       u64Ptr(1_752_649_200),
 	}
 	MantleHoodiQA3UpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               MantleHoodiQA3ChainId,
