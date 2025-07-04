@@ -235,7 +235,7 @@ func (eth *Ethereum) stateAtTransaction(ctx context.Context, block *types.Block,
 		return nil, vm.BlockContext{}, nil, nil, err
 	}
 	// Insert parent beacon block root in the state as per EIP-4788.
-	context := core.NewEVMBlockContext(block.Header(), eth.blockchain, nil)
+	context := core.NewEVMBlockContext(block.Header(), eth.blockchain, nil, eth.blockchain.Config(), statedb)
 	evm := vm.NewEVM(context, statedb, eth.blockchain.Config(), vm.Config{})
 	if beaconRoot := block.BeaconRoot(); beaconRoot != nil {
 		core.ProcessBeaconBlockRoot(*beaconRoot, evm)
@@ -249,12 +249,13 @@ func (eth *Ethereum) stateAtTransaction(ctx context.Context, block *types.Block,
 	}
 	// Recompute transactions up to the target index.
 	signer := types.MakeSigner(eth.blockchain.Config(), block.Number(), block.Time())
+	rules := eth.blockchain.Config().Rules(block.Number(), false, block.Time())
 	for idx, tx := range block.Transactions() {
 		if idx == txIndex {
 			return tx, context, statedb, release, nil
 		}
 		// Assemble the transaction call message and return if the requested offset
-		msg, _ := core.TransactionToMessage(tx, signer, block.BaseFee())
+		msg, _ := core.TransactionToMessage(tx, signer, block.BaseFee(), &rules)
 
 		// Not yet the searched for transaction, execute on top of the current state
 		statedb.SetTxContext(tx.Hash(), idx)

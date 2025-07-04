@@ -194,7 +194,7 @@ func newModernSigner(chainID *big.Int, fork forks.Fork) Signer {
 	}
 	s := &modernSigner{
 		chainID: chainID,
-		txtypes: make(map[byte]struct{}, 4),
+		txtypes: make(map[byte]struct{}, 6),
 	}
 	// configure legacy signer
 	switch {
@@ -206,6 +206,7 @@ func newModernSigner(chainID *big.Int, fork forks.Fork) Signer {
 		s.legacy = FrontierSigner{}
 	}
 	s.txtypes[LegacyTxType] = struct{}{}
+	s.txtypes[DepositTxType] = struct{}{}
 	// configure tx types
 	if fork >= forks.Berlin {
 		s.txtypes[AccessListTxType] = struct{}{}
@@ -248,6 +249,9 @@ func (s *modernSigner) Sender(tx *Transaction) (common.Address, error) {
 	if tt == LegacyTxType {
 		return s.legacy.Sender(tx)
 	}
+	if tt == DepositTxType {
+		return tx.inner.(*DepositTx).From, nil
+	}
 	if tx.ChainId().Cmp(s.chainID) != 0 {
 		return common.Address{}, fmt.Errorf("%w: have %d want %d", ErrInvalidChainId, tx.ChainId(), s.chainID)
 	}
@@ -265,6 +269,9 @@ func (s *modernSigner) SignatureValues(tx *Transaction, sig []byte) (R, S, V *bi
 	}
 	if tt == LegacyTxType {
 		return s.legacy.SignatureValues(tx, sig)
+	}
+	if tt == DepositTxType {
+		return nil, nil, nil, fmt.Errorf("deposits do not have a signature")
 	}
 	// Check that chain ID of tx matches the signer. We also accept ID zero here,
 	// because it indicates that the chain ID was not specified in the tx.

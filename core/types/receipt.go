@@ -66,11 +66,22 @@ type Receipt struct {
 	BlobGasUsed       uint64         `json:"blobGasUsed,omitempty"`
 	BlobGasPrice      *big.Int       `json:"blobGasPrice,omitempty"`
 
+	// DepositNonce was introduced in Regolith to store the actual nonce used by deposit transactions
+	// The state transition process ensures this is only set for Regolith deposit transactions.
+	DepositNonce *uint64 `json:"depositNonce,omitempty"`
+
 	// Inclusion information: These fields provide information about the inclusion of the
 	// transaction corresponding to this receipt.
 	BlockHash        common.Hash `json:"blockHash,omitempty"`
 	BlockNumber      *big.Int    `json:"blockNumber,omitempty"`
 	TransactionIndex uint        `json:"transactionIndex"`
+
+	// OVM legacy: extend receipts with their L1 price (if a rollup tx)
+	L1GasPrice *big.Int   `json:"l1GasPrice,omitempty"`
+	L1GasUsed  *big.Int   `json:"l1GasUsed,omitempty"`
+	L1Fee      *big.Int   `json:"l1Fee,omitempty"`
+	FeeScalar  *big.Float `json:"l1FeeScalar,omitempty"`
+	TokenRatio *big.Int   `json:"tokenRatio,omitempty"`
 }
 
 type receiptMarshaling struct {
@@ -84,6 +95,14 @@ type receiptMarshaling struct {
 	BlobGasPrice      *hexutil.Big
 	BlockNumber       *hexutil.Big
 	TransactionIndex  hexutil.Uint
+
+	// Optimism: extend receipts with their L1 price (if a rollup tx)
+	DepositNonce *hexutil.Uint64
+	L1GasPrice   *hexutil.Big
+	L1GasUsed    *hexutil.Big
+	L1Fee        *hexutil.Big
+	FeeScalar    *big.Float
+	TokenRatio   *hexutil.Big
 }
 
 // receiptRLP is the consensus encoding of a receipt.
@@ -94,11 +113,103 @@ type receiptRLP struct {
 	Logs              []*Log
 }
 
+type depositReceiptRlp struct {
+	PostStateOrStatus []byte
+	CumulativeGasUsed uint64
+	Bloom             Bloom
+	Logs              []*Log
+	// DepositNonce was introduced in Regolith to store the actual nonce used by deposit transactions.
+	// Must be nil for any transactions prior to Regolith or that aren't deposit transactions.
+	DepositNonce *uint64 `rlp:"optional"`
+}
+
 // storedReceiptRLP is the storage encoding of a receipt.
 type storedReceiptRLP struct {
 	PostStateOrStatus []byte
 	CumulativeGasUsed uint64
-	Logs              []*Log
+	Logs              []*LogForStorage
+	// DepositNonce was introduced in Regolith to store the actual nonce used by deposit transactions.
+	// Must be nil for any transactions prior to Regolith or that aren't deposit transactions.
+	DepositNonce *uint64 `rlp:"optional"`
+
+	// used to record calculating l1 fee for txs from Layer2
+	L1GasUsed  *big.Int `rlp:"optional"`
+	L1GasPrice *big.Int `rlp:"optional"`
+	L1Fee      *big.Int `rlp:"optional"`
+	FeeScalar  string   `rlp:"optional"`
+	TokenRatio *big.Int `rlp:"optional"`
+}
+
+// LegacyOptimismStoredReceiptRLP is the pre bedrock storage encoding of a
+// receipt. It will only exist in the database if it was migrated using the
+// migration tool. Nodes that sync using snap-sync will not have any of these
+// entries.
+type LegacyOptimismStoredReceiptRLP struct {
+	PostStateOrStatus []byte
+	CumulativeGasUsed uint64
+	Logs              []*LogForStorage
+	L1GasUsed         *big.Int
+	L1GasPrice        *big.Int
+	L1Fee             *big.Int
+	FeeScalar         string
+
+	// DAGasUsed,DAGasPrice,DAFee These values are not used to collect fee,
+	// so decode from ledger, but not exposed outside.
+	DAGasUsed  *big.Int
+	DAGasPrice *big.Int
+	DAFee      *big.Int
+}
+
+// LogForStorage is a wrapper around a Log that handles
+// backward compatibility with prior storage formats.
+type LogForStorage Log
+
+// EncodeRLP implements rlp.Encoder.
+func (l *LogForStorage) EncodeRLP(w io.Writer) error {
+	rl := Log{Address: l.Address, Topics: l.Topics, Data: l.Data}
+	return rlp.Encode(w, &rl)
+}
+
+type legacyRlpStorageLog struct {
+	Address     common.Address
+	Topics      []common.Hash
+	Data        []byte
+	BlockNumber uint64
+	TxHash      common.Hash
+	TxIndex     uint
+	BlockHash   common.Hash
+	Index       uint
+}
+
+// DecodeRLP implements rlp.Decoder.
+//
+// Note some redundant fields(e.g. block number, tx hash etc) will be assembled later.
+func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
+	blob, err := s.Raw()
+	if err != nil {
+		return err
+	}
+	var dec Log
+	err = rlp.DecodeBytes(blob, &dec)
+	if err == nil {
+		*l = LogForStorage{
+			Address: dec.Address,
+			Topics:  dec.Topics,
+			Data:    dec.Data,
+		}
+	} else {
+		// Try to decode log with previous definition.
+		var dec legacyRlpStorageLog
+		err = rlp.DecodeBytes(blob, &dec)
+		if err == nil {
+			*l = LogForStorage{
+				Address: dec.Address,
+				Topics:  dec.Topics,
+				Data:    dec.Data,
+			}
+		}
+	}
+	return err
 }
 
 // NewReceipt creates a barebone transaction receipt, copying the init fields.
@@ -136,7 +247,13 @@ func (r *Receipt) EncodeRLP(w io.Writer) error {
 // encodeTyped writes the canonical encoding of a typed receipt to w.
 func (r *Receipt) encodeTyped(data *receiptRLP, w *bytes.Buffer) error {
 	w.WriteByte(r.Type)
-	return rlp.Encode(w, data)
+	switch r.Type {
+	case DepositTxType:
+		withNonce := depositReceiptRlp{data.PostStateOrStatus, data.CumulativeGasUsed, data.Bloom, data.Logs, r.DepositNonce}
+		return rlp.Encode(w, withNonce)
+	default:
+		return rlp.Encode(w, data)
+	}
 }
 
 // MarshalBinary returns the consensus encoding of the receipt.
@@ -212,6 +329,15 @@ func (r *Receipt) decodeTyped(b []byte) error {
 		}
 		r.Type = b[0]
 		return r.setFromRLP(data)
+	case DepositTxType:
+		var data depositReceiptRlp
+		err := rlp.DecodeBytes(b[1:], &data)
+		if err != nil {
+			return err
+		}
+		r.Type = b[0]
+		r.DepositNonce = data.DepositNonce
+		return r.setFromRLP(receiptRLP{data.PostStateOrStatus, data.CumulativeGasUsed, data.Bloom, data.Logs})
 	default:
 		return ErrTxTypeNotSupported
 	}
@@ -263,36 +389,107 @@ type ReceiptForStorage Receipt
 
 // EncodeRLP implements rlp.Encoder, and flattens all content fields of a receipt
 // into an RLP stream.
-func (r *ReceiptForStorage) EncodeRLP(_w io.Writer) error {
-	w := rlp.NewEncoderBuffer(_w)
-	outerList := w.List()
-	w.WriteBytes((*Receipt)(r).statusEncoding())
-	w.WriteUint64(r.CumulativeGasUsed)
-	logList := w.List()
-	for _, log := range r.Logs {
-		if err := log.EncodeRLP(w); err != nil {
-			return err
-		}
+func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
+	feeScalar := ""
+	if r.FeeScalar != nil {
+		feeScalar = r.FeeScalar.String()
 	}
-	w.ListEnd(logList)
-	w.ListEnd(outerList)
-	return w.Flush()
+	enc := &storedReceiptRLP{
+		PostStateOrStatus: (*Receipt)(r).statusEncoding(),
+		CumulativeGasUsed: r.CumulativeGasUsed,
+		Logs:              make([]*LogForStorage, len(r.Logs)),
+		DepositNonce:      r.DepositNonce,
+		L1GasUsed:         r.L1GasUsed,
+		L1GasPrice:        r.L1GasPrice,
+		L1Fee:             r.L1Fee,
+		FeeScalar:         feeScalar,
+		TokenRatio:        r.TokenRatio,
+	}
+
+	for i, log := range r.Logs {
+		enc.Logs[i] = (*LogForStorage)(log)
+	}
+	return rlp.Encode(w, enc)
 }
 
 // DecodeRLP implements rlp.Decoder, and loads both consensus and implementation
 // fields of a receipt from an RLP stream.
 func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
-	var stored storedReceiptRLP
-	if err := s.Decode(&stored); err != nil {
+	// Retrieve the entire receipt blob as we need to try multiple decoders
+	blob, err := s.Raw()
+	if err != nil {
+		return err
+	}
+	// First try to decode the latest receipt database format, try the pre-bedrock Optimism legacy format otherwise.
+	if err := decodeStoredReceiptRLP(r, blob); err == nil {
+		return nil
+	}
+	return decodeLegacyOptimismReceiptRLP(r, blob)
+}
+
+func decodeLegacyOptimismReceiptRLP(r *ReceiptForStorage, blob []byte) error {
+	var stored LegacyOptimismStoredReceiptRLP
+	if err := rlp.DecodeBytes(blob, &stored); err != nil {
 		return err
 	}
 	if err := (*Receipt)(r).setStatus(stored.PostStateOrStatus); err != nil {
 		return err
 	}
 	r.CumulativeGasUsed = stored.CumulativeGasUsed
-	r.Logs = stored.Logs
+	r.Logs = make([]*Log, len(stored.Logs))
+	for i, log := range stored.Logs {
+		r.Logs[i] = (*Log)(log)
+	}
+	r.Bloom = CreateBloom((*Receipt)(r))
+	// UsingOVM
+	scalar := new(big.Float)
+	if stored.FeeScalar != "" {
+		var ok bool
+		scalar, ok = scalar.SetString(stored.FeeScalar)
+		if !ok {
+			return errors.New("cannot parse fee scalar")
+		}
+	}
+	r.L1GasUsed = stored.L1GasUsed
+	r.L1GasPrice = stored.L1GasPrice
+	r.L1Fee = stored.L1Fee
+	r.FeeScalar = scalar
+	return nil
+}
+
+func decodeStoredReceiptRLP(r *ReceiptForStorage, blob []byte) error {
+	var stored storedReceiptRLP
+	if err := rlp.DecodeBytes(blob, &stored); err != nil {
+		return err
+	}
+	if err := (*Receipt)(r).setStatus(stored.PostStateOrStatus); err != nil {
+		return err
+	}
+	r.CumulativeGasUsed = stored.CumulativeGasUsed
+	r.Logs = make([]*Log, len(stored.Logs))
+	for i, log := range stored.Logs {
+		r.Logs[i] = (*Log)(log)
+	}
 	r.Bloom = CreateBloom((*Receipt)(r))
 
+	if stored.DepositNonce != nil {
+		r.DepositNonce = stored.DepositNonce
+	}
+
+	scalar := new(big.Float)
+	if stored.FeeScalar != "" {
+		var ok bool
+		scalar, ok = scalar.SetString(stored.FeeScalar)
+		if !ok {
+			return errors.New("cannot parse fee scalar")
+		}
+	}
+
+	r.L1GasUsed = stored.L1GasUsed
+	r.L1GasPrice = stored.L1GasPrice
+	r.L1Fee = stored.L1Fee
+	r.FeeScalar = scalar
+	r.TokenRatio = stored.TokenRatio
 	return nil
 }
 
@@ -312,7 +509,7 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 	}
 	w.WriteByte(r.Type)
 	switch r.Type {
-	case AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType:
+	case AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType, DepositTxType:
 		rlp.Encode(w, data)
 	default:
 		// For unsupported types, write nothing. Since this is for
@@ -351,7 +548,11 @@ func (rs Receipts) DeriveFields(config *params.ChainConfig, hash common.Hash, nu
 		if txs[i].To() == nil {
 			// Deriving the signer is expensive, only do if it's actually needed
 			from, _ := Sender(signer, txs[i])
-			rs[i].ContractAddress = crypto.CreateAddress(from, txs[i].Nonce())
+			nonce := txs[i].Nonce()
+			if txs[i].IsDepositTx() && rs[i].DepositNonce != nil {
+				nonce = *rs[i].DepositNonce
+			}
+			rs[i].ContractAddress = crypto.CreateAddress(from, nonce)
 		} else {
 			rs[i].ContractAddress = common.Address{}
 		}
@@ -373,5 +574,6 @@ func (rs Receipts) DeriveFields(config *params.ChainConfig, hash common.Hash, nu
 			logIndex++
 		}
 	}
+
 	return nil
 }

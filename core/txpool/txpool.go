@@ -32,6 +32,8 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 )
 
+type L1CostFunc func(dataGas types.RollupCostData, isDepositTx bool, to *common.Address) *big.Int
+
 // TxStatus is the current status of a transaction as seen by the pool.
 type TxStatus uint
 
@@ -476,6 +478,21 @@ func (p *TxPool) Status(hash common.Hash) TxStatus {
 		}
 	}
 	return TxStatusUnknown
+}
+
+// ToJournal returns all transactions in the legacy subpool in a format suitable for journaling.
+// OP-Stack addition.
+func (p *TxPool) ToJournal() map[common.Address]types.Transactions {
+	for _, subpool := range p.subpools {
+		// We only implement ToJournal with the legacy pool. So once we find the first pool
+		// with this function, we can return.
+		if lpool, ok := subpool.(interface {
+			ToJournal() map[common.Address]types.Transactions
+		}); ok {
+			return lpool.ToJournal()
+		}
+	}
+	return nil
 }
 
 // Sync is a helper method for unit tests or simulator runs where the chain events

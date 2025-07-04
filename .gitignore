@@ -30,6 +30,7 @@
 /geth*.zip.sig
 /geth*.zip.asc
 
+vendor
 
 # travis
 profile.tmp
@@ -56,3 +57,4 @@ cmd/evm/evm
 cmd/geth/geth
 cmd/rlpdump/rlpdump
 cmd/workload/workload
+cmd/geth/op_geth*

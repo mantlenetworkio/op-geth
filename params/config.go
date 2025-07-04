@@ -337,6 +337,15 @@ var (
 		Clique:                  nil,
 	}
 	TestRules = TestChainConfig.Rules(new(big.Int), false, 0)
+
+	// This is an Optimism chain config with bedrock starting a block 5, introduced for historical endpoint testing, largely based on the clique config
+	OptimismTestConfig = func() *ChainConfig {
+		conf := *AllCliqueProtocolChanges // copy the config
+		conf.Clique = nil
+		conf.BedrockBlock = big.NewInt(5)
+		conf.Optimism = &OptimismConfig{EIP1559Elasticity: 50, EIP1559Denominator: 10}
+		return &conf
+	}()
 )
 
 var (
@@ -411,6 +420,18 @@ type ChainConfig struct {
 	OsakaTime    *uint64 `json:"osakaTime,omitempty"`    // Osaka switch time (nil = no fork, 0 = already on osaka)
 	VerkleTime   *uint64 `json:"verkleTime,omitempty"`   // Verkle switch time (nil = no fork, 0 = already on verkle)
 
+	BedrockBlock *big.Int `json:"bedrockBlock,omitempty"` // Bedrock switch block (nil = no fork, 0 = already on optimism bedrock)
+	RegolithTime *uint64  `json:"regolithTime,omitempty"` // Regolith switch time (nil = no fork, 0 = already on optimism regolith)
+
+	// Mantle upgrade configs
+	BaseFeeTime           *uint64 `json:"baseFeeTime,omitempty"`           // Mantle BaseFee switch time (nil = no fork, 0 = already on mantle baseFee)
+	BVMETHMintUpgradeTime *uint64 `json:"bvmETHMintUpgradeTime,omitempty"` // BVM_ETH mint upgrade switch time (nil = no fork, 0 = already on)
+	MetaTxV2UpgradeTime   *uint64 `json:"metaTxV2UpgradeTime,omitempty"`   // MetaTxV2UpgradeTime switch time ( nil = no fork, 0 = already forked)
+	MetaTxV3UpgradeTime   *uint64 `json:"metaTxV3UpgradeTime,omitempty"`   // MetaTxV3UpgradeTime switch time ( nil = no fork, 0 = already forked)
+	ProxyOwnerUpgradeTime *uint64 `json:"proxyOwnerUpgradeTime,omitempty"` // ProxyOwnerUpgradeTime switch time ( nil = no fork, 0 = already forked)
+	MantleEverestTime     *uint64 `json:"mantleEverestTime,omitempty"`     // MantleEverestTime switch time ( nil = no fork, 0 = already forked)
+	MantleSkadiTime       *uint64 `json:"mantleSkadiTime,omitempty"`       // MantleSkadiTime switch time ( nil = no fork, 0 = already forked)
+
 	// TerminalTotalDifficulty is the amount of total difficulty reached by
 	// the network that triggers the consensus upgrade.
 	TerminalTotalDifficulty *big.Int `json:"terminalTotalDifficulty,omitempty"`
@@ -434,6 +455,9 @@ type ChainConfig struct {
 	Ethash             *EthashConfig       `json:"ethash,omitempty"`
 	Clique             *CliqueConfig       `json:"clique,omitempty"`
 	BlobScheduleConfig *BlobScheduleConfig `json:"blobSchedule,omitempty"`
+
+	// Optimism config, nil if not active
+	Optimism *OptimismConfig `json:"optimism,omitempty"`
 }
 
 // EthashConfig is the consensus engine configs for proof-of-work based sealing.
@@ -455,6 +479,17 @@ func (c CliqueConfig) String() string {
 	return fmt.Sprintf("clique(period: %d, epoch: %d)", c.Period, c.Epoch)
 }
 
+// OptimismConfig is the optimism config.
+type OptimismConfig struct {
+	EIP1559Elasticity  uint64 `json:"eip1559Elasticity"`
+	EIP1559Denominator uint64 `json:"eip1559Denominator"`
+}
+
+// String implements the stringer interface, returning the optimism fee config details.
+func (o *OptimismConfig) String() string {
+	return "optimism"
+}
+
 // Description returns a human-readable description of ChainConfig.
 func (c *ChainConfig) Description() string {
 	var banner string
@@ -466,6 +501,8 @@ func (c *ChainConfig) Description() string {
 	}
 	banner += fmt.Sprintf("Chain ID:  %v (%s)\n", c.ChainID, network)
 	switch {
+	case c.Optimism != nil:
+		banner += "Consensus: Optimism\n"
 	case c.Ethash != nil:
 		banner += "Consensus: Beacon (proof-of-stake), merged from Ethash (proof-of-work)\n"
 	case c.Clique != nil:
@@ -529,6 +566,9 @@ func (c *ChainConfig) Description() string {
 	}
 	if c.VerkleTime != nil {
 		banner += fmt.Sprintf(" - Verkle:                      @%-10v\n", *c.VerkleTime)
+	}
+	if c.RegolithTime != nil {
+		banner += fmt.Sprintf(" - Regolith:                    @%-10v\n", *c.RegolithTime)
 	}
 	return banner
 }
@@ -672,6 +712,73 @@ func (c *ChainConfig) IsEIP4762(num *big.Int, time uint64) bool {
 	return c.IsVerkle(num, time)
 }
 
+// IsBedrock returns whether num is either equal to the Bedrock fork block or greater.
+func (c *ChainConfig) IsBedrock(num *big.Int) bool {
+	return isBlockForked(c.BedrockBlock, num)
+}
+
+func (c *ChainConfig) IsRegolith(time uint64) bool {
+	return isTimestampForked(c.RegolithTime, time)
+}
+
+// IsOptimism returns whether the node is an optimism node or not.
+func (c *ChainConfig) IsOptimism() bool {
+	return c.Optimism != nil
+}
+
+// IsOptimismBedrock returns true iff this is an optimism node & bedrock is active
+func (c *ChainConfig) IsOptimismBedrock(num *big.Int) bool {
+	return c.IsOptimism() && c.IsBedrock(num)
+}
+
+func (c *ChainConfig) IsOptimismRegolith(time uint64) bool {
+	return c.IsOptimism() && c.IsRegolith(time)
+}
+
+// IsOptimismPreBedrock returns true iff this is an optimism node & bedrock is not yet active
+func (c *ChainConfig) IsOptimismPreBedrock(num *big.Int) bool {
+	return c.IsOptimism() && !c.IsBedrock(num)
+}
+
+// IsMantleBaseFee returns whether time is either equal to the BaseFee fork time or greater.
+func (c *ChainConfig) IsMantleBaseFee(time uint64) bool {
+	return isTimestampForked(c.BaseFeeTime, time)
+}
+
+// IsMantleBVMETHMintUpgrade returns whether time is either equal to the BVM_ETH mint upgrade fork time or greater.
+func (c *ChainConfig) IsMantleBVMETHMintUpgrade(time uint64) bool {
+	return isTimestampForked(c.BVMETHMintUpgradeTime, time)
+}
+
+// IsMetaTxV2 returns whether time is either equal to the MetaTx fork time or greater.
+func (c *ChainConfig) IsMetaTxV2(time uint64) bool {
+	return isTimestampForked(c.MetaTxV2UpgradeTime, time)
+}
+
+// IsMetaTxV3 returns whether time is either equal to the MetaTx fork time or greater.
+func (c *ChainConfig) IsMetaTxV3(time uint64) bool {
+	return isTimestampForked(c.MetaTxV3UpgradeTime, time)
+}
+
+// IsMantleEverest returns whether time is either equal to the Mantle Everest fork time or greater.
+func (c *ChainConfig) IsMantleEverest(time uint64) bool {
+	return isTimestampForked(c.MantleEverestTime, time)
+}
+
+// IsMantleSkadi returns whether time is either equal to the Mantle Everest fork time or greater.
+func (c *ChainConfig) IsMantleSkadi(time uint64) bool {
+	return isTimestampForked(c.MantleSkadiTime, time)
+}
+
+func (c *ChainConfig) IsOptimismWithSkadi(time uint64) bool {
+	return c.IsOptimism() && c.IsMantleSkadi(time)
+}
+
+// IsProxyOwnerUpgrade returns whether time is either equal to the ProxyOwnerUpgrade fork time
+func (c *ChainConfig) IsProxyOwnerUpgrade(time uint64) bool {
+	return isTimestampEqual(c.ProxyOwnerUpgradeTime, time)
+}
+
 // CheckCompatible checks whether scheduled fork transitions have been imported
 // with a mismatching chain configuration.
 func (c *ChainConfig) CheckCompatible(newcfg *ChainConfig, height uint64, time uint64) *ConfigCompatError {
@@ -761,6 +868,15 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		// If it was optional and not set, then ignore it
 		if !cur.optional || (cur.block != nil || cur.timestamp != nil) {
 			lastFork = cur
+		}
+	}
+
+	// OP-Stack chains don't support blobs, and must have a nil BlobScheduleConfig.
+	if c.IsOptimism() {
+		if c.BlobScheduleConfig == nil {
+			return nil
+		} else {
+			return errors.New("OP-Stack chains must have empty blob configuration")
 		}
 	}
 
@@ -882,11 +998,17 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 
 // BaseFeeChangeDenominator bounds the amount the base fee can change between blocks.
 func (c *ChainConfig) BaseFeeChangeDenominator() uint64 {
+	if c.Optimism != nil {
+		return c.Optimism.EIP1559Denominator
+	}
 	return DefaultBaseFeeChangeDenominator
 }
 
 // ElasticityMultiplier bounds the maximum gas limit an EIP-1559 block may have.
 func (c *ChainConfig) ElasticityMultiplier() uint64 {
+	if c.Optimism != nil {
+		return c.Optimism.EIP1559Elasticity
+	}
 	return DefaultElasticityMultiplier
 }
 
@@ -966,6 +1088,14 @@ func isTimestampForked(s *uint64, head uint64) bool {
 		return false
 	}
 	return *s <= head
+}
+
+// isTimestampEqual returns whether it is time to fork.
+func isTimestampEqual(s *uint64, head uint64) bool {
+	if s == nil {
+		return false
+	}
+	return *s == head
 }
 
 func configTimestampEqual(x, y *uint64) bool {
@@ -1068,6 +1198,10 @@ type Rules struct {
 	IsBerlin, IsLondon                                      bool
 	IsMerge, IsShanghai, IsCancun, IsPrague, IsOsaka        bool
 	IsVerkle                                                bool
+	IsOptimismBedrock, IsOptimismRegolith                   bool
+	IsMantleBaseFee, IsMantleBVMETHMintUpgrade              bool
+	IsMetaTxV2, IsMetaTxV3                                  bool
+	IsMantleEverest, IsMantleSkadi                          bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -1080,24 +1214,32 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 	isMerge = isMerge && c.IsLondon(num)
 	isVerkle := isMerge && c.IsVerkle(num, timestamp)
 	return Rules{
-		ChainID:          new(big.Int).Set(chainID),
-		IsHomestead:      c.IsHomestead(num),
-		IsEIP150:         c.IsEIP150(num),
-		IsEIP155:         c.IsEIP155(num),
-		IsEIP158:         c.IsEIP158(num),
-		IsByzantium:      c.IsByzantium(num),
-		IsConstantinople: c.IsConstantinople(num),
-		IsPetersburg:     c.IsPetersburg(num),
-		IsIstanbul:       c.IsIstanbul(num),
-		IsBerlin:         c.IsBerlin(num),
-		IsEIP2929:        c.IsBerlin(num) && !isVerkle,
-		IsLondon:         c.IsLondon(num),
-		IsMerge:          isMerge,
-		IsShanghai:       isMerge && c.IsShanghai(num, timestamp),
-		IsCancun:         isMerge && c.IsCancun(num, timestamp),
-		IsPrague:         isMerge && c.IsPrague(num, timestamp),
-		IsOsaka:          isMerge && c.IsOsaka(num, timestamp),
-		IsVerkle:         isVerkle,
-		IsEIP4762:        isVerkle,
+		ChainID:                   new(big.Int).Set(chainID),
+		IsHomestead:               c.IsHomestead(num),
+		IsEIP150:                  c.IsEIP150(num),
+		IsEIP155:                  c.IsEIP155(num),
+		IsEIP158:                  c.IsEIP158(num),
+		IsByzantium:               c.IsByzantium(num),
+		IsConstantinople:          c.IsConstantinople(num),
+		IsPetersburg:              c.IsPetersburg(num),
+		IsIstanbul:                c.IsIstanbul(num),
+		IsBerlin:                  c.IsBerlin(num),
+		IsEIP2929:                 c.IsBerlin(num) && !isVerkle,
+		IsLondon:                  c.IsLondon(num),
+		IsMerge:                   isMerge,
+		IsShanghai:                isMerge && c.IsShanghai(num, timestamp),
+		IsCancun:                  isMerge && c.IsCancun(num, timestamp),
+		IsPrague:                  isMerge && c.IsPrague(num, timestamp),
+		IsOsaka:                   isMerge && c.IsOsaka(num, timestamp),
+		IsVerkle:                  isVerkle,
+		IsEIP4762:                 isVerkle,
+		IsOptimismBedrock:         c.IsOptimismBedrock(num),
+		IsOptimismRegolith:        c.IsOptimismRegolith(timestamp),
+		IsMantleBaseFee:           c.IsMantleBaseFee(timestamp),
+		IsMantleBVMETHMintUpgrade: c.IsMantleBVMETHMintUpgrade(timestamp),
+		IsMetaTxV2:                c.IsMetaTxV2(timestamp),
+		IsMetaTxV3:                c.IsMetaTxV3(timestamp),
+		IsMantleEverest:           c.IsMantleEverest(timestamp),
+		IsMantleSkadi:             c.IsMantleSkadi(timestamp),
 	}
 }

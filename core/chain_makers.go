@@ -98,7 +98,7 @@ func (b *BlockGen) Difficulty() *big.Int {
 // block.
 func (b *BlockGen) SetParentBeaconRoot(root common.Hash) {
 	b.header.ParentBeaconRoot = &root
-	blockContext := NewEVMBlockContext(b.header, b.cm, &b.header.Coinbase)
+	blockContext := NewEVMBlockContext(b.header, b.cm, &b.header.Coinbase, b.cm.config, b.statedb)
 	ProcessBeaconBlockRoot(root, vm.NewEVM(blockContext, b.statedb, b.cm.config, vm.Config{}))
 }
 
@@ -114,7 +114,7 @@ func (b *BlockGen) addTx(bc *BlockChain, vmConfig vm.Config, tx *types.Transacti
 		b.SetCoinbase(common.Address{})
 	}
 	var (
-		blockContext = NewEVMBlockContext(b.header, bc, &b.header.Coinbase)
+		blockContext = NewEVMBlockContext(b.header, bc, &b.header.Coinbase, b.cm.config, b.statedb)
 		evm          = vm.NewEVM(blockContext, b.statedb, b.cm.config, vmConfig)
 	)
 	b.statedb.SetTxContext(tx.Hash(), len(b.txs))
@@ -314,7 +314,9 @@ func (b *BlockGen) collectRequests(readonly bool) (requests [][]byte) {
 		statedb = statedb.Copy()
 	}
 
-	if b.cm.config.IsPrague(b.header.Number, b.header.Time) {
+	isMantleSkadi := b.cm.config.IsMantleSkadi(b.header.Time)
+
+	if b.cm.config.IsPrague(b.header.Number, b.header.Time) && !isMantleSkadi {
 		requests = [][]byte{}
 		// EIP-6110 deposits
 		var blockLogs []*types.Log
@@ -325,7 +327,7 @@ func (b *BlockGen) collectRequests(readonly bool) (requests [][]byte) {
 			panic(fmt.Sprintf("failed to parse deposit log: %v", err))
 		}
 		// create EVM for system calls
-		blockContext := NewEVMBlockContext(b.header, b.cm, &b.header.Coinbase)
+		blockContext := NewEVMBlockContext(b.header, b.cm, &b.header.Coinbase, b.cm.config, b.statedb)
 		evm := vm.NewEVM(blockContext, statedb, b.cm.config, vm.Config{})
 		// EIP-7002
 		if err := ProcessWithdrawalQueue(&requests, evm); err != nil {
@@ -336,6 +338,11 @@ func (b *BlockGen) collectRequests(readonly bool) (requests [][]byte) {
 			panic(fmt.Sprintf("could not process consolidation requests: %v", err))
 		}
 	}
+
+	if isMantleSkadi {
+		requests = [][]byte{}
+	}
+
 	return requests
 }
 
@@ -376,6 +383,11 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 				b.header.Difficulty = big.NewInt(0)
 			}
 		}
+		if config.IsOptimismWithSkadi(b.header.Time) {
+			b.withdrawals = make([]*types.Withdrawal, 0)
+			h := types.EmptyWithdrawalsHash
+			b.header.WithdrawalsHash = &h
+		}
 
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
@@ -392,7 +404,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 
 		if config.IsPrague(b.header.Number, b.header.Time) || config.IsVerkle(b.header.Number, b.header.Time) {
 			// EIP-2935
-			blockContext := NewEVMBlockContext(b.header, cm, &b.header.Coinbase)
+			blockContext := NewEVMBlockContext(b.header, cm, &b.header.Coinbase, b.cm.config, b.statedb)
 			blockContext.Random = &common.Hash{} // enable post-merge instruction set
 			evm := vm.NewEVM(blockContext, statedb, cm.config, vm.Config{})
 			ProcessParentBlockHash(b.header.ParentHash, evm)
@@ -499,7 +511,7 @@ func GenerateVerkleChain(config *params.ChainConfig, parent *types.Block, engine
 		// preState := statedb.Copy()
 
 		// EIP-2935 / 7709
-		blockContext := NewEVMBlockContext(b.header, cm, &b.header.Coinbase)
+		blockContext := NewEVMBlockContext(b.header, cm, &b.header.Coinbase, b.cm.config, b.statedb)
 		blockContext.Random = &common.Hash{} // enable post-merge instruction set
 		evm := vm.NewEVM(blockContext, statedb, cm.config, vm.Config{})
 		ProcessParentBlockHash(b.header.ParentHash, evm)

@@ -79,7 +79,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	if hooks := cfg.Tracer; hooks != nil {
 		tracingStateDB = state.NewHookedState(statedb, hooks)
 	}
-	context = NewEVMBlockContext(header, p.chain, nil)
+	context = NewEVMBlockContext(header, p.chain, nil, p.config, statedb)
 	evm := vm.NewEVM(context, tracingStateDB, p.config, cfg)
 
 	if beaconRoot := block.BeaconRoot(); beaconRoot != nil {
@@ -89,9 +89,11 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		ProcessParentBlockHash(block.ParentHash(), evm)
 	}
 
+	rules := evm.ChainConfig().Rules(block.Number(), false, header.Time)
+
 	// Iterate over and process the individual transactions
 	for i, tx := range block.Transactions() {
-		msg, err := TransactionToMessage(tx, signer, header.BaseFee)
+		msg, err := TransactionToMessage(tx, signer, header.BaseFee, &rules)
 		if err != nil {
 			return nil, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
@@ -104,9 +106,12 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		receipts = append(receipts, receipt)
 		allLogs = append(allLogs, receipt.Logs...)
 	}
+
+	isMantleSkadi := p.config.IsMantleSkadi(block.Time())
+
 	// Read requests if Prague is enabled.
 	var requests [][]byte
-	if p.config.IsPrague(block.Number(), block.Time()) {
+	if p.config.IsPrague(block.Number(), block.Time()) && !isMantleSkadi {
 		requests = [][]byte{}
 		// EIP-6110
 		if err := ParseDepositLogs(&requests, allLogs, p.config); err != nil {
@@ -120,6 +125,10 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		if err := ProcessConsolidationQueue(&requests, evm); err != nil {
 			return nil, err
 		}
+	}
+
+	if isMantleSkadi {
+		requests = [][]byte{}
 	}
 
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
@@ -145,6 +154,12 @@ func ApplyTransactionWithEVM(msg *Message, gp *GasPool, statedb *state.StateDB, 
 			defer func() { hooks.OnTxEnd(receipt, err) }()
 		}
 	}
+
+	nonce := tx.Nonce()
+	if msg.IsDepositTx && evm.ChainConfig().IsOptimismRegolith(evm.Context.Time) {
+		nonce = statedb.GetNonce(msg.From)
+	}
+
 	// Apply the transaction to the current state (included in the env).
 	result, err := ApplyMessage(evm, msg, gp)
 	if err != nil {
@@ -165,11 +180,11 @@ func ApplyTransactionWithEVM(msg *Message, gp *GasPool, statedb *state.StateDB, 
 		statedb.AccessEvents().Merge(evm.AccessEvents)
 	}
 
-	return MakeReceipt(evm, result, statedb, blockNumber, blockHash, tx, *usedGas, root), nil
+	return MakeReceipt(msg, evm, result, statedb, blockNumber, blockHash, tx, *usedGas, root, evm.ChainConfig(), nonce), nil
 }
 
 // MakeReceipt generates the receipt object for a transaction given its execution result.
-func MakeReceipt(evm *vm.EVM, result *ExecutionResult, statedb *state.StateDB, blockNumber *big.Int, blockHash common.Hash, tx *types.Transaction, usedGas uint64, root []byte) *types.Receipt {
+func MakeReceipt(msg *Message, evm *vm.EVM, result *ExecutionResult, statedb *state.StateDB, blockNumber *big.Int, blockHash common.Hash, tx *types.Transaction, usedGas uint64, root []byte, config *params.ChainConfig, nonce uint64) *types.Receipt {
 	// Create a new receipt for the transaction, storing the intermediate root and gas used
 	// by the tx.
 	receipt := &types.Receipt{Type: tx.Type(), PostState: root, CumulativeGasUsed: usedGas}
@@ -181,6 +196,25 @@ func MakeReceipt(evm *vm.EVM, result *ExecutionResult, statedb *state.StateDB, b
 	receipt.TxHash = tx.Hash()
 	receipt.GasUsed = result.UsedGas
 
+	if tx.IsDepositTx() && config.IsOptimismRegolith(evm.Context.Time) {
+		// The actual nonce for deposit transactions is only recorded from Regolith onwards and
+		// otherwise must be nil.
+		receipt.DepositNonce = &nonce
+	}
+
+	// used to record l1 fee
+	l1BaseFee, overhead, scalar, scaled, tokenRatio := types.DeriveL1GasInfo(statedb)
+
+	// used to record calculating l1 fee for txs from Layer2
+	if !msg.IsDepositTx {
+		gas := tx.RollupCostData().DataGas(evm.Context.Time, config)
+		receipt.L1GasUsed = new(big.Int).Add(new(big.Int).SetUint64(gas), overhead)
+		receipt.L1GasPrice = l1BaseFee
+		receipt.L1Fee = types.L1Cost(gas, l1BaseFee, overhead, scalar, tokenRatio)
+		receipt.FeeScalar = scaled
+		receipt.TokenRatio = tokenRatio
+	}
+
 	if tx.Type() == types.BlobTxType {
 		receipt.BlobGasUsed = uint64(len(tx.BlobHashes()) * params.BlobTxBlobGasPerBlob)
 		receipt.BlobGasPrice = evm.Context.BlobBaseFee
@@ -188,7 +222,7 @@ func MakeReceipt(evm *vm.EVM, result *ExecutionResult, statedb *state.StateDB, b
 
 	// If the transaction created a contract, store the creation address in the receipt.
 	if tx.To() == nil {
-		receipt.ContractAddress = crypto.CreateAddress(evm.TxContext.Origin, tx.Nonce())
+		receipt.ContractAddress = crypto.CreateAddress(evm.TxContext.Origin, nonce)
 	}
 
 	// Set the receipt logs and create the bloom filter.
@@ -205,7 +239,8 @@ func MakeReceipt(evm *vm.EVM, result *ExecutionResult, statedb *state.StateDB, b
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
 func ApplyTransaction(evm *vm.EVM, gp *GasPool, statedb *state.StateDB, header *types.Header, tx *types.Transaction, usedGas *uint64) (*types.Receipt, error) {
-	msg, err := TransactionToMessage(tx, types.MakeSigner(evm.ChainConfig(), header.Number, header.Time), header.BaseFee)
+	rules := evm.ChainConfig().Rules(header.Number, false, header.Time)
+	msg, err := TransactionToMessage(tx, types.MakeSigner(evm.ChainConfig(), header.Number, header.Time), header.BaseFee, &rules)
 	if err != nil {
 		return nil, err
 	}

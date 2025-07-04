@@ -79,11 +79,21 @@ type simBlockResult struct {
 	Block       *types.Block
 	Calls       []simCallResult
 	// senders is a map of transaction hashes to their senders.
-	senders map[common.Hash]common.Address
+	senders  map[common.Hash]common.Address
+	Receipts types.Receipts
+}
+
+// preparedReceipts implements GetReceipts with already-set receipts.
+// It is used to retrieve receipts to source deposit-tx nonce data during RPC block marshaling.
+// simBlockResult.MarshalJSON can use the OPStack RPCMarshalBlock function.
+type preparedReceipts types.Receipts
+
+func (p preparedReceipts) GetReceipts(context.Context, common.Hash) (types.Receipts, error) {
+	return types.Receipts(p), nil
 }
 
 func (r *simBlockResult) MarshalJSON() ([]byte, error) {
-	blockData := RPCMarshalBlock(r.Block, true, r.fullTx, r.chainConfig)
+	blockData := RPCMarshalBlock(context.Background(), r.Block, true, r.fullTx, r.chainConfig, preparedReceipts(r.Receipts))
 	blockData["calls"] = r.Calls
 	// Set tx sender if user requested full tx objects.
 	if r.fullTx {
@@ -229,7 +239,7 @@ func (sim *simulator) processBlock(ctx context.Context, block *simBlock, header,
 		}
 		header.ExcessBlobGas = &excess
 	}
-	blockContext := core.NewEVMBlockContext(header, sim.newSimulatedChainContext(ctx, headers), nil)
+	blockContext := core.NewEVMBlockContext(header, sim.newSimulatedChainContext(ctx, headers), nil, sim.chainConfig, sim.state)
 	if block.BlockOverrides.BlobBaseFee != nil {
 		blockContext.BlobBaseFee = block.BlockOverrides.BlobBaseFee.ToInt()
 	}
@@ -287,7 +297,7 @@ func (sim *simulator) processBlock(ctx context.Context, block *simBlock, header,
 		tracer.reset(txHash, uint(i))
 		sim.state.SetTxContext(txHash, i)
 		// EoA check is always skipped, even in validation mode.
-		msg := call.ToMessage(header.BaseFee, !sim.validate, true)
+		msg := call.ToMessage(header.BaseFee, !sim.validate, true, core.EthcallMode, call.GasPrice)
 		result, err := applyMessageWithEVM(ctx, evm, msg, timeout, sim.gp)
 		if err != nil {
 			txErr := txValidationError(err)
@@ -301,7 +311,7 @@ func (sim *simulator) processBlock(ctx context.Context, block *simBlock, header,
 			root = sim.state.IntermediateRoot(sim.chainConfig.IsEIP158(blockContext.BlockNumber)).Bytes()
 		}
 		gasUsed += result.UsedGas
-		receipts[i] = core.MakeReceipt(evm, result, sim.state, blockContext.BlockNumber, common.Hash{}, tx, gasUsed, root)
+		receipts[i] = core.MakeReceipt(msg, evm, result, sim.state, blockContext.BlockNumber, common.Hash{}, tx, gasUsed, root, sim.chainConfig, tx.Nonce())
 		blobGasUsed += receipts[i].BlobGasUsed
 		logs := tracer.Logs()
 		callRes := simCallResult{ReturnValue: result.Return(), Logs: logs, GasUsed: hexutil.Uint64(result.UsedGas)}

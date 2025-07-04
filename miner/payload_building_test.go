@@ -36,6 +36,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/preconf"
 )
 
 var (
@@ -60,6 +61,7 @@ var (
 		PendingFeeRecipient: testBankAddress,
 		Recommit:            time.Second,
 		GasCeil:             params.GenesisGasLimit,
+		PreconfConfig:       &preconf.DefaultMinerConfig,
 	}
 )
 
@@ -156,6 +158,7 @@ func TestBuildPayload(t *testing.T) {
 		Timestamp:    timestamp,
 		Random:       common.Hash{},
 		FeeRecipient: recipient,
+		BaseFee:      big.NewInt(1e9),
 	}
 	payload, err := w.buildPayload(args, false)
 	if err != nil {

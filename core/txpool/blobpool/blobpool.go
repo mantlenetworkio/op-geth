@@ -326,6 +326,10 @@ type BlobPool struct {
 	txValidationFn txpool.ValidationFunction
 
 	lock sync.RWMutex // Mutex protecting the pool during reorg handling
+
+	// Preconf variables
+	preconfTxRequestFeed event.Feed
+	preconfTxFeed        event.Feed
 }
 
 // New creates a new blob transaction pool to gather, sort and filter inbound
@@ -1144,7 +1148,8 @@ func (p *BlobPool) validateTx(tx *types.Transaction) error {
 	}
 	// Ensure the transaction adheres to the stateful pool filters (nonce, balance)
 	stateOpts := &txpool.ValidationOptionsWithState{
-		State: p.state,
+		State:  p.state,
+		Config: p.chain.Config(),
 
 		FirstNonceGap: func(addr common.Address) uint64 {
 			// Nonce gaps are not permitted in the blob pool, the first gap will
@@ -1173,7 +1178,7 @@ func (p *BlobPool) validateTx(tx *types.Transaction) error {
 			return nil
 		},
 	}
-	if err := txpool.ValidateTransactionWithState(tx, p.signer, stateOpts); err != nil {
+	if err := txpool.ValidateTransactionWithState(tx, p.head, p.signer, stateOpts); err != nil {
 		return err
 	}
 	if err := p.checkDelegationLimit(tx); err != nil {

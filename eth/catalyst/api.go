@@ -160,6 +160,9 @@ type ConsensusAPI struct {
 // The underlying blockchain needs to have a valid terminal total difficulty set.
 func NewConsensusAPI(eth *eth.Ethereum) *ConsensusAPI {
 	api := newConsensusAPIWithoutHeartbeat(eth)
+	if api.eth.BlockChain().Config().Optimism != nil { // don't start the api heartbeat, there is no transition
+		return api
+	}
 	go api.heartbeat()
 	return api
 }
@@ -389,7 +392,7 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 		// If the specified head matches with our local head, do nothing and keep
 		// generating the payload. It's a special corner case that a few slots are
 		// missing and we are requested to generate the payload in slot.
-	} else {
+	} else if api.eth.BlockChain().Config().Optimism == nil {
 		// If the head block is already in our canonical chain, the beacon client is
 		// probably resyncing. Ignore the update.
 		log.Info("Ignoring beacon update to old head", "number", block.NumberU64(), "hash", update.HeadBlockHash, "age", common.PrettyAge(time.Unix(int64(block.Time()), 0)), "have", api.eth.BlockChain().CurrentBlock().Number)
@@ -430,6 +433,17 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 	// sealed by the beacon client. The payload will be requested later, and we
 	// will replace it arbitrarily many times in between.
 	if payloadAttributes != nil {
+		if api.eth.BlockChain().Config().Optimism != nil && payloadAttributes.GasLimit == nil {
+			return engine.STATUS_INVALID, engine.InvalidPayloadAttributes.With(errors.New("gasLimit parameter is required"))
+		}
+		transactions := make(types.Transactions, 0, len(payloadAttributes.Transactions))
+		for i, otx := range payloadAttributes.Transactions {
+			var tx types.Transaction
+			if err := tx.UnmarshalBinary(otx); err != nil {
+				return engine.STATUS_INVALID, fmt.Errorf("transaction %d is not valid: %v", i, err)
+			}
+			transactions = append(transactions, &tx)
+		}
 		args := &miner.BuildPayloadArgs{
 			Parent:       update.HeadBlockHash,
 			Timestamp:    payloadAttributes.Timestamp,
@@ -438,6 +452,10 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 			Withdrawals:  payloadAttributes.Withdrawals,
 			BeaconRoot:   payloadAttributes.BeaconRoot,
 			Version:      payloadVersion,
+			NoTxPool:     payloadAttributes.NoTxPool,
+			Transactions: transactions,
+			GasLimit:     payloadAttributes.GasLimit,
+			BaseFee:      payloadAttributes.BaseFee,
 		}
 		id := args.Id()
 		// If we already are busy generating this work, then we do not need
@@ -631,6 +649,11 @@ func (api *ConsensusAPI) NewPayloadV4(params engine.ExecutableData, versionedHas
 	if api.eth.BlockChain().Config().LatestFork(params.Timestamp) != forks.Prague {
 		return engine.PayloadStatusV1{Status: engine.INVALID}, engine.UnsupportedFork.With(errors.New("newPayloadV4 must only be called for prague payloads"))
 	}
+
+	if api.eth.BlockChain().Config().IsMantleSkadi(params.Timestamp) && params.WithdrawalsRoot == nil {
+		return engine.PayloadStatusV1{Status: engine.INVALID}, engine.InvalidParams.With(errors.New("nil withdrawalsRoot post skadi"))
+	}
+
 	requests := convertRequests(executionRequests)
 	if err := validateRequests(requests); err != nil {
 		return engine.PayloadStatusV1{Status: engine.INVALID}, engine.InvalidParams.With(err)
@@ -837,7 +860,7 @@ func (api *ConsensusAPI) newPayload(params engine.ExecutableData, versionedHashe
 	defer api.newPayloadLock.Unlock()
 
 	log.Trace("Engine API request received", "method", "NewPayload", "number", params.Number, "hash", params.BlockHash)
-	block, err := engine.ExecutableDataToBlock(params, versionedHashes, beaconRoot, requests)
+	block, err := engine.ExecutableDataToBlock(params, versionedHashes, beaconRoot, requests, api.eth.BlockChain().Config())
 	if err != nil {
 		bgu := "nil"
 		if params.BlobGasUsed != nil {
@@ -864,6 +887,7 @@ func (api *ConsensusAPI) newPayload(params engine.ExecutableData, versionedHashe
 			"params.ExcessBlobGas", ebg,
 			"len(params.Transactions)", len(params.Transactions),
 			"len(params.Withdrawals)", len(params.Withdrawals),
+			"params.WithdrawalsRoot", params.WithdrawalsRoot,
 			"beaconRoot", beaconRoot,
 			"len(requests)", len(requests),
 			"error", err)
@@ -936,7 +960,7 @@ func (api *ConsensusAPI) newPayload(params engine.ExecutableData, versionedHashe
 
 func (api *ConsensusAPI) executeStatelessPayload(params engine.ExecutableData, versionedHashes []common.Hash, beaconRoot *common.Hash, requests [][]byte, opaqueWitness hexutil.Bytes) (engine.StatelessPayloadStatusV1, error) {
 	log.Trace("Engine API request received", "method", "ExecuteStatelessPayload", "number", params.Number, "hash", params.BlockHash)
-	block, err := engine.ExecutableDataToBlockNoHash(params, versionedHashes, beaconRoot, requests)
+	block, err := engine.ExecutableDataToBlockNoHash(params, versionedHashes, beaconRoot, requests, api.eth.BlockChain().Config())
 	if err != nil {
 		bgu := "nil"
 		if params.BlobGasUsed != nil {
@@ -963,6 +987,7 @@ func (api *ConsensusAPI) executeStatelessPayload(params engine.ExecutableData, v
 			"params.ExcessBlobGas", ebg,
 			"len(params.Transactions)", len(params.Transactions),
 			"len(params.Withdrawals)", len(params.Withdrawals),
+			"params.WithdrawalsRoot", params.WithdrawalsRoot,
 			"beaconRoot", beaconRoot,
 			"len(requests)", len(requests),
 			"error", err)

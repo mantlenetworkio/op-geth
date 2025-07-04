@@ -44,6 +44,11 @@ type BuildPayloadArgs struct {
 	Withdrawals  types.Withdrawals     // The provided withdrawals
 	BeaconRoot   *common.Hash          // The provided beaconRoot (Cancun)
 	Version      engine.PayloadVersion // Versioning byte for payload id calculation.
+
+	NoTxPool     bool                 // Optimism addition: option to disable tx pool contents from being included
+	Transactions []*types.Transaction // Optimism addition: txs forced into the block via engine API
+	GasLimit     *uint64              // Optimism addition: override gas limit of the block to build
+	BaseFee      *big.Int             // Optimism addition: override base fee of the block to build
 }
 
 // Id computes an 8-byte identifier by hashing the components of the payload arguments.
@@ -56,6 +61,17 @@ func (args *BuildPayloadArgs) Id() engine.PayloadID {
 	rlp.Encode(hasher, args.Withdrawals)
 	if args.BeaconRoot != nil {
 		hasher.Write(args.BeaconRoot[:])
+	}
+	if args.NoTxPool || len(args.Transactions) > 0 { // extend if extra payload attributes are used
+		binary.Write(hasher, binary.BigEndian, args.NoTxPool)
+		binary.Write(hasher, binary.BigEndian, uint64(len(args.Transactions)))
+		for _, tx := range args.Transactions {
+			h := tx.Hash()
+			hasher.Write(h[:])
+		}
+	}
+	if args.GasLimit != nil {
+		binary.Write(hasher, binary.BigEndian, *args.GasLimit)
 	}
 	var out engine.PayloadID
 	copy(out[:], hasher.Sum(nil)[:8])
@@ -219,6 +235,9 @@ func (miner *Miner) buildPayload(args *BuildPayloadArgs, witness bool) (*Payload
 		withdrawals: args.Withdrawals,
 		beaconRoot:  args.BeaconRoot,
 		noTxs:       true,
+		txs:         args.Transactions,
+		gasLimit:    args.GasLimit,
+		baseFee:     args.BaseFee,
 	}
 	empty := miner.generateWork(emptyParams, witness)
 	if empty.err != nil {
@@ -226,6 +245,36 @@ func (miner *Miner) buildPayload(args *BuildPayloadArgs, witness bool) (*Payload
 	}
 	// Construct a payload object for return.
 	payload := newPayload(empty.block, empty.requests, empty.witness, args.Id())
+
+	if args.NoTxPool { // don't start the background payload updating job if there is no tx pool to pull from
+		// make sure to make it appear as full, otherwise it will wait indefinitely for payload building to complete.
+		payload.full = empty.block
+		payload.fullFees = empty.fees
+		payload.fullWitness = empty.witness
+		payload.requests = empty.requests
+		return payload, nil
+	}
+
+	fullParams := &generateParams{
+		timestamp:   args.Timestamp,
+		forceTime:   true,
+		parentHash:  args.Parent,
+		coinbase:    args.FeeRecipient,
+		random:      args.Random,
+		withdrawals: args.Withdrawals,
+		beaconRoot:  args.BeaconRoot,
+		noTxs:       false,
+		txs:         args.Transactions,
+		gasLimit:    args.GasLimit,
+		baseFee:     args.BaseFee,
+	}
+
+	// Since we skip building the empty block when using the tx pool, we need to explicitly
+	// validate the BuildPayloadArgs here.
+	blockTime, err := miner.validateParams(fullParams)
+	if err != nil {
+		return nil, err
+	}
 
 	// Spin up a routine for updating the payload in background. This strategy
 	// can maximum the revenue for including transactions with highest fee.
@@ -235,21 +284,10 @@ func (miner *Miner) buildPayload(args *BuildPayloadArgs, witness bool) (*Payload
 		timer := time.NewTimer(0)
 		defer timer.Stop()
 
-		// Setup the timer for terminating the process if SECONDS_PER_SLOT (12s in
-		// the Mainnet configuration) have passed since the point in time identified
-		// by the timestamp parameter.
-		endTimer := time.NewTimer(time.Second * 12)
-
-		fullParams := &generateParams{
-			timestamp:   args.Timestamp,
-			forceTime:   true,
-			parentHash:  args.Parent,
-			coinbase:    args.FeeRecipient,
-			random:      args.Random,
-			withdrawals: args.Withdrawals,
-			beaconRoot:  args.BeaconRoot,
-			noTxs:       false,
-		}
+		// Setup the timer for terminating the payload building process as determined
+		// by validateParams.
+		endTimer := time.NewTimer(blockTime)
+		defer endTimer.Stop()
 
 		for {
 			select {

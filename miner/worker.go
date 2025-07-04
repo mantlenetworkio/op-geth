@@ -17,6 +17,7 @@
 package miner
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/big"
@@ -32,6 +33,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/eth/tracers"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
@@ -60,6 +62,50 @@ type environment struct {
 	blobs    int
 
 	witness *stateless.Witness
+}
+
+// copy creates a deep copy of environment.
+func (env *environment) copy(chain core.ChainContext) *environment {
+	cpy := &environment{
+		signer:   env.signer,
+		state:    env.state.Copy(),
+		tcount:   env.tcount,
+		coinbase: env.coinbase,
+
+		header:   types.CopyHeader(env.header),
+		receipts: copyReceipts(env.receipts),
+		blobs:    env.blobs,
+
+		witness: env.witness,
+	}
+	if env.gasPool != nil {
+		gasPool := *env.gasPool
+		cpy.gasPool = &gasPool
+	}
+	if env.evm != nil {
+		blockCtx := core.NewEVMBlockContext(cpy.header, chain, nil, env.evm.ChainConfig(), cpy.state)
+		cpy.evm = vm.NewEVM(blockCtx, cpy.state, env.evm.ChainConfig(), env.evm.Config)
+	}
+	// The content of txs and uncles are immutable, unnecessary
+	// to do the expensive deep copy for them.
+	cpy.txs = make([]*types.Transaction, len(env.txs))
+	copy(cpy.txs, env.txs)
+
+	// copy the sidecars
+	cpy.sidecars = make([]*types.BlobTxSidecar, len(env.sidecars))
+	copy(cpy.sidecars, env.sidecars)
+
+	return cpy
+}
+
+// copyReceipts makes a deep copy of the given receipts.
+func copyReceipts(receipts []*types.Receipt) []*types.Receipt {
+	result := make([]*types.Receipt, len(receipts))
+	for i, l := range receipts {
+		cpy := *l
+		result[i] = &cpy
+	}
+	return result
 }
 
 const (
@@ -91,6 +137,10 @@ type generateParams struct {
 	withdrawals types.Withdrawals // List of withdrawals to include in block (shanghai field)
 	beaconRoot  *common.Hash      // The beacon root (cancun field).
 	noTxs       bool              // Flag whether an empty block without any transaction is expected
+
+	txs      []*types.Transaction // Optimism addition: txs forced into the block via engine API
+	gasLimit *uint64              // Optimism addition: override gas limit of the block to build
+	baseFee  *big.Int             // Optimism addition: override base fee of the block to build
 }
 
 // generateWork generates a sealing block based on the given parameters.
@@ -99,6 +149,31 @@ func (miner *Miner) generateWork(params *generateParams, witness bool) *newPaylo
 	if err != nil {
 		return &newPayloadResult{err: err}
 	}
+
+	if work.gasPool == nil {
+		gasLimit := work.header.GasLimit
+
+		// If we're building blocks with mempool transactions, we need to ensure that the
+		// gas limit is not higher than the effective gas limit. We must still accept any
+		// explicitly selected transactions with gas usage up to the block header's limit.
+		if !params.noTxs {
+			effectiveGasLimit := miner.config.EffectiveGasCeil
+			if effectiveGasLimit != 0 && effectiveGasLimit < gasLimit {
+				gasLimit = effectiveGasLimit
+			}
+		}
+		work.gasPool = new(core.GasPool).AddGas(gasLimit)
+	}
+
+	for _, tx := range params.txs {
+		from, _ := types.Sender(work.signer, tx)
+		work.state.SetTxContext(tx.Hash(), work.tcount)
+		err = miner.commitTransaction(work, tx)
+		if err != nil {
+			return &newPayloadResult{err: fmt.Errorf("failed to force-include tx: %s type: %d sender: %s nonce: %d, err: %w", tx.Hash(), tx.Type(), from, tx.Nonce(), err)}
+		}
+	}
+
 	if !params.noTxs {
 		interrupt := new(atomic.Int32)
 		timer := time.AfterFunc(miner.config.Recommit, func() {
@@ -118,9 +193,11 @@ func (miner *Miner) generateWork(params *generateParams, witness bool) *newPaylo
 		allLogs = append(allLogs, r.Logs...)
 	}
 
+	isMantleSkadi := miner.chainConfig.IsMantleSkadi(work.header.Time)
+
 	// Collect consensus-layer requests if Prague is enabled.
 	var requests [][]byte
-	if miner.chainConfig.IsPrague(work.header.Number, work.header.Time) {
+	if miner.chainConfig.IsPrague(work.header.Number, work.header.Time) && !isMantleSkadi {
 		requests = [][]byte{}
 		// EIP-6110 deposits
 		if err := core.ParseDepositLogs(&requests, allLogs, miner.chainConfig); err != nil {
@@ -135,6 +212,11 @@ func (miner *Miner) generateWork(params *generateParams, witness bool) *newPaylo
 			return &newPayloadResult{err: err}
 		}
 	}
+
+	if isMantleSkadi {
+		requests = [][]byte{}
+	}
+
 	if requests != nil {
 		reqHash := types.CalcRequestsHash(requests)
 		work.header.RequestsHash = &reqHash
@@ -189,7 +271,7 @@ func (miner *Miner) prepareWork(genParams *generateParams, witness bool) (*envir
 		Coinbase:   genParams.coinbase,
 	}
 	// Set the extra field.
-	if len(miner.config.ExtraData) != 0 {
+	if len(miner.config.ExtraData) != 0 && miner.chainConfig.Optimism == nil {
 		header.Extra = miner.config.ExtraData
 	}
 	// Set the randomness field from the beacon chain if it's available.
@@ -199,10 +281,25 @@ func (miner *Miner) prepareWork(genParams *generateParams, witness bool) (*envir
 	// Set baseFee and GasLimit if we are on an EIP-1559 chain
 	if miner.chainConfig.IsLondon(header.Number) {
 		header.BaseFee = eip1559.CalcBaseFee(miner.chainConfig, parent)
+		if miner.chainConfig.IsMantleBaseFee(header.Time) {
+			header.BaseFee = genParams.baseFee
+		}
+		if genParams.baseFee == nil {
+			header.BaseFee = eip1559.CalcBaseFee(miner.chainConfig, parent)
+			log.Debug("header base fee from eip1559 calculator", "baseFee", header.BaseFee.String())
+		} else {
+			log.Debug("header base fee from catalyst generation parameters", "baseFee", header.BaseFee.String())
+		}
 		if !miner.chainConfig.IsLondon(parent.Number) {
 			parentGasLimit := parent.GasLimit * miner.chainConfig.ElasticityMultiplier()
 			header.GasLimit = core.CalcGasLimit(parentGasLimit, miner.config.GasCeil)
 		}
+	}
+	if genParams.gasLimit != nil { // override gas limit if specified
+		header.GasLimit = *genParams.gasLimit
+	} else if miner.chain.Config().Optimism != nil && miner.config.GasCeil != 0 {
+		// configure the gas limit of pending blocks with the miner gas limit config when using optimism
+		header.GasLimit = miner.config.GasCeil
 	}
 	// Run the consensus preparation with the default or customized consensus engine.
 	// Note that the `header.Time` may be changed.
@@ -241,9 +338,19 @@ func (miner *Miner) prepareWork(genParams *generateParams, witness bool) (*envir
 func (miner *Miner) makeEnv(parent *types.Header, header *types.Header, coinbase common.Address, witness bool) (*environment, error) {
 	// Retrieve the parent state to execute on top.
 	state, err := miner.chain.StateAt(parent.Root)
+	if err != nil && miner.chainConfig.Optimism != nil { // Allow the miner to reorg its own chain arbitrarily deep
+		if historicalBackend, ok := miner.backend.(BackendWithHistoricalState); ok {
+			var release tracers.StateReleaseFunc
+			parentBlock := miner.backend.BlockChain().GetBlockByHash(parent.Hash())
+			state, release, err = historicalBackend.StateAtBlock(context.Background(), parentBlock, ^uint64(0), nil, false, false)
+			state = state.Copy()
+			release()
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
+
 	if witness {
 		bundle, err := stateless.NewWitness(header, miner.chain)
 		if err != nil {
@@ -258,7 +365,7 @@ func (miner *Miner) makeEnv(parent *types.Header, header *types.Header, coinbase
 		coinbase: coinbase,
 		header:   header,
 		witness:  state.Witness(),
-		evm:      vm.NewEVM(core.NewEVMBlockContext(header, miner.chain, &coinbase), state, miner.chainConfig, vm.Config{}),
+		evm:      vm.NewEVM(core.NewEVMBlockContext(header, miner.chain, &coinbase, miner.chainConfig, state), state, miner.chainConfig, vm.Config{}),
 	}, nil
 }
 
@@ -429,8 +536,13 @@ func (miner *Miner) commitTransactions(env *environment, plainTxs, blobTxs *tran
 // into the given sealing block. The transaction selection and ordering strategy can
 // be customized with the plugin in the future.
 func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *environment) error {
+	unSealedPreconfTxsCh := miner.preconfChecker.PausePreconf()
+	defer func() {
+		miner.preconfChecker.UnpausePreconf(env.copy(miner.backend.BlockChain()), miner.txpool.PreconfReady)
+	}()
+
 	miner.confMu.RLock()
-	tip := miner.config.GasPrice
+	tip := big.NewInt(0) // accept txs with 0 tip fee
 	prio := miner.prio
 	miner.confMu.RUnlock()
 
@@ -445,7 +557,27 @@ func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *environment) 
 		filter.BlobFee = uint256.MustFromBig(eip4844.CalcBlobFee(miner.chainConfig, env.header))
 	}
 	filter.OnlyPlainTxs, filter.OnlyBlobTxs = true, false
-	pendingPlainTxs := miner.txpool.Pending(filter)
+
+	// Split the pending transactions into locals and remotes
+	// Fill the block with all available pending transactions.
+	preconfTxs, pendingPlainTxs := miner.txpool.PendingPreconfTxs(filter)
+	log.Debug("find preconf txs to fill into block", "count", len(preconfTxs))
+	var unsealedPreconfTxs []*types.Transaction
+	if len(preconfTxs) > 0 {
+		unsealedTxs, err := miner.commitFIFOTransactions(env, preconfTxs, interrupt)
+		if err != nil {
+			return err
+		}
+		unsealedPreconfTxs = unsealedTxs
+	}
+	unSealedPreconfTxsCh <- unsealedPreconfTxs
+	// If there are unsealed preconfirmation transactions, we cannot include new transactions
+	// as this could cause other transactions to be packaged before preconfirmation transactions,
+	// potentially causing successfully preconfirmed transactions to actually fail
+	if len(unsealedPreconfTxs) > 0 {
+		log.Debug("Ending fillTransactions due to unsealed preconfirmation transactions", "unsealedPreconfTxs", unsealedPreconfTxs)
+		return nil
+	}
 
 	filter.OnlyPlainTxs, filter.OnlyBlobTxs = false, true
 	pendingBlobTxs := miner.txpool.Pending(filter)
@@ -484,6 +616,79 @@ func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *environment) 
 	return nil
 }
 
+func (miner *Miner) commitFIFOTransactions(env *environment, txs []*types.Transaction, interrupt *atomic.Int32) ([]*types.Transaction, error) {
+	gasLimit := env.header.GasLimit
+	if env.gasPool == nil {
+		env.gasPool = new(core.GasPool).AddGas(gasLimit)
+	}
+
+	// gasLimitReached indicates whether we broke the loop due to gas limit
+	gasLimitReached := false
+	// breakIndex tracks the index where we broke due to gas limit
+	breakIndex := -1
+
+FIFO:
+	for i, tx := range txs {
+		// Check interruption signal and abort building if it's fired.
+		if interrupt != nil {
+			if signal := interrupt.Load(); signal != commitInterruptNone {
+				return nil, signalToErr(signal)
+			}
+		}
+		// If we don't have enough gas for any further transactions then we're done.
+		if env.gasPool.Gas() < params.TxGas {
+			log.Trace("Not enough gas for further transactions", "have", env.gasPool, "want", params.TxGas, "index", i, "tx", tx.Hash().Hex())
+			gasLimitReached = true
+			breakIndex = i
+			break
+		}
+
+		// Error may be ignored here. The error has already been checked
+		// during transaction acceptance is the transaction pool.
+		from, _ := types.Sender(env.signer, tx)
+
+		// Check whether the tx is replay protected. If we're not in the EIP155 hf
+		// phase, start ignoring the sender until we do.
+		if tx.Protected() && !miner.chainConfig.IsEIP155(env.header.Number) {
+			log.Trace("Ignoring reply protected transaction", "hash", tx.Hash(), "eip155", miner.chainConfig.EIP155Block)
+			continue
+		}
+		// Start executing the transaction
+		env.state.SetTxContext(tx.Hash(), env.tcount)
+
+		err := miner.commitTransaction(env, tx)
+		switch {
+		case errors.Is(err, core.ErrGasLimitReached):
+			// Pop the current out-of-gas transaction without shifting in the next from the account
+			log.Trace("Gas limit exceeded for current block", "sender", from, "index", i, "tx", tx.Hash().Hex())
+			gasLimitReached = true
+			breakIndex = i
+			break FIFO
+
+		case errors.Is(err, core.ErrNonceTooLow):
+			// New head notification data race between the transaction pool and miner
+			log.Trace("Skipping transaction with low nonce", "hash", tx.Hash(), "sender", from, "nonce", tx.Nonce())
+
+		case errors.Is(err, nil):
+			// Everything ok
+
+		default:
+			// Transaction is regarded as invalid, drop all consecutive transactions from
+			// the same sender because of `nonce-too-high` clause.
+			log.Debug("Transaction failed, account skipped", "hash", tx.Hash(), "err", err)
+		}
+	}
+
+	// Return unprocessed transactions only if we broke due to gas limit
+	unsealedTxs := make([]*types.Transaction, 0)
+	if gasLimitReached && breakIndex >= 0 {
+		// Only return transactions from the break point onwards
+		unsealedTxs = txs[breakIndex:]
+		log.Debug("unsealed transactions due to gas limit", "breakIndex", breakIndex, "len(tx)", len(txs))
+	}
+	return unsealedTxs, nil
+}
+
 // totalFees computes total consumed miner fees in Wei. Block transactions and receipts have to have the same order.
 func totalFees(block *types.Block, receipts []*types.Receipt) *big.Int {
 	feesWei := new(big.Int)
@@ -508,4 +713,36 @@ func signalToErr(signal int32) error {
 	default:
 		panic(fmt.Errorf("undefined signal %d", signal))
 	}
+}
+
+// validateParams validates the given parameters.
+// It currently checks that the parent block is known and that the timestamp is valid,
+// i.e., after the parent block's timestamp.
+// It returns an upper bound of the payload building duration as computed
+// by the difference in block timestamps between the parent and genParams.
+func (miner *Miner) validateParams(genParams *generateParams) (time.Duration, error) {
+	miner.confMu.RLock()
+	defer miner.confMu.RUnlock()
+
+	// Find the parent block for sealing task
+	parent := miner.chain.CurrentBlock()
+	if genParams.parentHash != (common.Hash{}) {
+		block := miner.chain.GetBlockByHash(genParams.parentHash)
+		if block == nil {
+			return 0, fmt.Errorf("missing parent %v", genParams.parentHash)
+		}
+		parent = block.Header()
+	}
+
+	// Sanity check the timestamp correctness
+	blockTime := int64(genParams.timestamp) - int64(parent.Time)
+	if blockTime <= 0 && genParams.forceTime {
+		return 0, fmt.Errorf("invalid timestamp, parent %d given %d", parent.Time, genParams.timestamp)
+	}
+
+	// minimum payload build time of 2s
+	if blockTime < 2 {
+		blockTime = 2
+	}
+	return time.Duration(blockTime) * time.Second, nil
 }

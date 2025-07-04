@@ -19,12 +19,14 @@ package eth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core"
@@ -40,6 +42,7 @@ import (
 	"github.com/ethereum/go-ethereum/eth/tracers"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
 )
@@ -48,6 +51,7 @@ import (
 type EthAPIBackend struct {
 	extRPCEnabled       bool
 	allowUnprotectedTxs bool
+	disableTxPool       bool
 	eth                 *Ethereum
 	gpo                 *gasprice.Oracle
 }
@@ -286,7 +290,7 @@ func (b *EthAPIBackend) GetEVM(ctx context.Context, state *state.StateDB, header
 	if blockCtx != nil {
 		context = *blockCtx
 	} else {
-		context = core.NewEVMBlockContext(header, b.eth.BlockChain(), nil)
+		context = core.NewEVMBlockContext(header, b.eth.BlockChain(), nil, b.eth.blockchain.Config(), state)
 	}
 	return vm.NewEVM(context, state, b.ChainConfig(), *vmConfig)
 }
@@ -308,6 +312,33 @@ func (b *EthAPIBackend) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscri
 }
 
 func (b *EthAPIBackend) SendTx(ctx context.Context, signedTx *types.Transaction) error {
+	if b.ChainConfig().IsOptimism() && signedTx.Type() == types.BlobTxType {
+		return types.ErrTxTypeNotSupported
+	}
+
+	if b.eth.seqRPCService != nil {
+		data, err := signedTx.MarshalBinary()
+		if err != nil {
+			return err
+		}
+		if err := b.eth.seqRPCService.CallContext(ctx, nil, "eth_sendRawTransaction", hexutil.Encode(data)); err != nil {
+			return fmt.Errorf("failed to forward tx to sequencer, err: '%w'", err)
+		}
+	}
+	if b.disableTxPool {
+		return nil
+	}
+
+	// Retain tx in local tx pool after forwarding, for local RPC usage.
+	err := b.sendTx(ctx, signedTx)
+	if err != nil && b.eth.seqRPCService != nil {
+		log.Warn("successfully sent tx to sequencer, but failed to persist in local tx pool", "err", err, "tx", signedTx.Hash())
+		return nil
+	}
+	return err
+}
+
+func (b *EthAPIBackend) sendTx(ctx context.Context, signedTx *types.Transaction) error {
 	err := b.eth.txPool.Add([]*types.Transaction{signedTx}, false)[0]
 
 	// If the local transaction tracker is not configured, returns whatever
@@ -327,6 +358,63 @@ func (b *EthAPIBackend) SendTx(ctx context.Context, signedTx *types.Transaction)
 	// Locally submitted transactions will be resubmitted later via the local tracker.
 	b.eth.localTxTracker.Track(signedTx)
 	return nil
+}
+
+func (b *EthAPIBackend) SendTxWithPreconf(ctx context.Context, tx *types.Transaction) (*core.NewPreconfTxEvent, error) {
+	if b.eth.seqRPCService != nil {
+		data, err := tx.MarshalBinary()
+		if err != nil {
+			return nil, err
+		}
+		var result *core.NewPreconfTxEvent
+		if err = b.eth.seqRPCService.CallContext(ctx, &result, "eth_sendRawTransactionWithPreconf", hexutil.Encode(data)); err != nil {
+			return nil, fmt.Errorf("failed to forward tx to sequencer, please try again. Error message: '%w'", err)
+		}
+		return result, nil
+	}
+
+	return b.sendTxWithPreconf(ctx, tx)
+}
+
+func (b *EthAPIBackend) sendTxWithPreconf(ctx context.Context, tx *types.Transaction) (*core.NewPreconfTxEvent, error) {
+	if b.eth.config.Miner.PreconfConfig == nil || !b.eth.config.Miner.PreconfConfig.EnablePreconfChecker {
+		return nil, fmt.Errorf("preconf checker is not enabled, can't be submitted as preconf tx")
+	}
+
+	if !b.eth.miner.IsPreconfStatusOk() {
+		return nil, fmt.Errorf("preconf checker is not ready, can't be submitted as preconf tx")
+	}
+
+	preconfTxCh := make(chan core.NewPreconfTxEvent, 100)
+	defer close(preconfTxCh)
+	sub := b.SubscribeNewPreconfTxEvent(preconfTxCh)
+	defer sub.Unsubscribe()
+
+	// Send tx
+	txHash := tx.Hash()
+	if err := b.SendTx(ctx, tx); err != nil {
+		return nil, err
+	}
+
+	// Wait for preconf tx event
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	for {
+		select {
+		case preconfTx := <-preconfTxCh:
+			if preconfTx.TxHash == txHash {
+				if preconfTx.Status != core.PreconfStatusSuccess {
+					log.Trace("api backend received preconf tx failed event", "tx", txHash, "reason", preconfTx.Reason)
+				} else if b.eth.preconfTxTracker != nil { // only success preconf tx will be tracked
+					b.eth.preconfTxTracker.Track(tx)
+				}
+				return &preconfTx, nil
+			}
+		case <-ctx.Done():
+			log.Trace("preconf tx event not received", "tx", txHash, "err", ctx.Err())
+			return nil, fmt.Errorf("can't be submitted as preconf tx, txHash: %s", txHash)
+		}
+	}
 }
 
 func (b *EthAPIBackend) GetPoolTransactions() (types.Transactions, error) {
@@ -383,6 +471,10 @@ func (b *EthAPIBackend) TxPoolContentFrom(addr common.Address) ([]*types.Transac
 
 func (b *EthAPIBackend) TxPool() *txpool.TxPool {
 	return b.eth.txPool
+}
+
+func (b *EthAPIBackend) SubscribeNewPreconfTxEvent(ch chan<- core.NewPreconfTxEvent) event.Subscription {
+	return b.eth.TxPool().SubscribeNewPreconfTxEvent(ch)
 }
 
 func (b *EthAPIBackend) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription {
@@ -467,4 +559,12 @@ func (b *EthAPIBackend) StateAtBlock(ctx context.Context, block *types.Block, re
 
 func (b *EthAPIBackend) StateAtTransaction(ctx context.Context, block *types.Block, txIndex int, reexec uint64) (*types.Transaction, vm.BlockContext, *state.StateDB, tracers.StateReleaseFunc, error) {
 	return b.eth.stateAtTransaction(ctx, block, txIndex, reexec)
+}
+
+func (b *EthAPIBackend) HistoricalRPCService() *rpc.Client {
+	return b.eth.historicalRPCService
+}
+
+func (b *EthAPIBackend) Genesis() *types.Block {
+	return b.eth.blockchain.Genesis()
 }

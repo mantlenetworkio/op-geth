@@ -74,6 +74,7 @@ type Backend interface {
 
 	// Transaction pool API
 	SendTx(ctx context.Context, signedTx *types.Transaction) error
+	SendTxWithPreconf(ctx context.Context, signedTx *types.Transaction) (*core.NewPreconfTxEvent, error)
 	GetTransaction(txHash common.Hash) (bool, *types.Transaction, common.Hash, uint64, uint64)
 	TxIndexDone() bool
 	GetPoolTransactions() (types.Transactions, error)
@@ -83,10 +84,13 @@ type Backend interface {
 	TxPoolContent() (map[common.Address][]*types.Transaction, map[common.Address][]*types.Transaction)
 	TxPoolContentFrom(addr common.Address) ([]*types.Transaction, []*types.Transaction)
 	SubscribeNewTxsEvent(chan<- core.NewTxsEvent) event.Subscription
+	SubscribeNewPreconfTxEvent(chan<- core.NewPreconfTxEvent) event.Subscription
 
 	ChainConfig() *params.ChainConfig
 	Engine() consensus.Engine
 	HistoryPruningCutoff() uint64
+	HistoricalRPCService() *rpc.Client
+	Genesis() *types.Block
 
 	// This is copied from filters.Backend
 	// eth/filters needs to be initialized from this backend type, so methods needed by

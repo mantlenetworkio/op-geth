@@ -100,6 +100,7 @@ type handlerConfig struct {
 	BloomCache     uint64                 // Megabytes to alloc for snap sync bloom
 	EventMux       *event.TypeMux         // Legacy event mux, deprecate for `feed`
 	RequiredBlocks map[uint64]common.Hash // Hard coded map of required block hashes for sync challenges
+	NoTxGossip     bool                   // Disable P2P transaction gossip
 }
 
 type handler struct {
@@ -114,6 +115,8 @@ type handler struct {
 	txpool   txPool
 	chain    *core.BlockChain
 	maxPeers int
+
+	noTxGossip bool
 
 	downloader *downloader.Downloader
 	txFetcher  *fetcher.TxFetcher
@@ -147,6 +150,7 @@ func newHandler(config *handlerConfig) (*handler, error) {
 		eventMux:       config.EventMux,
 		database:       config.Database,
 		txpool:         config.TxPool,
+		noTxGossip:     config.NoTxGossip,
 		chain:          config.Chain,
 		peers:          newPeerSet(),
 		requiredBlocks: config.RequiredBlocks,

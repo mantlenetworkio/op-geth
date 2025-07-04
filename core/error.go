@@ -78,6 +78,10 @@ var (
 	// than required to start the invocation.
 	ErrIntrinsicGas = errors.New("intrinsic gas too low")
 
+	// ErrInsufficientGasForL1Cost is returned if the transaction is specified to use less gas
+	// than required for l1Cost.
+	ErrInsufficientGasForL1Cost = errors.New("insufficient gas for l1Cost. Please use estimateGas to get gasLimit")
+
 	// ErrFloorDataGas is returned if the transaction is specified to use less gas
 	// than required for the data floor cost.
 	ErrFloorDataGas = errors.New("insufficient gas for floor data gas cost")
@@ -122,6 +126,12 @@ var (
 	// Message validation errors:
 	ErrEmptyAuthList   = errors.New("EIP-7702 transaction with empty auth list")
 	ErrSetCodeTxCreate = errors.New("EIP-7702 transaction cannot be used to create contract")
+
+	// ErrSystemTxNotSupported is returned for any deposit tx with IsSystemTx=true after the Regolith fork
+	ErrSystemTxNotSupported = errors.New("system tx not supported")
+
+	// ErrEthTxValueTooLarge is returned when EthTxValue is larger than the BVM balance of msg.from
+	ErrEthTxValueTooLarge = errors.New("eth tx value is too large")
 )
 
 // EIP-7702 state transition errors.

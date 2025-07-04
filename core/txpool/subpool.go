@@ -94,6 +94,8 @@ type TxMetadata struct {
 // production, this interface defines the common methods that allow the primary
 // transaction pool to manage the subpools.
 type SubPool interface {
+	preconfTxPool
+
 	// Filter is a selector used to decide whether a transaction would be added
 	// to this particular subpool.
 	Filter(tx *types.Transaction) bool

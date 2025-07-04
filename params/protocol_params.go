@@ -22,6 +22,15 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+var (
+	// The base fee portion of the transaction fee accumulates at this predeploy
+	OptimismBaseFeeRecipient = common.HexToAddress("0x4200000000000000000000000000000000000019")
+	// The L1 portion of the transaction fee accumulates at this predeploy
+	OptimismL1FeeRecipient = common.HexToAddress("0x420000000000000000000000000000000000001A")
+	// The L2 withdrawals contract predeploy address
+	OptimismL2ToL1MessagePasser = common.HexToAddress("0x4200000000000000000000000000000000000016")
+)
+
 const (
 	GasLimitBoundDivisor uint64 = 1024               // The bound divisor of the gas limit, used in update calculations.
 	MinGasLimit          uint64 = 5000               // Minimum the gas limit may ever be.
@@ -162,6 +171,8 @@ const (
 	Bls12381PairingPerPairGas uint64 = 32600 // Per-point pair gas price for BLS12-381 elliptic curve pairing check
 	Bls12381MapG1Gas          uint64 = 5500  // Gas price for BLS12-381 mapping field element to G1 operation
 	Bls12381MapG2Gas          uint64 = 23800 // Gas price for BLS12-381 mapping field element to G2 operation
+
+	P256VerifyGas uint64 = 3450 // secp256r1 elliptic curve signature verifier gas price
 
 	// The Refund Quotient is the cap on how much of the used gas can be refunded. Before EIP-3529,
 	// up to half the consumed gas could be refunded. Redefined as 1/5th in EIP-3529

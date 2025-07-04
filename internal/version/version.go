@@ -34,6 +34,16 @@ var Family = fmt.Sprintf("%d.%d", version.Major, version.Minor)
 // Semantic holds the textual version string for major.minor.patch.
 var Semantic = fmt.Sprintf("%d.%d.%d", version.Major, version.Minor, version.Patch)
 
+// UpstreamGethSemantic holds the textual upstream geth version string for major.minor.patch.
+var UpstreamGethSemantic = func() string {
+	return fmt.Sprintf("%d.%d.%d", version.Major, version.Minor, version.Patch)
+}()
+
+// UpstreamGethWithMeta holds the textual upstream geth version string including the metadata.
+var UpstreamGethWithMeta = func() string {
+	return UpstreamGethSemantic + "-" + version.Meta
+}()
+
 // WithMeta holds the textual version string including the metadata.
 var WithMeta = func() string {
 	v := Semantic

@@ -26,6 +26,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/params"
 )
 
 func TestChainIterator(t *testing.T) {
@@ -35,7 +36,7 @@ func TestChainIterator(t *testing.T) {
 	var block *types.Block
 	var txs []*types.Transaction
 	to := common.BytesToAddress([]byte{0x11})
-	block = types.NewBlock(&types.Header{Number: big.NewInt(int64(0))}, nil, nil, newTestHasher()) // Empty genesis block
+	block = types.NewBlock(&types.Header{Number: big.NewInt(int64(0))}, nil, nil, newTestHasher(), params.TestChainConfig) // Empty genesis block
 	WriteBlock(chainDb, block)
 	WriteCanonicalHash(chainDb, block.Hash(), block.NumberU64())
 	for i := uint64(1); i <= 10; i++ {
@@ -61,7 +62,7 @@ func TestChainIterator(t *testing.T) {
 			})
 		}
 		txs = append(txs, tx)
-		block = types.NewBlock(&types.Header{Number: big.NewInt(int64(i))}, &types.Body{Transactions: types.Transactions{tx}}, nil, newTestHasher())
+		block = types.NewBlock(&types.Header{Number: big.NewInt(int64(i))}, &types.Body{Transactions: types.Transactions{tx}}, nil, newTestHasher(), params.TestChainConfig)
 		WriteBlock(chainDb, block)
 		WriteCanonicalHash(chainDb, block.Hash(), block.NumberU64())
 	}
@@ -109,7 +110,7 @@ func initDatabaseWithTransactions(db ethdb.Database) ([]*types.Block, []*types.T
 	to := common.BytesToAddress([]byte{0x11})
 
 	// Write empty genesis block
-	block := types.NewBlock(&types.Header{Number: big.NewInt(int64(0))}, nil, nil, newTestHasher())
+	block := types.NewBlock(&types.Header{Number: big.NewInt(int64(0))}, nil, nil, newTestHasher(), params.TestChainConfig)
 	WriteBlock(db, block)
 	WriteCanonicalHash(db, block.Hash(), block.NumberU64())
 	blocks = append(blocks, block)
@@ -138,7 +139,7 @@ func initDatabaseWithTransactions(db ethdb.Database) ([]*types.Block, []*types.T
 			})
 		}
 		txs = append(txs, tx)
-		block := types.NewBlock(&types.Header{Number: big.NewInt(int64(i))}, &types.Body{Transactions: types.Transactions{tx}}, nil, newTestHasher())
+		block := types.NewBlock(&types.Header{Number: big.NewInt(int64(i))}, &types.Body{Transactions: types.Transactions{tx}}, nil, newTestHasher(), params.TestChainConfig)
 		WriteBlock(db, block)
 		WriteCanonicalHash(db, block.Hash(), block.NumberU64())
 		blocks = append(blocks, block)

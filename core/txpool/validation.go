@@ -31,11 +31,30 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 )
 
+// L1 Info Gas Overhead is the amount of gas the the L1 info deposit consumes.
+// It is removed from the tx pool max gas to better indicate that L2 transactions
+// are not able to consume all of the gas in a L2 block as the L1 info deposit is always present.
+const l1InfoGasOverhead = uint64(1_000_000)
+
 var (
 	// blobTxMinBlobGasPrice is the big.Int version of the configured protocol
 	// parameter to avoid constructing a new big integer for every transaction.
 	blobTxMinBlobGasPrice = big.NewInt(params.BlobTxMinBlobGasprice)
 )
+
+func EffectiveGasLimit(chainConfig *params.ChainConfig, gasLimit uint64, effectiveLimit uint64) uint64 {
+	if effectiveLimit != 0 && effectiveLimit < gasLimit {
+		gasLimit = effectiveLimit
+	}
+	if chainConfig.IsOptimism() {
+		if l1InfoGasOverhead < gasLimit {
+			gasLimit -= l1InfoGasOverhead
+		} else {
+			gasLimit = 0
+		}
+	}
+	return gasLimit
+}
 
 // ValidationOptions define certain differences between transaction validation
 // across the different pools without having to duplicate those checks.
@@ -45,6 +64,8 @@ type ValidationOptions struct {
 	Accept  uint8    // Bitmap of transaction types that should be accepted for the calling pool
 	MaxSize uint64   // Maximum size of a transaction that the caller can meaningfully handle
 	MinTip  *big.Int // Minimum gas tip needed to allow a transaction into the caller pool
+
+	EffectiveGasCeil uint64 // if non-zero, a gas ceiling to enforce independent of the header's gaslimit value
 }
 
 // ValidationFunction is an method type which the pools use to perform the tx-validations which do not
@@ -59,6 +80,21 @@ type ValidationFunction func(tx *types.Transaction, head *types.Header, signer t
 // This check is public to allow different transaction pools to check the basic
 // rules without duplicating code and running the risk of missed updates.
 func ValidateTransaction(tx *types.Transaction, head *types.Header, signer types.Signer, opts *ValidationOptions) error {
+	// No unauthenticated deposits allowed in the transaction pool.
+	// This is for spam protection, not consensus,
+	// as the external engine-API user authenticates deposits.
+	if tx.Type() == types.DepositTxType {
+		return core.ErrTxTypeNotSupported
+	}
+
+	if opts.Config.IsOptimism() && tx.Type() == types.BlobTxType {
+		return core.ErrTxTypeNotSupported
+	}
+
+	if err := types.MetaTxCheck(tx.Data()); err != nil {
+		return err
+	}
+
 	// Ensure transactions not implemented by the calling pool are rejected
 	if opts.Accept&(1<<tx.Type()) == 0 {
 		return fmt.Errorf("%w: tx type %v not supported by this pool", core.ErrTxTypeNotSupported, tx.Type())
@@ -92,7 +128,7 @@ func ValidateTransaction(tx *types.Transaction, head *types.Header, signer types
 		return ErrNegativeValue
 	}
 	// Ensure the transaction doesn't exceed the current block limit gas
-	if head.GasLimit < tx.Gas() {
+	if EffectiveGasLimit(opts.Config, head.GasLimit, opts.EffectiveGasCeil) < tx.Gas() {
 		return ErrGasLimit
 	}
 	// Sanity check for extremely large numbers (supported by RLP or RPC)
@@ -110,25 +146,7 @@ func ValidateTransaction(tx *types.Transaction, head *types.Header, signer types
 	if _, err := types.Sender(signer, tx); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidSender, err)
 	}
-	// Ensure the transaction has more gas than the bare minimum needed to cover
-	// the transaction metadata
-	intrGas, err := core.IntrinsicGas(tx.Data(), tx.AccessList(), tx.SetCodeAuthorizations(), tx.To() == nil, true, rules.IsIstanbul, rules.IsShanghai)
-	if err != nil {
-		return err
-	}
-	if tx.Gas() < intrGas {
-		return fmt.Errorf("%w: gas %v, minimum needed %v", core.ErrIntrinsicGas, tx.Gas(), intrGas)
-	}
-	// Ensure the transaction can cover floor data gas.
-	if opts.Config.IsPrague(head.Number, head.Time) {
-		floorDataGas, err := core.FloorDataGas(tx.Data())
-		if err != nil {
-			return err
-		}
-		if tx.Gas() < floorDataGas {
-			return fmt.Errorf("%w: gas %v, minimum needed %v", core.ErrFloorDataGas, tx.Gas(), floorDataGas)
-		}
-	}
+
 	// Ensure the gasprice is high enough to cover the requirement of the calling pool
 	if tx.GasTipCapIntCmp(opts.MinTip) < 0 {
 		return fmt.Errorf("%w: gas tip cap %v, minimum needed %v", ErrTxGasPriceTooLow, tx.GasTipCap(), opts.MinTip)
@@ -190,6 +208,8 @@ func validateBlobSidecar(hashes []common.Hash, sidecar *types.BlobTxSidecar) err
 type ValidationOptionsWithState struct {
 	State *state.StateDB // State database to check nonces and balances against
 
+	Config *params.ChainConfig // Chain configuration to selectively validate based on current fork rules
+
 	// FirstNonceGap is an optional callback to retrieve the first nonce gap in
 	// the list of pooled transactions of a specific account. If this method is
 	// set, nonce gaps will be checked and forbidden. If this method is not set,
@@ -208,6 +228,9 @@ type ValidationOptionsWithState struct {
 	// ExistingCost is a mandatory callback to retrieve an already pooled
 	// transaction's cost with the given nonce to check for overdrafts.
 	ExistingCost func(addr common.Address, nonce uint64) *big.Int
+
+	// L1CostFn is an optional extension, to validate L1 rollup costs of a tx
+	L1CostFn L1CostFunc
 }
 
 // ValidateTransactionWithState is a helper method to check whether a transaction
@@ -215,7 +238,7 @@ type ValidationOptionsWithState struct {
 //
 // This check is public to allow different transaction pools to check the stateful
 // rules without duplicating code and running the risk of missed updates.
-func ValidateTransactionWithState(tx *types.Transaction, signer types.Signer, opts *ValidationOptionsWithState) error {
+func ValidateTransactionWithState(tx *types.Transaction, head *types.Header, signer types.Signer, opts *ValidationOptionsWithState) error {
 	// Ensure the transaction adheres to nonce ordering
 	from, err := types.Sender(signer, tx) // already validated (and cached), but cleaner to check
 	if err != nil {
@@ -237,10 +260,56 @@ func ValidateTransactionWithState(tx *types.Transaction, signer types.Signer, op
 	var (
 		balance = opts.State.GetBalance(from).ToBig()
 		cost    = tx.Cost()
+		// Ensure only transactions that have been enabled are accepted
+		rules      = opts.Config.Rules(head.Number, head.Difficulty.Sign() == 0, head.Time)
+		tokenRatio = opts.State.GetState(types.GasOracleAddr, types.TokenRatioSlot).Big().Uint64()
 	)
 	if balance.Cmp(cost) < 0 {
 		return fmt.Errorf("%w: balance %v, tx cost %v, overshot %v", core.ErrInsufficientFunds, balance, cost, new(big.Int).Sub(cost, balance))
 	}
+
+	// When feecap is smaller than basefee, submission is meaningless.
+	// Report an error quickly instead of getting stuck in txpool.
+	if tx.GasFeeCap().Cmp(head.BaseFee) < 0 {
+		return core.ErrFeeCapTooLow
+	}
+
+	// Ensure the transaction has more gas than the bare minimum needed to cover the transaction metadata
+	intrGas, err := core.IntrinsicGas(tx.Data(), tx.AccessList(), tx.SetCodeAuthorizations(), tx.To() == nil, true, rules.IsIstanbul, rules.IsShanghai)
+	if err != nil {
+		return err
+	}
+	if tx.Gas() < intrGas*tokenRatio {
+		return fmt.Errorf("%w: gas %v, minimum needed %v", core.ErrIntrinsicGas, tx.Gas(), intrGas*tokenRatio)
+	}
+
+	gasRemaining := big.NewInt(int64(tx.Gas() - intrGas*tokenRatio))
+
+	// Ensure the transaction can cover floor data gas.
+	if opts.Config.IsPrague(head.Number, head.Time) {
+		floorDataGas, err := core.FloorDataGas(tx.Data())
+		if err != nil {
+			return err
+		}
+		if tx.Gas() < floorDataGas*tokenRatio {
+			return fmt.Errorf("%w: gas %v, minimum needed %v", core.ErrFloorDataGas, tx.Gas(), floorDataGas*tokenRatio)
+		}
+
+		if floorDataGas > intrGas {
+			gasRemaining = big.NewInt(int64(tx.Gas() - floorDataGas*tokenRatio))
+		}
+	}
+
+	// Using gas remaining to validate l1 cost
+	if opts.L1CostFn != nil {
+		if l1Cost := opts.L1CostFn(tx.RollupCostData(), tx.IsDepositTx(), tx.To()); l1Cost != nil {
+			txCost := new(big.Int).Mul(tx.GasPrice(), gasRemaining)
+			if txCost.Cmp(l1Cost) < 0 {
+				return core.ErrInsufficientGasForL1Cost
+			}
+		}
+	}
+
 	// Ensure the transactor has enough funds to cover for replacements or nonce
 	// expansions without overdrafts
 	spent := opts.ExistingExpenditure(from)

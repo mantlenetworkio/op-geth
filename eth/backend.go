@@ -18,6 +18,7 @@
 package eth
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -78,6 +79,9 @@ type Ethereum struct {
 	discmix *enode.FairMix
 	dropper *dropper
 
+	seqRPCService        *rpc.Client
+	historicalRPCService *rpc.Client
+
 	// DB interfaces
 	chainDb ethdb.Database // Block chain database
 
@@ -101,6 +105,8 @@ type Ethereum struct {
 	lock sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
 
 	shutdownTracker *shutdowncheck.ShutdownTracker // Tracks if and when the node has shutdown ungracefully
+
+	preconfTxTracker *locals.PreconfTxTracker
 }
 
 // New creates a new Ethereum object (including the initialisation of the common Ethereum object),
@@ -177,7 +183,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if bcVersion != nil {
 		dbVer = fmt.Sprintf("%d", *bcVersion)
 	}
-	log.Info("Initialising Ethereum protocol", "network", networkID, "dbversion", dbVer)
 
 	// Create BlockChain object.
 	if !config.SkipBcVersionCheck {
@@ -226,10 +231,25 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if config.OverrideVerkle != nil {
 		overrides.OverrideVerkle = config.OverrideVerkle
 	}
+	if config.OverrideOptimismBedrock != nil {
+		overrides.OverrideOptimismBedrock = config.OverrideOptimismBedrock
+	}
+	if config.OverrideOptimismRegolith != nil {
+		overrides.OverrideOptimismRegolith = config.OverrideOptimismRegolith
+	}
+	if config.OverrideOptimism != nil {
+		overrides.OverrideOptimism = config.OverrideOptimism
+	}
+	overrides.ApplyMantleUpgrades = config.ApplyMantleUpgrades
 	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, config.Genesis, &overrides, eth.engine, vmConfig, &config.TransactionHistory)
 	if err != nil {
 		return nil, err
 	}
+	if chainConfig := eth.blockchain.Config(); chainConfig.Optimism != nil { // config.Genesis.Config.ChainID cannot be used because it's based on CLI flags only, thus default to mainnet L1
+		config.NetworkId = chainConfig.ChainID.Uint64() // optimism defaults eth network ID to chain ID
+		eth.networkID = config.NetworkId
+	}
+	log.Info("Initialising Ethereum protocol", "network", config.NetworkId, "dbversion", dbVer)
 
 	// Initialize filtermaps log index.
 	fmConfig := filtermaps.Config{
@@ -256,21 +276,33 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if config.BlobPool.Datadir != "" {
 		config.BlobPool.Datadir = stack.ResolvePath(config.BlobPool.Datadir)
 	}
-	blobPool := blobpool.New(config.BlobPool, eth.blockchain, legacyPool.HasPendingAuth)
 
-	eth.txPool, err = txpool.New(config.TxPool.PriceLimit, eth.blockchain, []txpool.SubPool{legacyPool, blobPool})
+	txPools := []txpool.SubPool{legacyPool}
+	if !eth.BlockChain().Config().IsOptimism() {
+		blobPool := blobpool.New(config.BlobPool, eth.blockchain, legacyPool.HasPendingAuth)
+		txPools = append(txPools, blobPool)
+	}
+
+	eth.txPool, err = txpool.New(config.TxPool.PriceLimit, eth.blockchain, txPools)
 	if err != nil {
 		return nil, err
 	}
 
+	rejournal := config.TxPool.Rejournal
+	if rejournal < time.Second {
+		log.Warn("Sanitizing invalid txpool journal time", "provided", rejournal, "updated", time.Second)
+		rejournal = time.Second
+	}
 	if !config.TxPool.NoLocals {
-		rejournal := config.TxPool.Rejournal
-		if rejournal < time.Second {
-			log.Warn("Sanitizing invalid txpool journal time", "provided", rejournal, "updated", time.Second)
-			rejournal = time.Second
-		}
 		eth.localTxTracker = locals.New(config.TxPool.Journal, rejournal, eth.blockchain.Config(), eth.txPool)
 		stack.RegisterLifecycle(eth.localTxTracker)
+	} else if config.TxPool.JournalRemote {
+		pj := locals.NewPoolJournaler(config.TxPool.Journal, rejournal, eth.txPool)
+		stack.RegisterLifecycle(pj)
+	}
+	if config.Miner.PreconfConfig.EnablePreconfChecker {
+		eth.preconfTxTracker = locals.NewPreconfTxTracker(config.TxPool.Journal+".preconf", rejournal, eth.txPool)
+		stack.RegisterLifecycle(eth.preconfTxTracker)
 	}
 
 	// Permit the downloader to use the trie cache allowance during fast sync
@@ -285,6 +317,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		BloomCache:     uint64(cacheLimit),
 		EventMux:       eth.eventMux,
 		RequiredBlocks: config.RequiredBlocks,
+		NoTxGossip:     config.RollupDisableTxPoolGossip,
 	}); err != nil {
 		return nil, err
 	}
@@ -295,11 +328,31 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
 	eth.miner.SetPrioAddresses(config.TxPool.Locals)
 
-	eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
+	eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, config.RollupDisableTxPoolAdmission, eth, nil}
 	if eth.APIBackend.allowUnprotectedTxs {
 		log.Info("Unprotected transactions allowed")
 	}
 	eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, config.GPO, config.Miner.GasPrice)
+
+	if config.RollupSequencerHTTP != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		client, err := rpc.DialContext(ctx, config.RollupSequencerHTTP)
+		cancel()
+		if err != nil {
+			return nil, err
+		}
+		eth.seqRPCService = client
+	}
+
+	if config.RollupHistoricalRPC != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), config.RollupHistoricalRPCTimeout)
+		client, err := rpc.DialContext(ctx, config.RollupHistoricalRPC)
+		cancel()
+		if err != nil {
+			return nil, err
+		}
+		eth.historicalRPCService = client
+	}
 
 	// Start the RPC service
 	eth.netRPCService = ethapi.NewNetAPI(eth.p2pServer, networkID)
@@ -522,6 +575,13 @@ func (s *Ethereum) Stop() error {
 
 	s.chainDb.Close()
 	s.eventMux.Stop()
+
+	if s.seqRPCService != nil {
+		s.seqRPCService.Close()
+	}
+	if s.historicalRPCService != nil {
+		s.historicalRPCService.Close()
+	}
 
 	return nil
 }

@@ -71,6 +71,7 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/nat"
 	"github.com/ethereum/go-ethereum/p2p/netutil"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/preconf"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/ethereum/go-ethereum/triedb"
 	"github.com/ethereum/go-ethereum/triedb/hashdb"
@@ -248,6 +249,21 @@ var (
 		Usage:    "Manually specify the Verkle fork timestamp, overriding the bundled setting",
 		Category: flags.EthCategory,
 	}
+	OverrideOptimismBedrock = &flags.BigFlag{
+		Name:     "override.bedrock",
+		Usage:    "Manually specify OptimsimBedrock, overriding the bundled setting",
+		Category: flags.EthCategory,
+	}
+	OverrideOptimismRegolith = &flags.BigFlag{
+		Name:     "override.regolith",
+		Usage:    "Manually specify the OptimsimRegolith fork timestamp, overriding the bundled setting",
+		Category: flags.EthCategory,
+	}
+	OverrideOptimism = &cli.BoolFlag{
+		Name:     "override.optimism",
+		Usage:    "Manually specify optimism",
+		Category: flags.EthCategory,
+	}
 	SyncModeFlag = &cli.StringFlag{
 		Name:     "syncmode",
 		Usage:    `Blockchain sync mode ("snap" or "full")`,
@@ -358,6 +374,28 @@ var (
 		Category: flags.BeaconCategory,
 	}
 	// Transaction pool settings
+	TxPoolFromPreconfsFlag = &cli.StringFlag{
+		Name:     "txpool.frompreconfs",
+		Usage:    "Comma separated accounts to treat as from preconfs (no flush, priority inclusion)",
+		Category: flags.TxPoolCategory,
+	}
+	TxPoolToPreconfsFlag = &cli.StringFlag{
+		Name:     "txpool.topreconfs",
+		Usage:    "Comma separated accounts to treat as to preconfs (no flush, priority inclusion)",
+		Category: flags.TxPoolCategory,
+	}
+	TxPoolAllPreconfsFlag = &cli.BoolFlag{
+		Name:     "txpool.allpreconfs",
+		Usage:    "Enable all transactions to be preconf tx",
+		Value:    preconf.DefaultTxPoolConfig.AllPreconfs,
+		Category: flags.TxPoolCategory,
+	}
+	TxPoolPreconfTimeoutFlag = &cli.DurationFlag{
+		Name:     "txpool.preconftimeout",
+		Usage:    "Timeout for preconfs",
+		Value:    preconf.DefaultTxPoolConfig.PreconfTimeout,
+		Category: flags.TxPoolCategory,
+	}
 	TxPoolLocalsFlag = &cli.StringFlag{
 		Name:     "txpool.locals",
 		Usage:    "Comma separated accounts to treat as locals (no flush, priority inclusion)",
@@ -372,6 +410,11 @@ var (
 		Name:     "txpool.journal",
 		Usage:    "Disk journal for local transaction to survive node restarts",
 		Value:    ethconfig.Defaults.TxPool.Journal,
+		Category: flags.TxPoolCategory,
+	}
+	TxPoolJournalRemotesFlag = &cli.BoolFlag{
+		Name:     "txpool.journalremotes",
+		Usage:    "Includes remote transactions in the journal. Only effective if nolocals is set too.",
 		Category: flags.TxPoolCategory,
 	}
 	TxPoolRejournalFlag = &cli.DurationFlag{
@@ -507,6 +550,12 @@ var (
 		Value:    ethconfig.Defaults.Miner.GasCeil,
 		Category: flags.MinerCategory,
 	}
+	MinerEffectiveGasLimitFlag = &cli.Uint64Flag{
+		Name:     "miner.effectivegaslimit",
+		Usage:    "If non-zero, an effective gas limit to apply in addition to the block header gaslimit.",
+		Value:    0,
+		Category: flags.MinerCategory,
+	}
 	MinerGasPriceFlag = &flags.BigFlag{
 		Name:     "miner.gasprice",
 		Usage:    "Minimum gas price for mining a transaction",
@@ -527,6 +576,36 @@ var (
 	MinerPendingFeeRecipientFlag = &cli.StringFlag{
 		Name:     "miner.pending.feeRecipient",
 		Usage:    "0x prefixed public address for the pending block producer (not used for actual block production)",
+		Category: flags.MinerCategory,
+	}
+	MinerEnablePreconfChecker = &cli.BoolFlag{
+		Name:     "miner.enablepreconfchecker",
+		Usage:    "Enable preconf checker",
+		Value:    preconf.DefaultMinerConfig.EnablePreconfChecker,
+		Category: flags.MinerCategory,
+	}
+	MinerPreconfOpNodeHTTP = &cli.StringFlag{
+		Name:     "miner.optimismnodehttp",
+		Usage:    "Optimism node http",
+		Value:    preconf.DefaultMinerConfig.OptimismNodeHTTP,
+		Category: flags.MinerCategory,
+	}
+	MinerPreconfL1RPCHTTP = &cli.StringFlag{
+		Name:     "miner.l1rpchttp",
+		Usage:    "L1 rpc http",
+		Value:    preconf.DefaultMinerConfig.L1RPCHTTP,
+		Category: flags.MinerCategory,
+	}
+	MinerPreconfL1DepositAddress = &cli.StringFlag{
+		Name:     "miner.l1depositaddress",
+		Usage:    "L1 deposit address",
+		Value:    preconf.DefaultMinerConfig.L1DepositAddress,
+		Category: flags.MinerCategory,
+	}
+	MinerPreconfToleranceBlock = &cli.Int64Flag{
+		Name:     "miner.preconf.toleranceblock",
+		Usage:    "Preconf tolerance block",
+		Value:    preconf.DefaultMinerConfig.ToleranceBlock,
 		Category: flags.MinerCategory,
 	}
 
@@ -871,6 +950,54 @@ var (
 		Usage:    "Gas price below which gpo will ignore transactions",
 		Value:    ethconfig.Defaults.GPO.IgnorePrice.Int64(),
 		Category: flags.GasPriceCategory,
+	}
+	GpoMinSuggestedPriorityFeeFlag = &cli.Int64Flag{
+		Name:     "gpo.minsuggestedpriorityfee",
+		Usage:    "Minimum transaction priority fee to suggest. Used on OP chains when blocks are not full.",
+		Value:    ethconfig.Defaults.GPO.MinSuggestedPriorityFee.Int64(),
+		Category: flags.GasPriceCategory,
+	}
+
+	// Rollup Flags
+	RollupSequencerHTTPFlag = &cli.StringFlag{
+		Name:     "rollup.sequencerhttp",
+		Usage:    "HTTP endpoint for the sequencer mempool",
+		Category: flags.RollupCategory,
+	}
+
+	RollupHistoricalRPCFlag = &cli.StringFlag{
+		Name:     "rollup.historicalrpc",
+		Usage:    "RPC endpoint for historical data.",
+		Category: flags.RollupCategory,
+	}
+
+	RollupHistoricalRPCTimeoutFlag = &cli.StringFlag{
+		Name:     "rollup.historicalrpctimeout",
+		Usage:    "Timeout for historical RPC requests.",
+		Value:    "5s",
+		Category: flags.RollupCategory,
+	}
+
+	RollupDisableTxPoolGossipFlag = &cli.BoolFlag{
+		Name:     "rollup.disabletxpoolgossip",
+		Usage:    "Disable transaction pool gossip.",
+		Category: flags.RollupCategory,
+	}
+	RollupEnableTxPoolAdmissionFlag = &cli.BoolFlag{
+		Name:     "rollup.enabletxpooladmission",
+		Usage:    "Add RPC-submitted transactions to the txpool (on by default if --rollup.sequencerhttp is not set).",
+		Category: flags.RollupCategory,
+	}
+	RollupComputePendingBlock = &cli.BoolFlag{
+		Name:     "rollup.computependingblock",
+		Usage:    "By default the pending block equals the latest block to save resources and not leak txs from the tx-pool, this flag enables computing of the pending block from the tx-pool instead.",
+		Category: flags.RollupCategory,
+	}
+	RollupMantleUpgradesFlag = &cli.BoolFlag{
+		Name:     "rollup.mantle-upgrades",
+		Usage:    "Apply mantle config changes to the local chain-configuration",
+		Category: flags.RollupCategory,
+		Value:    true,
 	}
 
 	// Metrics flags
@@ -1462,9 +1589,13 @@ func setGPO(ctx *cli.Context, cfg *gasprice.Config) {
 	if ctx.IsSet(GpoIgnoreGasPriceFlag.Name) {
 		cfg.IgnorePrice = big.NewInt(ctx.Int64(GpoIgnoreGasPriceFlag.Name))
 	}
+	if ctx.IsSet(GpoMinSuggestedPriorityFeeFlag.Name) {
+		cfg.MinSuggestedPriorityFee = big.NewInt(ctx.Int64(GpoMinSuggestedPriorityFeeFlag.Name))
+	}
 }
 
 func setTxPool(ctx *cli.Context, cfg *legacypool.Config) {
+	setPreconfCfg(ctx, cfg)
 	if ctx.IsSet(TxPoolLocalsFlag.Name) {
 		locals := strings.Split(ctx.String(TxPoolLocalsFlag.Name), ",")
 		for _, account := range locals {
@@ -1480,6 +1611,9 @@ func setTxPool(ctx *cli.Context, cfg *legacypool.Config) {
 	}
 	if ctx.IsSet(TxPoolJournalFlag.Name) {
 		cfg.Journal = ctx.String(TxPoolJournalFlag.Name)
+	}
+	if ctx.IsSet(TxPoolJournalRemotesFlag.Name) {
+		cfg.JournalRemote = ctx.Bool(TxPoolJournalRemotesFlag.Name)
 	}
 	if ctx.IsSet(TxPoolRejournalFlag.Name) {
 		cfg.Rejournal = ctx.Duration(TxPoolRejournalFlag.Name)
@@ -1505,6 +1639,40 @@ func setTxPool(ctx *cli.Context, cfg *legacypool.Config) {
 	if ctx.IsSet(TxPoolLifetimeFlag.Name) {
 		cfg.Lifetime = ctx.Duration(TxPoolLifetimeFlag.Name)
 	}
+	if ctx.IsSet(MinerEffectiveGasLimitFlag.Name) {
+		// While technically this is a miner config parameter, we also want the txpool to enforce
+		// it to avoid accepting transactions that can never be included in a block.
+		cfg.EffectiveGasCeil = ctx.Uint64(MinerEffectiveGasLimitFlag.Name)
+	}
+}
+
+func setPreconfCfg(ctx *cli.Context, cfg *legacypool.Config) {
+	if ctx.IsSet(TxPoolFromPreconfsFlag.Name) {
+		preconfs := strings.Split(ctx.String(TxPoolFromPreconfsFlag.Name), ",")
+		for _, account := range preconfs {
+			if trimmed := strings.TrimSpace(account); !common.IsHexAddress(trimmed) {
+				Fatalf("Invalid account in --txpool.frompreconfs: %s", trimmed)
+			} else {
+				cfg.Preconf.FromPreconfs = append(cfg.Preconf.FromPreconfs, common.HexToAddress(trimmed))
+			}
+		}
+	}
+	if ctx.IsSet(TxPoolToPreconfsFlag.Name) {
+		preconfs := strings.Split(ctx.String(TxPoolToPreconfsFlag.Name), ",")
+		for _, account := range preconfs {
+			if trimmed := strings.TrimSpace(account); !common.IsHexAddress(trimmed) {
+				Fatalf("Invalid account in --txpool.topreconfs: %s", trimmed)
+			} else {
+				cfg.Preconf.ToPreconfs = append(cfg.Preconf.ToPreconfs, common.HexToAddress(trimmed))
+			}
+		}
+	}
+	if ctx.IsSet(TxPoolAllPreconfsFlag.Name) {
+		cfg.Preconf.AllPreconfs = ctx.Bool(TxPoolAllPreconfsFlag.Name)
+	}
+	if ctx.IsSet(TxPoolPreconfTimeoutFlag.Name) {
+		cfg.Preconf.PreconfTimeout = ctx.Duration(TxPoolPreconfTimeoutFlag.Name)
+	}
 }
 
 func setBlobPool(ctx *cli.Context, cfg *blobpool.Config) {
@@ -1529,6 +1697,9 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	if ctx.IsSet(MinerGasLimitFlag.Name) {
 		cfg.GasCeil = ctx.Uint64(MinerGasLimitFlag.Name)
 	}
+	if ctx.IsSet(MinerEffectiveGasLimitFlag.Name) {
+		cfg.EffectiveGasCeil = ctx.Uint64(MinerEffectiveGasLimitFlag.Name)
+	}
 	if ctx.IsSet(MinerGasPriceFlag.Name) {
 		cfg.GasPrice = flags.GlobalBig(ctx, MinerGasPriceFlag.Name)
 	}
@@ -1538,6 +1709,24 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	if ctx.IsSet(MinerNewPayloadTimeoutFlag.Name) {
 		log.Warn("The flag --miner.newpayload-timeout is deprecated and will be removed, please use --miner.recommit")
 		cfg.Recommit = ctx.Duration(MinerNewPayloadTimeoutFlag.Name)
+	}
+	if ctx.IsSet(RollupComputePendingBlock.Name) {
+		cfg.RollupComputePendingBlock = ctx.Bool(RollupComputePendingBlock.Name)
+	}
+	if ctx.IsSet(MinerEnablePreconfChecker.Name) {
+		cfg.PreconfConfig.EnablePreconfChecker = ctx.Bool(MinerEnablePreconfChecker.Name)
+	}
+	if ctx.IsSet(MinerPreconfOpNodeHTTP.Name) {
+		cfg.PreconfConfig.OptimismNodeHTTP = ctx.String(MinerPreconfOpNodeHTTP.Name)
+	}
+	if ctx.IsSet(MinerPreconfL1RPCHTTP.Name) {
+		cfg.PreconfConfig.L1RPCHTTP = ctx.String(MinerPreconfL1RPCHTTP.Name)
+	}
+	if ctx.IsSet(MinerPreconfL1DepositAddress.Name) {
+		cfg.PreconfConfig.L1DepositAddress = ctx.String(MinerPreconfL1DepositAddress.Name)
+	}
+	if ctx.IsSet(MinerPreconfToleranceBlock.Name) {
+		cfg.PreconfConfig.ToleranceBlock = ctx.Int64(MinerPreconfToleranceBlock.Name)
 	}
 }
 
@@ -1740,6 +1929,21 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 			cfg.EthDiscoveryURLs = SplitAndTrim(urls)
 		}
 	}
+
+	// Only configure sequencer http flag if we're running in verifier mode i.e. --mine is disabled.
+	if ctx.IsSet(RollupSequencerHTTPFlag.Name) && !ctx.IsSet(MiningEnabledFlag.Name) {
+		cfg.RollupSequencerHTTP = ctx.String(RollupSequencerHTTPFlag.Name)
+	}
+	if ctx.IsSet(RollupHistoricalRPCFlag.Name) {
+		cfg.RollupHistoricalRPC = ctx.String(RollupHistoricalRPCFlag.Name)
+	}
+	if ctx.IsSet(RollupHistoricalRPCTimeoutFlag.Name) {
+		cfg.RollupHistoricalRPCTimeout = ctx.Duration(RollupHistoricalRPCTimeoutFlag.Name)
+	}
+	cfg.RollupDisableTxPoolGossip = ctx.Bool(RollupDisableTxPoolGossipFlag.Name)
+	cfg.RollupDisableTxPoolAdmission = cfg.RollupSequencerHTTP != "" && !ctx.Bool(RollupEnableTxPoolAdmissionFlag.Name)
+	cfg.ApplyMantleUpgrades = ctx.Bool(RollupMantleUpgradesFlag.Name)
+
 	// Override any default configs for hard coded networks.
 	switch {
 	case ctx.Bool(MainnetFlag.Name):

@@ -144,6 +144,8 @@ const (
 	//  * Total difficulty has been removed from both the key-value store and the ancient store.
 	//  * The metadata structure of freezer is changed by adding 'flushOffset'
 	BlockChainVersion uint64 = 9
+
+	DefaultMantleBlockGasLimit = 0x4000000000000
 )
 
 // CacheConfig contains the configuration values for the trie database
@@ -314,6 +316,10 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	log.Info(strings.Repeat("-", 153))
 	log.Info("")
 
+	if chainConfig.IsOptimism() && chainConfig.RegolithTime == nil {
+		log.Warn("Optimism RegolithTime has not been set")
+	}
+
 	bc := &BlockChain{
 		chainConfig:   chainConfig,
 		cacheConfig:   cacheConfig,
@@ -434,10 +440,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 			}
 		}
 	}
-	// The first thing the node will do is reconstruct the verification data for
-	// the head block (ethash cache or clique voting snapshot). Might as well do
-	// it in advance.
-	bc.engine.VerifyHeader(bc, bc.CurrentHeader())
 
 	if bc.logger != nil && bc.logger.OnBlockchainInit != nil {
 		bc.logger.OnBlockchainInit(chainConfig)
@@ -490,6 +492,13 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		}
 		rawdb.WriteChainConfig(db, genesisHash, chainConfig)
 	}
+
+	// OP-Stack diff: deliberately only check header after reorg handling, to get un-stuck of degenerate reorg cases.
+	// The first thing the node will do is reconstruct the verification data for
+	// the head block (ethash cache or clique voting snapshot). Might as well do
+	// it in advance.
+	bc.engine.VerifyHeader(bc, bc.CurrentHeader())
+
 	// Start tx indexer if it's enabled.
 	if txLookupLimit != nil {
 		bc.txIndexer = newTxIndexer(*txLookupLimit, bc)
