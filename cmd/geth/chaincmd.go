@@ -155,9 +155,26 @@ from Era archives.
 		ArgsUsage: "<dir> <first> <last>",
 		Flags:     utils.DatabaseFlags,
 		Description: `
-The export-history command will export blocks and their corresponding receipts
-into Era archives. Eras are typically packaged in steps of 8192 blocks.
-`,
+		The export-history command will export blocks and their corresponding receipts
+		into Era archives. Eras are typically packaged in steps of 8192 blocks.
+		`,
+	}
+	exportReceiptsCommand = &cli.Command{
+		Action:    exportReceipts,
+		Name:      "export-receipts",
+		Usage:     "Export the receipts into file",
+		ArgsUsage: "<filename> [<blockNumFirst> <blockNumLast>]",
+		Flags: slices.Concat([]cli.Flag{
+			utils.CacheFlag,
+			utils.SyncModeFlag,
+		}, utils.DatabaseFlags),
+		Category: "BLOCKCHAIN COMMANDS",
+		Description: `
+Requires a first argument of the file to write to.
+Optional second and third arguments control the first and
+last block to write. In this mode, the file will be appended
+if already existing. If the file ends with .gz, the output will
+be gzipped.`,
 	}
 	importPreimagesCommand = &cli.Command{
 		Action:    importPreimages,
@@ -499,6 +516,40 @@ func exportHistory(ctx *cli.Context) error {
 		utils.Fatalf("Export error: block number %d larger than head block %d\n", uint64(last), head.Number.Uint64())
 	}
 	err := utils.ExportHistory(chain, dir, uint64(first), uint64(last), uint64(era.MaxEra1Size))
+	if err != nil {
+		utils.Fatalf("Export error: %v\n", err)
+	}
+	fmt.Printf("Export done in %v\n", time.Since(start))
+	return nil
+}
+
+func exportReceipts(ctx *cli.Context) error {
+	if ctx.Args().Len() < 1 {
+		utils.Fatalf("This command requires an argument.")
+	}
+	stack, _ := makeConfigNode(ctx)
+	defer stack.Close()
+
+	chain, _ := utils.MakeChain(ctx, stack, true)
+	start := time.Now()
+
+	var err error
+	fp := ctx.Args().First()
+	if ctx.Args().Len() < 3 {
+		err = utils.ExportReceipt(chain, fp)
+	} else {
+		// This can be improved to allow for numbers larger than 9223372036854775807
+		first, ferr := strconv.ParseInt(ctx.Args().Get(1), 10, 64)
+		last, lerr := strconv.ParseInt(ctx.Args().Get(2), 10, 64)
+		if ferr != nil || lerr != nil {
+			utils.Fatalf("Export error in parsing parameters: block number not an integer\n")
+		}
+		if first < 0 || last < 0 {
+			utils.Fatalf("Export error: block number must be greater than 0\n")
+		}
+		err = utils.ExportAppendReceipt(chain, fp, uint64(first), uint64(last))
+	}
+
 	if err != nil {
 		utils.Fatalf("Export error: %v\n", err)
 	}

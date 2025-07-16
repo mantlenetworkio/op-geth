@@ -535,6 +535,58 @@ func ImportPreimages(db ethdb.Database, fn string) error {
 	return nil
 }
 
+// ExportReceipts exports receipts into the specified file, truncating any data
+// already present in the file.
+func ExportReceipt(blockchain *core.BlockChain, fn string) error {
+	log.Info("Exporting receipts", "file", fn)
+
+	// Open the file handle and potentially wrap with a gzip stream
+	fh, err := os.OpenFile(fn, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.ModePerm)
+	if err != nil {
+		return err
+	}
+	defer fh.Close()
+
+	var writer io.Writer = fh
+	if strings.HasSuffix(fn, ".gz") {
+		writer = gzip.NewWriter(writer)
+		defer writer.(*gzip.Writer).Close()
+	}
+	// Iterate over the blocks and export them
+	if err := blockchain.ExportReceipts(writer); err != nil {
+		return err
+	}
+	log.Info("Exported receipts", "file", fn)
+
+	return nil
+}
+
+// ExportAppendReceipt exports receipts into the specified file, appending to
+// the file if data already exists in it.
+func ExportAppendReceipt(blockchain *core.BlockChain, fn string, first uint64, last uint64) error {
+	log.Info("Exporting receipts", "file", fn)
+
+	// Open the file handle and potentially wrap with a gzip stream
+	fh, err := os.OpenFile(fn, os.O_CREATE|os.O_APPEND|os.O_WRONLY, os.ModePerm)
+	if err != nil {
+		return err
+	}
+	defer fh.Close()
+
+	var writer io.Writer = fh
+	if strings.HasSuffix(fn, ".gz") {
+		writer = gzip.NewWriter(writer)
+		defer writer.(*gzip.Writer).Close()
+	}
+	// Iterate over the blocks and export them
+	if err := blockchain.ExportReceiptsN(writer, first, last); err != nil {
+		return err
+	}
+	log.Info("Exported receipts to", "file", fn)
+
+	return nil
+}
+
 // ExportPreimages exports all known hash preimages into the specified file,
 // truncating any data already present in the file.
 // It's a part of the deprecated functionality, should be removed in the future.
