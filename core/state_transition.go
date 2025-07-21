@@ -366,7 +366,7 @@ func (st *stateTransition) buyGas(metaTxV3 bool) (*big.Int, *big.Int, error) {
 
 	if st.evm.ChainConfig().IsMantleLimb(st.evm.Context.Time) {
 		if st.evm.Context.OperatorCostFunc != nil && st.msg.RunMode != EthcallMode {
-			operatorCost = st.evm.Context.OperatorCostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.GasLimit, st.msg.IsDepositTx, st.msg.To)
+			operatorCost = st.evm.Context.OperatorCostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.GasLimit, st.msg.IsDepositTx, st.msg.To, false)
 		}
 	}
 
@@ -732,7 +732,6 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 
 		if st.msg.GasPrice.Cmp(common.Big0) > 0 && operatorFeeCost != nil {
 			operatorGas = new(big.Int).Div(operatorFeeCost, st.msg.GasPrice).Uint64()
-
 		}
 		if st.gasRemaining < operatorGas {
 			return nil, fmt.Errorf("%w: have %d, want %d", ErrInsufficientGasForOperatorFee, st.gasRemaining, operatorGas)
@@ -833,14 +832,16 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 	gasUsed := st.initialGas - st.gasRemaining
 	l1AndOperatorGas := l1Gas + operatorGas
 	l2GasUsed = gasUsed - l1AndOperatorGas
+
 	// Recalculate the operator gas cost according to the L2 gas used.
-	if rules.IsMantleLimb {
+	if rules.IsMantleLimb && !st.msg.IsDepositTx && !st.msg.IsSystemTx {
 		if operatorFeeCost != nil && st.evm.Context.OperatorCostFunc != nil {
-			operatorCostL2 := st.evm.Context.OperatorCostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, l2GasUsed, st.msg.IsDepositTx, st.msg.To)
+			operatorCostL2 := st.evm.Context.OperatorCostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, l2GasUsed, st.msg.IsDepositTx, st.msg.To, true)
 			var operatorGasL2 uint64
 			if st.msg.GasPrice.Cmp(common.Big0) > 0 && operatorCostL2 != nil {
 				operatorGasL2 = new(big.Int).Div(operatorCostL2.ToBig(), st.msg.GasPrice).Uint64()
 			}
+
 			if operatorGas > operatorGasL2 {
 				returnOperatorGas := operatorGas - operatorGasL2
 				prev := st.gasRemaining
@@ -1207,23 +1208,4 @@ func (st *stateTransition) generateMetaTxSponsorEvent(sponsor, txSender common.A
 		// core/state doesn't know the current block number.
 		BlockNumber: st.evm.Context.BlockNumber.Uint64(),
 	})
-}
-
-func (st *stateTransition) refundIsMantleOperatorFeeCost(l2GasUsed, tokenRatio uint64) {
-
-	operatorCostGasLimit := st.evm.Context.OperatorCostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.GasLimit, st.msg.IsDepositTx, st.msg.To)
-	operatorCostGasUsed := st.evm.Context.OperatorCostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, l2GasUsed, st.msg.IsDepositTx, st.msg.To)
-
-	if operatorCostGasUsed.Cmp(operatorCostGasLimit) > 0 { // Sanity check.
-		panic(fmt.Sprintf("operator cost gas used (%d) > operator cost gas limit (%d)", operatorCostGasUsed, operatorCostGasLimit))
-	}
-	refundOperatorFee := new(uint256.Int).Sub(operatorCostGasLimit, operatorCostGasUsed)
-	if tokenRatio > 0 {
-		refundOperatorFee = new(uint256.Int).Div(refundOperatorFee, uint256.NewInt(tokenRatio))
-	}
-	refundOperatorGas := new(big.Int).Div(refundOperatorFee.ToBig(), st.msg.GasPrice).Uint64()
-
-	st.state.AddBalance(st.msg.From, refundOperatorFee, tracing.BalanceIncreaseGasReturn)
-	st.gasRemaining += refundOperatorGas
-
 }

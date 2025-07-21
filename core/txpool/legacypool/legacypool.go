@@ -1518,7 +1518,7 @@ func (pool *LegacyPool) reset(oldHead, newHead *types.Header) {
 	}
 	if operatorCostFn := types.NewOperatorCostFunc(pool.chainconfig, statedb); operatorCostFn != nil {
 		pool.operatorCostFn = func(gasUsed uint64, isDepositTx bool, to *common.Address) *uint256.Int {
-			return operatorCostFn(newHead.Number.Uint64(), newHead.Time, gasUsed, isDepositTx, to)
+			return operatorCostFn(newHead.Number.Uint64(), newHead.Time, gasUsed, isDepositTx, to, false)
 		}
 	}
 

@@ -17,8 +17,9 @@
 package types
 
 import (
-	"github.com/holiman/uint256"
 	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/params"
@@ -57,7 +58,7 @@ type StateGetter interface {
 // Returns nil if there is no cost.
 type L1CostFunc func(blockNum uint64, blockTime uint64, dataGas RollupCostData, isDepositTx bool, to *common.Address) *big.Int
 
-type OperatorCostFunc func(blockNum uint64, blockTime uint64, gasUsed uint64, isDepositTx bool, to *common.Address) *uint256.Int
+type OperatorCostFunc func(blockNum uint64, blockTime uint64, gasUsed uint64, isDepositTx bool, to *common.Address, isOperatorFeeRefund bool) *uint256.Int
 
 var (
 	L1BaseFeeSlot  = common.BigToHash(big.NewInt(1))
@@ -74,31 +75,41 @@ var (
 	EigenDaPrice  = new(big.Int).Mul(big.NewInt(15), big.NewInt(1e6))
 )
 
+// l1CostCache 封装L1费用计算的缓存状态
+type l1CostCache struct {
+	cacheBlockNum uint64
+	l1BaseFee     *big.Int
+	overhead      *big.Int
+	scalar        *big.Int
+	tokenRatio    *big.Int
+}
+
 // NewL1CostFunc returns a function used for calculating L1 fee cost.
 // This depends on the oracles because gas costs can change over time.
 // It returns nil if there is no applicable cost function.
 func NewL1CostFunc(config *params.ChainConfig, statedb StateGetter) L1CostFunc {
-	cacheBlockNum := ^uint64(0)
-	var l1BaseFee, overhead, scalar, tokenRatio *big.Int
+	cache := &l1CostCache{
+		cacheBlockNum: ^uint64(0),
+	}
 	return func(blockNum uint64, blockTime uint64, rollupCostData RollupCostData, isDepositTx bool, to *common.Address) *big.Int {
 		rollupDataGas := rollupCostData.DataGas(blockTime, config) // Only fake txs for RPC view-calls are 0.
 		if config.Optimism == nil || isDepositTx || rollupDataGas == 0 {
 			return common.Big0
 		}
-		if blockNum != cacheBlockNum {
-			l1BaseFee = statedb.GetState(L1BlockAddr, L1BaseFeeSlot).Big()
-			overhead = statedb.GetState(L1BlockAddr, OverheadSlot).Big()
-			scalar = statedb.GetState(L1BlockAddr, ScalarSlot).Big()
-			tokenRatio = statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
-			cacheBlockNum = blockNum
+		if blockNum != cache.cacheBlockNum {
+			cache.l1BaseFee = statedb.GetState(L1BlockAddr, L1BaseFeeSlot).Big()
+			cache.overhead = statedb.GetState(L1BlockAddr, OverheadSlot).Big()
+			cache.scalar = statedb.GetState(L1BlockAddr, ScalarSlot).Big()
+			cache.tokenRatio = statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
+			cache.cacheBlockNum = blockNum
 		}
 
 		// update the tokenRatio, so set the cacheBlockNum as default value and query the latest tokenRatio next time
 		if to != nil && *to == GasOracleAddr {
-			cacheBlockNum = ^uint64(0)
+			cache.cacheBlockNum = ^uint64(0)
 		}
 
-		return L1Cost(rollupDataGas, l1BaseFee, overhead, scalar, tokenRatio)
+		return L1Cost(rollupDataGas, cache.l1BaseFee, cache.overhead, cache.scalar, cache.tokenRatio)
 	}
 }
 
@@ -111,38 +122,48 @@ func L1Cost(rollupDataGas uint64, l1BaseFee, overhead, scalar, tokenRatio *big.I
 	return l1Cost.Div(l1Cost, Decimals)
 }
 
+// operatorCostCache 封装操作费用计算的缓存状态
+type operatorCostCache struct {
+	cacheBlockNum       uint64
+	tokenRatio          *big.Int
+	operatorFeeConstant *big.Int
+	operatorFeeScalar   *big.Int
+}
+
 // NewOperatorCostFunc returns a function used for calculating operator fees, or nil if this is
 // not an op-stack chain.
 func NewOperatorCostFunc(config *params.ChainConfig, statedb StateGetter) OperatorCostFunc {
-	cacheBlockNum := ^uint64(0)
-	var tokenRatio, operatorFeeConstant, operatorFeeScalar *big.Int
-	return func(blockNum uint64, blockTime uint64, gasUsed uint64, isDepositTx bool, to *common.Address) *uint256.Int {
+	cache := &operatorCostCache{
+		cacheBlockNum: ^uint64(0),
+	}
+	return func(blockNum uint64, blockTime uint64, gasUsed uint64, isDepositTx bool, to *common.Address, isOperatorFeeRefund bool) *uint256.Int {
 		if config.Optimism == nil || isDepositTx {
 			return uint256.NewInt(0)
 		}
 		if !config.IsMantleLimb(blockTime) {
 			return uint256.NewInt(0)
 		}
-		if blockNum != cacheBlockNum {
-			tokenRatio = statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
-			operatorFeeConstant = statedb.GetState(GasOracleAddr, OperatorFeeConstantSlot).Big()
-			operatorFeeScalar = statedb.GetState(GasOracleAddr, OperatorFeeScalarSlot).Big()
-			cacheBlockNum = blockNum
+		if blockNum != cache.cacheBlockNum && !isOperatorFeeRefund {
+			cache.tokenRatio = statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
+			cache.operatorFeeConstant = statedb.GetState(GasOracleAddr, OperatorFeeConstantSlot).Big()
+			cache.operatorFeeScalar = statedb.GetState(GasOracleAddr, OperatorFeeScalarSlot).Big()
+			cache.cacheBlockNum = blockNum
 		}
+
 		if to != nil && *to == GasOracleAddr {
-			cacheBlockNum = ^uint64(0)
+			cache.cacheBlockNum = ^uint64(0)
 		}
-		return OperatorCost(gasUsed, tokenRatio, operatorFeeConstant, operatorFeeScalar)
+		return OperatorCost(gasUsed, cache.tokenRatio, cache.operatorFeeConstant, cache.operatorFeeScalar)
 	}
 }
 
-func OperatorCost(gasUsed uint64, tokenRation, operatorFeeConstant, operatorFeeScalar *big.Int) *uint256.Int {
+func OperatorCost(gasUsed uint64, tokenRatio, operatorFeeConstant, operatorFeeScalar *big.Int) *uint256.Int {
 	operatorGasUsed := new(big.Int).SetUint64(gasUsed)
 	operatorCost := operatorGasUsed.Mul(operatorGasUsed, operatorFeeScalar)
-	operatorCost = operatorCost.Mul(operatorCost, tokenRation)
-	operatorCost.Div(operatorCost, Decimals)
-	operatorFeeConstant = operatorFeeConstant.Mul(operatorFeeConstant, tokenRation)
-	operatorCost = operatorCost.Add(operatorCost, operatorFeeConstant)
+	operatorCost = operatorCost.Mul(operatorCost, tokenRatio)
+	operatorCost = operatorCost.Div(operatorCost, Decimals)
+	operatorFeeConstantScaled := new(big.Int).Mul(operatorFeeConstant, tokenRatio)
+	operatorCost = operatorCost.Add(operatorCost, operatorFeeConstantScaled)
 	operatorFeeU256, overflow := uint256.FromBig(operatorCost)
 	if overflow {
 		// This should never happen, as (u64.max * u32.max / 1e6) + u64.max is an int of bit length 77

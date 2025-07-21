@@ -203,6 +203,10 @@ func MakeReceipt(msg *Message, evm *vm.EVM, result *ExecutionResult, statedb *st
 	}
 
 	// used to record l1 fee
+	// If the transaction modifies the GasOracleAddr contract,
+	// the contract state retrieved is the updated one,
+	// while the actual execution uses the state before the change,
+	// making the receipt returned here inaccurate.
 	l1BaseFee, overhead, scalar, scaled, tokenRatio := types.DeriveL1GasInfo(statedb)
 
 	_, operatorFeeConstant, operatorFeeScalar := types.DeriveGOInfo(statedb)
