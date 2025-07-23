@@ -11,7 +11,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/internal/flags"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -97,24 +96,6 @@ func doExportHeader(ctx *cli.Context) error {
 	}
 
 	log.Info("RLP encoded to file", "output", conf.Output, "block", header.Number, "hash", header.Hash().Hex(), "total difficulty", header.Difficulty.String())
-
-	// export transactions to file
-	if err = doExportTransactions(db, header); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func doExportTransactions(db ethdb.Database, header *types.Header) error {
-	block := rawdb.ReadBlock(db, header.Hash(), header.Number.Uint64())
-
-	txs := block.Transactions()
-	// export transactions to file
-	output := fmt.Sprintf("transactions_%d.rlp", header.Number)
-	if err := encodeToFile(txs, output); err != nil {
-		return err
-	}
 
 	return nil
 }
