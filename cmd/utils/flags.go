@@ -682,6 +682,11 @@ var (
 		Usage:    "Path to a JWT secret to use for authenticated RPC endpoints",
 		Category: flags.APICategory,
 	}
+	PreConfJWTSecretFlag = &flags.DirectoryFlag{
+		Name:     "authrpc.jwtsecret.preconf",
+		Usage:    "Path to a JWT secret to use for authenticated RPC endpoints",
+		Category: flags.APICategory,
+	}
 
 	// Logging and debug settings
 	EthStatsURLFlag = &cli.StringFlag{
@@ -1497,6 +1502,9 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 
 	if ctx.IsSet(JWTSecretFlag.Name) {
 		cfg.JWTSecret = ctx.String(JWTSecretFlag.Name)
+	}
+	if ctx.IsSet(PreConfJWTSecretFlag.Name) {
+		cfg.PreConfJWTSecret = ctx.String(PreConfJWTSecretFlag.Name)
 	}
 	if ctx.IsSet(EnablePersonal.Name) {
 		log.Warn(fmt.Sprintf("Option --%s is deprecated. The 'personal' RPC namespace has been removed.", EnablePersonal.Name))

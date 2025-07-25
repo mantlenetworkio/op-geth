@@ -17,12 +17,12 @@ import (
 
 // SubscribeNewPreconfTxEvent subscribes to new preconf transaction events.
 func (pool *LegacyPool) SubscribeNewPreconfTxEvent(ch chan<- core.NewPreconfTxEvent) event.Subscription {
-	return pool.preconfTxFeed.Subscribe(ch)
+	return pool.preconf.SubscribePreConfTxEvent(ch)
 }
 
 // SubscribeNewPreconfTxRequestEvent subscribes to new preconf transaction request events.
 func (pool *LegacyPool) SubscribeNewPreconfTxRequestEvent(ch chan<- *core.NewPreconfTxRequest) event.Subscription {
-	return pool.preconfTxRequestFeed.Subscribe(ch)
+	return pool.preconf.SubscribePreConfRequestEvent(ch)
 }
 
 // PendingPreconfTxs retrieves the preconf transactions and the pending transactions.
@@ -53,20 +53,27 @@ func (pool *LegacyPool) PendingPreconfTxs(filter txpool.PendingFilter) ([]*types
 func (pool *LegacyPool) extractPreconfTxsFromPending(pending map[common.Address][]*txpool.LazyTransaction) []*types.Transaction {
 	// check preconf tx in pending map and also in preconfTxs
 	for from, txs := range pending {
-		if pool.config.Preconf.IsPreconfTxFrom(from) {
+		if pool.preconf.IsPreConfTransaction(nil, &from, nil, true) {
 			for _, tx := range txs {
-				if pool.config.Preconf.IsPreconfTx(&from, tx.Tx.To()) && !pool.preconfTxs.Contains(tx.Tx.Hash()) {
+				if pool.preconf.IsPreConfTransaction(nil, &from, tx.Tx.To(), false) && !pool.preconf.ContainsTx(tx.Tx.Hash()) {
 					// This tx will be sealed like a normal tx, not a preconf tx
 					log.Error("Missing preconf tx in preconfTxs, please report the issue", "tx", tx.Tx.Hash(), "from", from.Hex(), "nonce", tx.Tx.Nonce())
 					continue
 				}
 			}
 		}
+		for _, tx := range txs {
+			if pool.preconf.IsPreConfTransaction(&tx.Hash, nil, nil, false) && !pool.preconf.ContainsTx(tx.Tx.Hash()) {
+				// This tx will be sealed like a normal tx, not a preconf tx
+				log.Error("Missing preconf tx in preconfTxs, please report the issue", "tx", tx.Tx.Hash(), "from", from.Hex(), "nonce", tx.Tx.Nonce())
+				continue
+			}
+		}
 	}
 
 	// removes the preconf transaction from the pending map, maintaining the order.
 	preconfTxs := make([]*types.Transaction, 0)
-	for _, preconfTx := range pool.preconfTxs.TxEntries() {
+	for _, preconfTx := range pool.preconf.GetTxsEntries() {
 		preconfTxHash := preconfTx.Tx.Hash()
 
 		// Get the slice of transactions for the target address
@@ -76,7 +83,7 @@ func (pool *LegacyPool) extractPreconfTxsFromPending(pending map[common.Address]
 		// show the error log.
 		if !exists || len(txs) == 0 {
 			log.Error("Missing transaction in pending map, please report the issue", "hash", preconfTxHash)
-			pool.preconfTxs.Remove(preconfTxHash) // remove it prevent log always print
+			pool.preconf.RemoveTxsAndMohoTxs(preconfTx.From, preconfTxHash) // remove it prevent log always print
 			continue
 		}
 
@@ -106,7 +113,7 @@ func (pool *LegacyPool) extractPreconfTxsFromPending(pending map[common.Address]
 }
 
 func (pool *LegacyPool) cleanTimeoutPreconfTxs() int {
-	removed := pool.preconfTxs.CleanTimeout()
+	removed := pool.preconf.CleanTimeOut()
 	for _, tx := range removed {
 		pool.removeTx(tx.Tx.Hash(), true, true)
 	}
@@ -116,10 +123,7 @@ func (pool *LegacyPool) cleanTimeoutPreconfTxs() int {
 // PreconfReady closes the preconfReadyCh channel to notify the miner that preconf is ready
 // This is called every time a worker is ready with an env, but it only closes once, so we need to use sync.Once to ensure it only closes once
 func (pool *LegacyPool) PreconfReady() {
-	pool.preconfReadyOnce.Do(func() {
-		close(pool.preconfReadyCh)
-		log.Info("preconf ready")
-	})
+	pool.preconf.Ready()
 }
 
 func (pool *LegacyPool) addPreconfTx(tx *types.Transaction) {
@@ -128,7 +132,7 @@ func (pool *LegacyPool) addPreconfTx(tx *types.Transaction) {
 
 	// check tx is preconf tx
 	from, _ := types.Sender(pool.signer, tx)
-	if !pool.config.Preconf.IsPreconfTx(&from, tx.To()) {
+	if !pool.preconf.IsPreConfTransaction(&txHash, &from, tx.To(), false) {
 		log.Debug("preconf from and to is not match", "tx", txHash)
 		return
 	}
@@ -141,15 +145,12 @@ func (pool *LegacyPool) handlePreconfTx(from common.Address, tx *types.Transacti
 	txHash := tx.Hash()
 
 	// add tx to preconfTxs and send preconf request event should keep same order
-	pool.preconfTxs.Add(from, tx)
+	pool.preconf.AddTx(from, tx)
 
 	// If preconfReadyCh is not closed, it means this is a preconf tx restored from journal after system restart.
 	// In this case, we don't need to execute preconfirmation again to avoid resource contention with worker.
-	select {
-	case <-pool.preconfReadyCh:
-	default:
-		// only success preconf tx can be restored from journal
-		pool.preconfTxs.SetStatus(txHash, core.PreconfStatusSuccess)
+	if !pool.preconf.IsReady() {
+		pool.preconf.SetStatus(txHash, core.PreconfStatusSuccess)
 		log.Debug("handle preconf tx from journal", "tx", txHash)
 		return
 	}
@@ -164,7 +165,7 @@ func (pool *LegacyPool) handlePreconfTx(from common.Address, tx *types.Transacti
 			close(result)
 		},
 	}
-	pool.preconfTxRequestFeed.Send(preconfTxRequest)
+	pool.preconf.SendPreConfRequestEvent(preconfTxRequest)
 	log.Debug("txpool sent preconf tx request", "tx", txHash)
 
 	// goroutine to avoid blocking
@@ -174,7 +175,7 @@ func (pool *LegacyPool) handlePreconfTx(from common.Address, tx *types.Transacti
 		tx := preconfTxRequest.Tx
 
 		// default preconf event
-		event := core.NewPreconfTxEvent{
+		event := &core.NewPreconfTxEvent{
 			TxHash:                 txHash,
 			PredictedL2BlockNumber: hexutil.Uint64(0),
 			Status:                 core.PreconfStatusWaiting,
@@ -208,7 +209,7 @@ func (pool *LegacyPool) handlePreconfTx(from common.Address, tx *types.Transacti
 			status := preconfTxRequest.SetStatus(core.PreconfStatusWaiting, core.PreconfStatusTimeout)
 			if status == core.PreconfStatusTimeout {
 				event.Reason = fmt.Sprintf("preconf timeout, over %s timeout", time.Since(now))
-				pool.preconfTxs.SetStatus(txHash, core.PreconfStatusTimeout)
+				pool.preconf.SetStatus(txHash, core.PreconfStatusTimeout)
 				event.Status = core.PreconfStatusTimeout
 			} else {
 				event.Status = status
@@ -225,17 +226,21 @@ func (pool *LegacyPool) handlePreconfTx(from common.Address, tx *types.Transacti
 		}
 
 		// send preconf event
-		pool.preconfTxFeed.Send(event)
+		pool.preconf.SendPreConfTxEvent(event)
 	}()
 }
 
 func (pool *LegacyPool) SetPreconfTxStatus(txHash common.Hash, status core.PreconfStatus) {
 	// preconfTxs.SetStatus is thread safe
-	pool.preconfTxs.SetStatus(txHash, status)
+	pool.preconf.SetStatus(txHash, status)
 }
 
 func (pool *LegacyPool) recoverTimeoutPreconfTx(tx *types.Transaction) {
 	log.Trace("recoverTimeoutPreconfTx", "tx", tx.Hash())
-	pool.preconfTxs.Remove(tx.Hash())
+	pool.preconf.RemoveTx(tx.Hash())
 	pool.addPreconfTx(tx)
+}
+
+func (pool *LegacyPool) AddMohoTx(address common.Address, hash common.Hash) {
+	pool.preconf.AddMohoTx(address, hash)
 }

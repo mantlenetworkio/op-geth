@@ -25,6 +25,9 @@ type preconfTxPool interface {
 
 	// SetPreconfTxStatus sets the status of a preconf transaction
 	SetPreconfTxStatus(txHash common.Hash, status core.PreconfStatus)
+
+	// AddMohoTx add moho preconf transaction
+	AddMohoTx(address common.Address, hash common.Hash)
 }
 
 // SubscribeNewPreconfTxEvent registers a subscription of NewPreconfTxEvent and
@@ -71,5 +74,11 @@ func (p *TxPool) PreconfReady() {
 func (p *TxPool) SetPreconfTxStatus(txHash common.Hash, status core.PreconfStatus) {
 	for _, subpool := range p.subpools {
 		subpool.SetPreconfTxStatus(txHash, status)
+	}
+}
+
+func (p *TxPool) AddMohoTx(address common.Address, hash common.Hash) {
+	for _, subpool := range p.subpools {
+		subpool.AddMohoTx(address, hash)
 	}
 }

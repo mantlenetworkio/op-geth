@@ -481,6 +481,10 @@ func (b *EthAPIBackend) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.S
 	return b.eth.txPool.SubscribeTransactions(ch, true)
 }
 
+func (b *EthAPIBackend) AddMoHoPreconfTxHash(address common.Address, txHash common.Hash) {
+	b.eth.txPool.AddMohoTx(address, txHash)
+}
+
 func (b *EthAPIBackend) SyncProgress(ctx context.Context) ethereum.SyncProgress {
 	prog := b.eth.Downloader().Progress()
 	if txProg, err := b.eth.blockchain.TxIndexProgress(); err == nil {

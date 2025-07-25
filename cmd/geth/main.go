@@ -190,6 +190,7 @@ var (
 		utils.AuthPortFlag,
 		utils.AuthVirtualHostsFlag,
 		utils.JWTSecretFlag,
+		utils.PreConfJWTSecretFlag,
 		utils.HTTPVirtualHostsFlag,
 		utils.GraphQLEnabledFlag,
 		utils.GraphQLCORSDomainFlag,

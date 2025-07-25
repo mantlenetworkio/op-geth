@@ -270,12 +270,8 @@ type LegacyPool struct {
 
 	l1CostFn txpool.L1CostFunc // To apply L1 costs as rollup, optional field, may be nil.
 
-	// Preconf variables
-	preconfReadyCh       chan struct{}
-	preconfReadyOnce     sync.Once
-	preconfTxRequestFeed event.Feed
-	preconfTxFeed        event.Feed
-	preconfTxs           *preconf.FIFOTxSet // Set of preconf transactions
+	// Preconf manager
+	preconf *preconf.PreConfManager
 }
 
 type txpoolResetRequest struct {
@@ -307,8 +303,7 @@ func New(config Config, chain BlockChain) *LegacyPool {
 	}
 	pool.priced = newPricedList(pool.all)
 	// Initialize preconfs
-	pool.preconfReadyCh = make(chan struct{})
-	pool.preconfTxs = preconf.NewFIFOTxSet()
+	pool.preconf = preconf.NewPreConfManager(config.Preconf)
 	log.Info("preconf", "txpool.config", pool.config.Preconf.String())
 
 	pool.reset(nil, chain.CurrentBlock())
@@ -820,7 +815,7 @@ func (pool *LegacyPool) add(tx *types.Transaction) (replaced bool, err error) {
 	if list := pool.pending[from]; list != nil && list.Contains(tx.Nonce()) {
 		old := list.txs.Get(tx.Nonce())
 		if old != nil {
-			status := pool.preconfTxs.GetStatus(old.Hash())
+			status := pool.preconf.GetStatus(old.Hash())
 			// only timeout preconf tx can be replaced
 			if status != nil && *status != core.PreconfStatusTimeout {
 				return false, txpool.ErrPreconfInProcess
@@ -838,7 +833,7 @@ func (pool *LegacyPool) add(tx *types.Transaction) (replaced bool, err error) {
 			pool.all.Remove(old.Hash())
 			pool.priced.Removed(1)
 			pendingReplaceMeter.Mark(1)
-			pool.preconfTxs.Remove(old.Hash())
+			pool.preconf.RemoveTxsAndMohoTxs(from, old.Hash())
 			log.Trace("add: removed old tx", "hash", old.Hash())
 		}
 		pool.all.Add(tx)
@@ -949,7 +944,7 @@ func (pool *LegacyPool) promoteTx(addr common.Address, hash common.Hash, tx *typ
 		pool.all.Remove(old.Hash())
 		pool.priced.Removed(1)
 		pendingReplaceMeter.Mark(1)
-		pool.preconfTxs.Remove(old.Hash())
+		pool.preconf.RemoveTxsAndMohoTxs(addr, old.Hash())
 		log.Trace("promoteTx: removed old tx", "hash", old.Hash())
 	} else {
 		// Nothing was replaced, bump the pending counter
@@ -1003,7 +998,7 @@ func (pool *LegacyPool) Add(txs []*types.Transaction, sync bool) []error {
 	for i, tx := range txs {
 		// If the transaction is known, pre-set the error slot
 		if pool.all.Get(tx.Hash()) != nil {
-			status := pool.preconfTxs.GetStatus(tx.Hash())
+			status := pool.preconf.GetStatus(tx.Hash())
 			if status != nil {
 				if *status == core.PreconfStatusTimeout {
 					pool.mu.Lock()
@@ -1588,7 +1583,11 @@ func (pool *LegacyPool) truncatePending() {
 	// Assemble a spam order to penalize large transactors first
 	spammers := prque.New[uint64, common.Address](nil)
 	for addr, list := range pool.pending {
-		if pool.config.Preconf.IsPreconfTxFrom(addr) {
+		//Do not remove pre-confirmation transactions.
+		//In Moho mode, if the address has pending transactions
+		//and has sent a pre-confirmation transaction,
+		//then all of them must be pre-confirmation transactions
+		if pool.preconf.IsPreConfTransaction(nil, &addr, nil, true) {
 			continue
 		}
 		// Only evict transactions from high rollers
@@ -1727,13 +1726,13 @@ func (pool *LegacyPool) demoteUnexecutables() {
 			pool.all.Remove(hash)
 			log.Trace("Removed old pending transaction", "hash", hash)
 		}
-		pool.preconfTxs.Forward(addr, nonce) // remove all preconf txs with tx.nonce < nonce
+		pool.preconf.RemoveNonceTooLow(addr, nonce) // remove all preconf txs with tx.nonce < nonce
 		// Drop all transactions that are too costly (low balance or out of gas), and queue any invalids back for later
 		drops, invalids := list.Filter(pool.currentState.GetBalance(addr), gasLimit)
 		for _, tx := range drops {
 			hash := tx.Hash()
 			pool.all.Remove(hash)
-			pool.preconfTxs.Remove(hash)
+			pool.preconf.RemoveTxsAndMohoTxs(addr, hash)
 			log.Trace("Removed unpayable pending transaction", "hash", hash)
 		}
 		pendingNofundsMeter.Mark(int64(len(drops)))

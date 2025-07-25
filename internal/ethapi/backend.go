@@ -85,6 +85,7 @@ type Backend interface {
 	TxPoolContentFrom(addr common.Address) ([]*types.Transaction, []*types.Transaction)
 	SubscribeNewTxsEvent(chan<- core.NewTxsEvent) event.Subscription
 	SubscribeNewPreconfTxEvent(chan<- core.NewPreconfTxEvent) event.Subscription
+	AddMoHoPreconfTxHash(address common.Address, txHash common.Hash)
 
 	ChainConfig() *params.ChainConfig
 	Engine() consensus.Engine
@@ -125,6 +126,10 @@ func GetAPIs(apiBackend Backend) []rpc.API {
 		}, {
 			Namespace: "eth",
 			Service:   NewEthereumAccountAPI(apiBackend.AccountManager()),
+		}, {
+			Namespace:     "preconf",
+			Service:       NewPreConfAPI(apiBackend),
+			Authenticated: true,
 		},
 	}
 }

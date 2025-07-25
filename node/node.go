@@ -429,22 +429,30 @@ func (n *Node) startRPC() error {
 		return nil
 	}
 
-	initAuth := func(port int, secret []byte) error {
+	initAuth := func(port int, secret []byte, special bool) error {
 		// Enable auth via HTTP
 		server := n.httpAuth
 		if err := server.setListenAddr(n.config.AuthAddr, port); err != nil {
 			return err
 		}
+		var modules []string
+		if special {
+			modules = SpecialAuthModules
+		} else {
+			modules = DefaultAuthModules
+		}
+
 		sharedConfig := rpcEndpointConfig{
 			jwtSecret:              secret,
 			batchItemLimit:         engineAPIBatchItemLimit,
 			batchResponseSizeLimit: engineAPIBatchResponseSizeLimit,
 			httpBodyLimit:          engineAPIBodyLimit,
 		}
+
 		err := server.enableRPC(allAPIs, httpConfig{
 			CorsAllowedOrigins: DefaultAuthCors,
 			Vhosts:             n.config.AuthVirtualHosts,
-			Modules:            DefaultAuthModules,
+			Modules:            modules,
 			prefix:             DefaultAuthPrefix,
 			rpcEndpointConfig:  sharedConfig,
 		})
@@ -459,7 +467,7 @@ func (n *Node) startRPC() error {
 			return err
 		}
 		if err := server.enableWS(allAPIs, wsConfig{
-			Modules:           DefaultAuthModules,
+			Modules:           modules,
 			Origins:           DefaultAuthOrigins,
 			prefix:            DefaultAuthPrefix,
 			rpcEndpointConfig: sharedConfig,
@@ -490,7 +498,14 @@ func (n *Node) startRPC() error {
 		if err != nil {
 			return err
 		}
-		if err := initAuth(n.config.AuthPort, jwtSecret); err != nil {
+		if err := initAuth(n.config.AuthPort, jwtSecret, false); err != nil {
+			return err
+		}
+		preConfJwtSecret, err := n.obtainJWTSecret(n.config.PreConfJWTSecret)
+		if err != nil {
+			return err
+		}
+		if err := initAuth(n.config.AuthPort, preConfJwtSecret, true); err != nil {
 			return err
 		}
 	}

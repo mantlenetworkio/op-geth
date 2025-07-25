@@ -207,6 +207,9 @@ type Config struct {
 	// JWTSecret is the path to the hex-encoded jwt secret.
 	JWTSecret string `toml:",omitempty"`
 
+	//PreConfJWTSecret is the path to the hex-encoded preconf jwt secret.
+	PreConfJWTSecret string `toml:",omitempty"`
+
 	// EnablePersonal enables the deprecated personal namespace.
 	EnablePersonal bool `toml:"-"`
 

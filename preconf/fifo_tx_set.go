@@ -156,7 +156,7 @@ func (s *FIFOTxSet) Clear() {
 	s.txQueue = make([]*TxEntry, 0)
 }
 
-func (s *FIFOTxSet) Forward(addr common.Address, nonce uint64) {
+func (s *FIFOTxSet) Forward(addr common.Address, nonce uint64) []common.Hash {
 	defer MetricsPreconfTxPoolForwardCost(time.Now())
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -164,10 +164,12 @@ func (s *FIFOTxSet) Forward(addr common.Address, nonce uint64) {
 	now := time.Now()
 
 	i := 0
+	remove := []common.Hash{}
 	for _, entry := range s.txQueue {
 		if entry.From == addr && entry.Tx.Nonce() < nonce {
 			// Remove from txMap
 			delete(s.txMap, entry.Tx.Hash())
+			remove = append(remove, entry.Tx.Hash())
 			MetricsPendingPreconfDec(1)
 			log.Trace("preconf removed by forward", "tx", entry.Tx.Hash(), "nonce", nonce, "tx.nonce", entry.Tx.Nonce())
 			continue // Skip appending to txQueue
@@ -178,6 +180,7 @@ func (s *FIFOTxSet) Forward(addr common.Address, nonce uint64) {
 	s.txQueue = s.txQueue[:i]
 
 	log.Debug("preconf forward", "duration", time.Since(now))
+	return remove
 }
 
 func (s *FIFOTxSet) SetStatus(hash common.Hash, status core.PreconfStatus) int {
