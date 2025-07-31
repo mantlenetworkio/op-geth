@@ -68,3 +68,7 @@ func (miner *Miner) preconfLoop() {
 func (miner *Miner) IsPreconfStatusOk() bool {
 	return miner.preconfChecker.PrecheckStatus() == nil
 }
+
+func (miner *Miner) SetNextPreconfDepositTxs(epoch uint64, transactions []*types.Transaction) bool {
+	return miner.preconfChecker.updateDepositTxsV2(epoch, transactions)
+}

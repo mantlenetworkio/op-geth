@@ -45,12 +45,15 @@ var (
 	FAILED  = "FAILED"
 	INVALID = "INVALID"
 	WAITING = "WAITING"
+	REORG   = "REORG"
 
-	InvalidBlockNumber = &PreConfAPIError{code: -48000, msg: "Invalid block number"}
-	InvalidTimeOut     = &PreConfAPIError{code: -48001, msg: "Invalid time out"}
+	InvalidBlockNumber  = &PreConfAPIError{code: -48000, msg: "Invalid block number"}
+	InvalidTimeOut      = &PreConfAPIError{code: -48001, msg: "Invalid time out"}
+	InvalidGasLimitFlow = &PreConfAPIError{code: -48002, msg: "Invalid gas limit"}
 
 	STATUS_TIMEOUT = Response{Status: TIMEOUT, Receipts: nil}
 	STATUS_FAILED  = Response{Status: FAILED, Receipts: nil}
 	STATUS_REVERT  = Response{Status: REVERT, Receipts: nil}
 	STATUS_INVALID = Response{Status: INVALID, Receipts: nil}
+	STATUS_REOGR   = Response{Status: REORG, Receipts: nil}
 )

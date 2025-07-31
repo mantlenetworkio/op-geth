@@ -16,7 +16,7 @@ type PreConfManager struct {
 	txRequestFeed event.Feed    // Feed for preconf transaction requests
 	txFeed        event.Feed    // Feed for preconf transaction events
 	txs           *FIFOTxSet    // Set of preconf transactions
-	mohoTxs       *MohoTxSet
+	mohoTxs       *MohoTxSet    // Set of preconf transactions for addresses
 }
 
 func NewPreConfManager(config *TxPoolConfig) *PreConfManager {

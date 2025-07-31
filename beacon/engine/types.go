@@ -202,6 +202,12 @@ type ForkchoiceStateV1 struct {
 	FinalizedBlockHash common.Hash `json:"finalizedBlockHash"`
 }
 
+type ForkchoicePreconf struct {
+	L1BlockNumber uint64      `json:"l1BlockNumber" gencodec:"required"`
+	L1BlockHash   common.Hash `json:"l1BlockHash" gencodec:"required"`
+	Transactions  [][]byte    `json:"transactions,omitempty"  gencodec:"optional"`
+}
+
 func encodeTransactions(txs []*types.Transaction) [][]byte {
 	var enc = make([][]byte, len(txs))
 	for i, tx := range txs {

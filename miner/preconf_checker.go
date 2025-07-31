@@ -249,6 +249,17 @@ func (c *preconfChecker) updateDepositTxs(currentL1, headL1 uint64) error {
 	return nil
 }
 
+// updateDepositTxsV2
+// update deposit txs by ConsensusAPI api
+func (c *preconfChecker) updateDepositTxsV2(nextEpoch uint64, depositTxs []*types.Transaction) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.depositTxs = depositTxs
+	preconf.MetricsL1Deposit(true, len(depositTxs))
+	log.Debug("update deposit txs", "next_epoch", nextEpoch, "deposit_txs", len(depositTxs))
+	return true
+}
+
 func (c *preconfChecker) Preconf(tx *types.Transaction) (*types.Receipt, error) {
 	defer preconf.MetricsPreconfExecuteCost(time.Now())
 

@@ -88,6 +88,7 @@ var caps = []string{
 	"engine_forkchoiceUpdatedWithWitnessV1",
 	"engine_forkchoiceUpdatedWithWitnessV2",
 	"engine_forkchoiceUpdatedWithWitnessV3",
+	"engine_forkchoiceUpdatedWithNextDepositTxsV3",
 	"engine_exchangeTransitionConfigurationV1",
 	"engine_getPayloadV1",
 	"engine_getPayloadV2",
@@ -206,7 +207,7 @@ func (api *ConsensusAPI) ForkchoiceUpdatedV1(update engine.ForkchoiceStateV1, pa
 			return engine.STATUS_INVALID, engine.InvalidParams.With(errors.New("forkChoiceUpdateV1 called post-shanghai"))
 		}
 	}
-	return api.forkchoiceUpdated(update, payloadAttributes, engine.PayloadV1, false)
+	return api.forkchoiceUpdated(update, payloadAttributes, engine.PayloadV1, false, nil)
 }
 
 // ForkchoiceUpdatedV2 is equivalent to V1 with the addition of withdrawals in the payload
@@ -229,7 +230,7 @@ func (api *ConsensusAPI) ForkchoiceUpdatedV2(update engine.ForkchoiceStateV1, pa
 			return engine.STATUS_INVALID, engine.UnsupportedFork.With(errors.New("forkchoiceUpdatedV2 must only be called with paris and shanghai payloads"))
 		}
 	}
-	return api.forkchoiceUpdated(update, params, engine.PayloadV2, false)
+	return api.forkchoiceUpdated(update, params, engine.PayloadV2, false, nil)
 }
 
 // ForkchoiceUpdatedV3 is equivalent to V2 with the addition of parent beacon block root
@@ -250,7 +251,7 @@ func (api *ConsensusAPI) ForkchoiceUpdatedV3(update engine.ForkchoiceStateV1, pa
 	// hash, even if params are wrong. To do this we need to split up
 	// forkchoiceUpdate into a function that only updates the head and then a
 	// function that kicks off block construction.
-	return api.forkchoiceUpdated(update, params, engine.PayloadV3, false)
+	return api.forkchoiceUpdated(update, params, engine.PayloadV3, false, nil)
 }
 
 // ForkchoiceUpdatedWithWitnessV1 is analogous to ForkchoiceUpdatedV1, only it
@@ -264,7 +265,7 @@ func (api *ConsensusAPI) ForkchoiceUpdatedWithWitnessV1(update engine.Forkchoice
 			return engine.STATUS_INVALID, engine.InvalidParams.With(errors.New("forkChoiceUpdateV1 called post-shanghai"))
 		}
 	}
-	return api.forkchoiceUpdated(update, payloadAttributes, engine.PayloadV1, true)
+	return api.forkchoiceUpdated(update, payloadAttributes, engine.PayloadV1, true, nil)
 }
 
 // ForkchoiceUpdatedWithWitnessV2 is analogous to ForkchoiceUpdatedV2, only it
@@ -287,7 +288,7 @@ func (api *ConsensusAPI) ForkchoiceUpdatedWithWitnessV2(update engine.Forkchoice
 			return engine.STATUS_INVALID, engine.UnsupportedFork.With(errors.New("forkchoiceUpdatedV2 must only be called with paris and shanghai payloads"))
 		}
 	}
-	return api.forkchoiceUpdated(update, params, engine.PayloadV2, true)
+	return api.forkchoiceUpdated(update, params, engine.PayloadV2, true, nil)
 }
 
 // ForkchoiceUpdatedWithWitnessV3 is analogous to ForkchoiceUpdatedV3, only it
@@ -308,10 +309,29 @@ func (api *ConsensusAPI) ForkchoiceUpdatedWithWitnessV3(update engine.Forkchoice
 	// hash, even if params are wrong. To do this we need to split up
 	// forkchoiceUpdate into a function that only updates the head and then a
 	// function that kicks off block construction.
-	return api.forkchoiceUpdated(update, params, engine.PayloadV3, true)
+	return api.forkchoiceUpdated(update, params, engine.PayloadV3, true, nil)
 }
 
-func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payloadAttributes *engine.PayloadAttributes, payloadVersion engine.PayloadVersion, payloadWitness bool) (engine.ForkChoiceResponse, error) {
+func (api *ConsensusAPI) ForkchoiceUpdatedWithNextDepositTxsV3(update engine.ForkchoiceStateV1, params *engine.PayloadAttributes, preconf *engine.ForkchoicePreconf) (engine.ForkChoiceResponse, error) {
+	if params != nil {
+		if params.Withdrawals == nil {
+			return engine.STATUS_INVALID, engine.InvalidPayloadAttributes.With(errors.New("missing withdrawals"))
+		}
+		if params.BeaconRoot == nil {
+			return engine.STATUS_INVALID, engine.InvalidPayloadAttributes.With(errors.New("missing beacon root"))
+		}
+		if api.eth.BlockChain().Config().LatestFork(params.Timestamp) != forks.Cancun && api.eth.BlockChain().Config().LatestFork(params.Timestamp) != forks.Prague {
+			return engine.STATUS_INVALID, engine.UnsupportedFork.With(errors.New("forkchoiceUpdatedV3 must only be called for cancun payloads"))
+		}
+	}
+	// TODO(matt): the spec requires that fcu is applied when called on a valid
+	// hash, even if params are wrong. To do this we need to split up
+	// forkchoiceUpdate into a function that only updates the head and then a
+	// function that kicks off block construction.
+	return api.forkchoiceUpdated(update, params, engine.PayloadV3, false, preconf)
+}
+
+func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payloadAttributes *engine.PayloadAttributes, payloadVersion engine.PayloadVersion, payloadWitness bool, preconf *engine.ForkchoicePreconf) (engine.ForkChoiceResponse, error) {
 	api.forkchoiceLock.Lock()
 	defer api.forkchoiceLock.Unlock()
 
@@ -469,6 +489,17 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 			return valid(nil), engine.InvalidPayloadAttributes.With(err)
 		}
 		api.localBlocks.put(id, payload)
+		if preconf != nil {
+			depositTxs := make(types.Transactions, 0, len(preconf.Transactions))
+			for i, dtx := range preconf.Transactions {
+				var tx types.Transaction
+				if err := tx.UnmarshalBinary(dtx); err != nil {
+					return valid(nil), fmt.Errorf("transaction %d is not valid: %v", i, err)
+				}
+				depositTxs = append(depositTxs, &tx)
+			}
+			api.eth.Miner().SetNextPreconfDepositTxs(preconf.L1BlockNumber, depositTxs)
+		}
 		return valid(&id), nil
 	}
 	return valid(nil), nil

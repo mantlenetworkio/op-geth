@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
+
+	"github.com/ethereum/go-ethereum/common"
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core"
@@ -39,6 +42,12 @@ var caps = []string{
 
 type PreConfAPI struct {
 	eth *eth.Ethereum
+
+	parentHash        common.Hash
+	lastBlockNumber   uint64
+	lastBlockGasLimit uint64
+
+	sendRawTransactionLock sync.Mutex
 }
 
 func NewPreConfAPI(eth *eth.Ethereum) *PreConfAPI {
@@ -59,6 +68,37 @@ func (api *PreConfAPI) SendRawTransactionWithPreConfV2(params *preconf.Params) (
 	// - FAILED: One or more transactions failed (non-timeout errors)
 	// - TIMEOUT: Processing timed out (user timeout exceeded)
 	// - INVALID: Invalid parameters (block number, timeout format, etc.)
+
+	api.sendRawTransactionLock.Lock()
+	defer api.sendRawTransactionLock.Unlock()
+
+	if api.lastBlockNumber == 0 {
+		api.reset(params)
+	}
+
+	if api.lastBlockNumber == params.BlockNumber {
+		if api.parentHash != params.ParentHash {
+			return preconf.STATUS_REOGR, nil
+		}
+	} else if api.lastBlockNumber > params.BlockNumber {
+		if !params.ForkBlock {
+			return preconf.STATUS_INVALID, nil
+		}
+		api.reset(params)
+	} else if api.lastBlockNumber == params.BlockNumber-1 {
+		api.reset(params)
+	} else {
+		// verify parent hash
+		block := api.eth.BlockChain().GetBlockByNumber(params.BlockNumber - 1)
+		if block != nil {
+			if api.parentHash == block.Hash() {
+				api.reset(params)
+			} else {
+				return preconf.STATUS_REOGR, nil
+			}
+		}
+		return preconf.STATUS_INVALID, nil
+	}
 
 	var (
 		err     error
@@ -93,6 +133,18 @@ func (api *PreConfAPI) SendRawTransactionWithPreConfV2(params *preconf.Params) (
 		"timeout", timeout,
 		"transaction_count", len(params.Transactions))
 
+	// check gas limit
+	gaslimit := api.eth.BlockChain().GasLimit()
+	txs, gasUsed, err := checkTransactions(params.Transactions)
+	if err != nil {
+		response.Status = preconf.FAILED
+		return *response, err
+	}
+	if api.lastBlockGasLimit+gasUsed > gaslimit {
+		return preconf.STATUS_INVALID, preconf.InvalidGasLimitFlow
+	}
+	api.lastBlockGasLimit += gasUsed
+
 	// Channel to collect results
 	resultCh := make(chan preconf.Response, 1)
 
@@ -109,7 +161,7 @@ func (api *PreConfAPI) SendRawTransactionWithPreConfV2(params *preconf.Params) (
 		defer timer.Stop()
 
 		// Process each transaction
-		for i, txData := range params.Transactions {
+		for i, tx := range txs {
 			// Check if we've exceeded the overall timeout
 			select {
 			case <-timer.C:
@@ -121,15 +173,6 @@ func (api *PreConfAPI) SendRawTransactionWithPreConfV2(params *preconf.Params) (
 				return
 			default:
 				// Continue processing
-			}
-
-			// Unmarshal transaction
-			tx := new(types.Transaction)
-			if err := tx.UnmarshalBinary(txData); err != nil {
-				log.Error("Failed to unmarshal transaction", "index", i, "error", err)
-				hasError = true
-				errorReason = "invalid transaction data"
-				break
 			}
 
 			// Create a context with a reasonable timeout for this single transaction
@@ -220,4 +263,34 @@ func (api *PreConfAPI) SendRawTransactionWithPreConfV2(params *preconf.Params) (
 			Receipts: make([]hexutil.Bytes, 0),
 		}, nil
 	}
+}
+
+func (api *PreConfAPI) reset(params *preconf.Params) {
+	api.parentHash = params.ParentHash
+	api.lastBlockNumber = params.BlockNumber
+	api.lastBlockGasLimit = 0
+}
+
+// checkTransactions converts hexutil.Bytes to types.Transaction and calculates total gas limit
+func checkTransactions(txs []hexutil.Bytes) ([]*types.Transaction, uint64, error) {
+	var (
+		transactions = make([]*types.Transaction, 0, len(txs))
+		totalGas     uint64
+	)
+
+	for i, txData := range txs {
+		// Unmarshal transaction
+		tx := new(types.Transaction)
+		if err := tx.UnmarshalBinary(txData); err != nil {
+			return nil, 0, fmt.Errorf("failed to unmarshal transaction at index %d: %w", i, err)
+		}
+
+		// Add to transactions slice
+		transactions = append(transactions, tx)
+
+		// Accumulate gas limit
+		totalGas += tx.Gas()
+	}
+
+	return transactions, totalGas, nil
 }
