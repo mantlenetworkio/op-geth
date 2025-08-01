@@ -1169,9 +1169,12 @@ func (bc *BlockChain) ExportReceiptsN(w io.Writer, first uint64, last uint64) er
 			return fmt.Errorf("export failed on #%d: not found", nr)
 		}
 		receipts := bc.GetReceiptsByHash(block.Hash())
-		if err := rlp.Encode(w, receipts); err != nil {
-			return err
+		for _, receipt := range receipts {
+			if err := rlp.Encode(w, receipt); err != nil {
+				return err
+			}
 		}
+
 		if time.Since(reported) >= statsReportLimit {
 			log.Info("Exporting receipts", "exported", block.NumberU64()-first, "elapsed", common.PrettyDuration(time.Since(start)))
 			reported = time.Now()
