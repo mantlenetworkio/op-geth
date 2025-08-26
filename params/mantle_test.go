@@ -25,6 +25,11 @@ func TestGetUpgradeConfigForMantle(t *testing.T) {
 		t.Errorf("upgradeConfig should be nil, upgradeConfig: got %v, want %v", upgradeConfig, nil)
 	}
 
+	hoodiQA5UpgradeConfig := GetUpgradeConfigForMantle(MantleHoodiQA5ChainId)
+	if *hoodiQA5UpgradeConfig.MantleSkadiTime != *MantleHoodiQA5UpgradeConfig.MantleSkadiTime {
+		t.Errorf("wrong mantleSkadiTime: got %v, want %v", *hoodiQA5UpgradeConfig.MantleSkadiTime, *MantleHoodiQA5UpgradeConfig.MantleSkadiTime)
+	}
+
 	defaultUpgradeConfig := GetUpgradeConfigForMantle(OtherChainID)
 	if *defaultUpgradeConfig.BaseFeeTime != *MantleDefaultUpgradeConfig.BaseFeeTime {
 		t.Errorf("wrong baseFeeTime: got %v, want %v", *defaultUpgradeConfig.BaseFeeTime, *MantleDefaultUpgradeConfig.BaseFeeTime)
