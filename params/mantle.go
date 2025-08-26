@@ -52,7 +52,7 @@ var (
 		MetaTxV3UpgradeTime:   u64Ptr(0),
 		ProxyOwnerUpgradeTime: nil,
 		MantleEverestTime:     u64Ptr(0),
-		MantleSkadiTime:       u64Ptr(1756206000),
+		MantleSkadiTime:       u64Ptr(1756207800),
 	}
 	MantleLocalUpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               MantleLocalChainId,
