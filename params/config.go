@@ -531,8 +531,9 @@ func (c CliqueConfig) String() string {
 
 // OptimismConfig is the optimism config.
 type OptimismConfig struct {
-	EIP1559Elasticity  uint64 `json:"eip1559Elasticity"`
-	EIP1559Denominator uint64 `json:"eip1559Denominator"`
+	EIP1559Elasticity        uint64  `json:"eip1559Elasticity"`
+	EIP1559Denominator       uint64  `json:"eip1559Denominator"`
+	EIP1559DenominatorCanyon *uint64 `json:"eip1559DenominatorCanyon,omitempty"`
 }
 
 // String implements the stringer interface, returning the optimism fee config details.
@@ -832,7 +833,27 @@ func (c *ChainConfig) IsCanyon(time uint64) bool {
 	return c.IsMantleArsia(time)
 }
 
+func (c *ChainConfig) IsEcotone(time uint64) bool {
+	return c.IsMantleArsia(time)
+}
+
+func (c *ChainConfig) IsFjord(time uint64) bool {
+	return c.IsMantleArsia(time)
+}
+
+func (c *ChainConfig) IsGranite(time uint64) bool {
+	return c.IsMantleArsia(time)
+}
+
+func (c *ChainConfig) IsHolocene(time uint64) bool {
+	return c.IsMantleArsia(time)
+}
+
 func (c *ChainConfig) IsIsthmus(time uint64) bool {
+	return c.IsMantleArsia(time)
+}
+
+func (c *ChainConfig) IsJovian(time uint64) bool {
 	return c.IsMantleArsia(time)
 }
 
@@ -848,6 +869,34 @@ func (c *ChainConfig) IsOptimismBedrock(num *big.Int) bool {
 
 func (c *ChainConfig) IsOptimismRegolith(time uint64) bool {
 	return c.IsOptimism() && c.IsRegolith(time)
+}
+
+func (c *ChainConfig) IsOptimismCanyon(time uint64) bool {
+	return c.IsOptimism() && c.IsCanyon(time)
+}
+
+func (c *ChainConfig) IsOptimismEcotone(time uint64) bool {
+	return c.IsOptimism() && c.IsEcotone(time)
+}
+
+func (c *ChainConfig) IsOptimismFjord(time uint64) bool {
+	return c.IsOptimism() && c.IsFjord(time)
+}
+
+func (c *ChainConfig) IsOptimismGranite(time uint64) bool {
+	return c.IsOptimism() && c.IsGranite(time)
+}
+
+func (c *ChainConfig) IsOptimismHolocene(time uint64) bool {
+	return c.IsOptimism() && c.IsHolocene(time)
+}
+
+func (c *ChainConfig) IsOptimismIsthmus(time uint64) bool {
+	return c.IsOptimism() && c.IsIsthmus(time)
+}
+
+func (c *ChainConfig) IsOptimismJovian(time uint64) bool {
+	return c.IsOptimism() && c.IsJovian(time)
 }
 
 // IsOptimismPreBedrock returns true iff this is an optimism node & bedrock is not yet active
@@ -1465,4 +1514,38 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		IsMantleSkadi:             c.IsMantleSkadi(timestamp),
 		IsMantleLimb:              c.IsMantleLimb(timestamp),
 	}
+}
+
+func (c *ChainConfig) HasOptimismWithdrawalsRoot(blockTime uint64) bool {
+	return c.IsOptimismIsthmus(blockTime)
+}
+
+// CheckOptimismValidity checks for OP Stack chains:
+// - the EIP159 params are set
+// - the Ethereum forks are set to the same time as the OP Stack forks that imply them
+func (c *ChainConfig) CheckOptimismValidity() error {
+	if c.Optimism == nil {
+		return nil
+	}
+
+	if c.Optimism.EIP1559Denominator == 0 {
+		return errors.New("zero EIP1559Denominator")
+	}
+	if c.Optimism.EIP1559Elasticity == 0 {
+		return errors.New("zero EIP1559Elasticity")
+	}
+
+	return nil
+}
+
+func equalPtrValues[T comparable](a, b *T) bool {
+	// also captures nil == nil
+	return a == b || (a != nil && b != nil && *a == *b)
+}
+
+func ptrValueString[T any](t *T) string {
+	if t == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%v", *t)
 }
