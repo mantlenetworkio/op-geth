@@ -480,6 +480,7 @@ type ChainConfig struct {
 	MantleEverestTime     *uint64 `json:"mantleEverestTime,omitempty"`     // MantleEverestTime switch time ( nil = no fork, 0 = already forked)
 	MantleSkadiTime       *uint64 `json:"mantleSkadiTime,omitempty"`       // MantleSkadiTime switch time ( nil = no fork, 0 = already forked)
 	MantleLimbTime        *uint64 `json:"mantleLimbTime,omitempty"`        // MantleLimbTime switch time ( nil = no fork, 0 = already forked)
+	MantleArsiaTime       *uint64 `json:"mantleArsiaTime,omitempty"`       // MantleArsiaTime switch time ( nil = no fork, 0 = already forked)
 
 	// TerminalTotalDifficulty is the amount of total difficulty reached by
 	// the network that triggers the consensus upgrade.
@@ -827,6 +828,14 @@ func (c *ChainConfig) IsRegolith(time uint64) bool {
 	return isTimestampForked(c.RegolithTime, time)
 }
 
+func (c *ChainConfig) IsCanyon(time uint64) bool {
+	return c.IsMantleArsia(time)
+}
+
+func (c *ChainConfig) IsIsthmus(time uint64) bool {
+	return c.IsMantleArsia(time)
+}
+
 // IsOptimism returns whether the node is an optimism node or not.
 func (c *ChainConfig) IsOptimism() bool {
 	return c.Optimism != nil
@@ -887,6 +896,15 @@ func (c *ChainConfig) IsMantleLimb(time uint64) bool {
 
 func (c *ChainConfig) IsOptimismWithLimb(time uint64) bool {
 	return c.IsOptimism() && c.IsMantleLimb(time)
+}
+
+// IsMantleArsia returns whether time is either equal to the Mantle Everest fork time or greater.
+func (c *ChainConfig) IsMantleArsia(time uint64) bool {
+	return isTimestampForked(c.MantleArsiaTime, time)
+}
+
+func (c *ChainConfig) IsOptimismWithArsia(time uint64) bool {
+	return c.IsOptimism() && c.IsMantleArsia(time)
 }
 
 // IsProxyOwnerUpgrade returns whether time is either equal to the ProxyOwnerUpgrade fork time

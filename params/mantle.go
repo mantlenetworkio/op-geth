@@ -23,6 +23,7 @@ var (
 		MantleEverestTime:     u64Ptr(1_742_367_600),
 		MantleSkadiTime:       u64Ptr(1_756_278_000),
 		MantleLimbTime:        nil,
+		MantleArsiaTime:       nil,
 	}
 	MantleSepoliaUpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               MantleSepoliaChainId,
@@ -34,6 +35,7 @@ var (
 		MantleEverestTime:     u64Ptr(1_737_010_800),
 		MantleSkadiTime:       u64Ptr(1_752_649_200),
 		MantleLimbTime:        nil,
+		MantleArsiaTime:       nil,
 	}
 	MantleHoodiQA3UpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               MantleHoodiQA3ChainId,
@@ -45,6 +47,7 @@ var (
 		MantleEverestTime:     u64Ptr(0),
 		MantleSkadiTime:       u64Ptr(1_749_798_000),
 		MantleLimbTime:        nil,
+		MantleArsiaTime:       nil,
 	}
 	MantleLocalUpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               MantleLocalChainId,
@@ -56,6 +59,7 @@ var (
 		MantleEverestTime:     u64Ptr(0),
 		MantleSkadiTime:       u64Ptr(0),
 		MantleLimbTime:        nil,
+		MantleArsiaTime:       nil,
 	}
 	MantleDefaultUpgradeConfig = MantleUpgradeChainConfig{
 		BaseFeeTime:           u64Ptr(0),
@@ -66,6 +70,7 @@ var (
 		MantleEverestTime:     u64Ptr(0),
 		MantleSkadiTime:       u64Ptr(0),
 		MantleLimbTime:        nil,
+		MantleArsiaTime:       nil,
 	}
 )
 
@@ -80,6 +85,7 @@ type MantleUpgradeChainConfig struct {
 	MantleEverestTime     *uint64 `json:"mantleEverestTime"`     // MantleEverestTime identifies the current block time is ensuring eip-7212 & disable MetaTx
 	MantleSkadiTime       *uint64 `json:"mantleSkadiTime"`       // MantleSkadiTime identifies the current block time is ensuring prague upgrade
 	MantleLimbTime        *uint64 `json:"mantleLimbTime"`        // MantleLimbTime identifies the current block time is ensuring osaka upgrade
+	MantleArsiaTime       *uint64 `json:"mantleArsiaTime"`       // MantleArsiaTime identifies the current block time is ensuring arsia upgrade
 }
 
 func GetUpgradeConfigForMantle(chainID *big.Int) *MantleUpgradeChainConfig {

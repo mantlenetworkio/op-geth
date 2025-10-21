@@ -330,6 +330,7 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 		cfg.MantleEverestTime = mantleUpgradeChainConfig.MantleEverestTime
 		cfg.MantleSkadiTime = mantleUpgradeChainConfig.MantleSkadiTime
 		cfg.MantleLimbTime = mantleUpgradeChainConfig.MantleLimbTime
+		cfg.MantleArsiaTime = mantleUpgradeChainConfig.MantleArsiaTime
 
 		// active standard EVM version (shanghai/cancun/prague)  in mantle skadi time
 		cfg.ShanghaiTime = mantleUpgradeChainConfig.MantleSkadiTime
