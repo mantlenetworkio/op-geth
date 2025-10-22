@@ -283,6 +283,21 @@ func (s *modernSigner) SignatureValues(tx *Transaction, sig []byte) (R, S, V *bi
 	return R, S, V, nil
 }
 
+// NewIsthmusSigner returns a signer that accepts
+// - EIP-7702 set code transactions
+// - NOT EIP-4844 blob transactions
+// - EIP-1559 dynamic fee transactions
+// - EIP-2930 access list transactions,
+// - EIP-155 replay protected transactions, and
+// - legacy Homestead transactions.
+// OP-Stack addition
+func NewIsthmusSigner(chainId *big.Int) Signer {
+	s := newModernSigner(chainId, forks.Prague).(*modernSigner)
+	// OP-Stack: remove blob tx support
+	delete(s.txtypes, BlobTxType)
+	return s
+}
+
 // NewPragueSigner returns a signer that accepts
 // - EIP-7702 set code transactions
 // - EIP-4844 blob transactions

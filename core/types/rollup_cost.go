@@ -23,8 +23,20 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 )
 
+var (
+	// EcotoneL1AttributesSelector is the selector indicating Ecotone style L1 gas attributes.
+	EcotoneL1AttributesSelector = []byte{0x44, 0x0a, 0x5e, 0x20}
+
+	L1CostIntercept  = big.NewInt(-42_585_600)
+	L1CostFastlzCoef = big.NewInt(836_500)
+
+	MinTransactionSize       = big.NewInt(100)
+	MinTransactionSizeScaled = new(big.Int).Mul(MinTransactionSize, big.NewInt(1e6))
+)
+
 type RollupCostData struct {
 	Zeroes, Ones uint64
+	FastLzSize   uint64
 }
 
 func NewRollupCostData(data []byte) (out RollupCostData) {
@@ -35,6 +47,7 @@ func NewRollupCostData(data []byte) (out RollupCostData) {
 			out.Ones++
 		}
 	}
+	out.FastLzSize = uint64(FlzCompressLen(data))
 	return out
 }
 
@@ -46,6 +59,25 @@ func (r RollupCostData) DataGas(time uint64, cfg *params.ChainConfig) (gas uint6
 		gas += (r.Ones + 68) * params.TxDataNonZeroGasEIP2028
 	}
 	return gas
+}
+
+// estimatedDASizeScaled estimates the number of bytes the transaction will occupy in the DA batch using the Fjord
+// linear regression model, and returns this value scaled up by 1e6.
+func (cd RollupCostData) estimatedDASizeScaled() *big.Int {
+	fastLzSize := new(big.Int).SetUint64(cd.FastLzSize)
+	estimatedSize := new(big.Int).Add(L1CostIntercept, new(big.Int).Mul(L1CostFastlzCoef, fastLzSize))
+
+	if estimatedSize.Cmp(MinTransactionSizeScaled) < 0 {
+		estimatedSize.Set(MinTransactionSizeScaled)
+	}
+	return estimatedSize
+}
+
+// EstimatedDASize estimates the number of bytes the transaction will occupy in its DA batch using the Fjord linear
+// regression model.
+func (cd RollupCostData) EstimatedDASize() *big.Int {
+	b := cd.estimatedDASizeScaled()
+	return b.Div(b, big.NewInt(1e6))
 }
 
 type StateGetter interface {
@@ -131,4 +163,82 @@ func scaleDecimals(scalar, divisor *big.Int) *big.Float {
 	fdivisor := new(big.Float).SetInt(divisor)
 	// fscalar / fdivisor
 	return new(big.Float).Quo(fscalar, fdivisor)
+}
+
+// FlzCompressLen returns the length of the data after compression through FastLZ, based on
+// https://github.com/Vectorized/solady/blob/5315d937d79b335c668896d7533ac603adac5315/js/solady.js
+func FlzCompressLen(ib []byte) uint32 {
+	n := uint32(0)
+	ht := make([]uint32, 8192)
+	u24 := func(i uint32) uint32 {
+		return uint32(ib[i]) | (uint32(ib[i+1]) << 8) | (uint32(ib[i+2]) << 16)
+	}
+	cmp := func(p uint32, q uint32, e uint32) uint32 {
+		l := uint32(0)
+		for e -= q; l < e; l++ {
+			if ib[p+l] != ib[q+l] {
+				e = 0
+			}
+		}
+		return l
+	}
+	literals := func(r uint32) {
+		n += 0x21 * (r / 0x20)
+		r %= 0x20
+		if r != 0 {
+			n += r + 1
+		}
+	}
+	match := func(l uint32) {
+		l--
+		n += 3 * (l / 262)
+		if l%262 >= 6 {
+			n += 3
+		} else {
+			n += 2
+		}
+	}
+	hash := func(v uint32) uint32 {
+		return ((2654435769 * v) >> 19) & 0x1fff
+	}
+	setNextHash := func(ip uint32) uint32 {
+		ht[hash(u24(ip))] = ip
+		return ip + 1
+	}
+	a := uint32(0)
+	ipLimit := uint32(len(ib)) - 13
+	if len(ib) < 13 {
+		ipLimit = 0
+	}
+	for ip := a + 2; ip < ipLimit; {
+		r := uint32(0)
+		d := uint32(0)
+		for {
+			s := u24(ip)
+			h := hash(s)
+			r = ht[h]
+			ht[h] = ip
+			d = ip - r
+			if ip >= ipLimit {
+				break
+			}
+			ip++
+			if d <= 0x1fff && s == u24(r) {
+				break
+			}
+		}
+		if ip >= ipLimit {
+			break
+		}
+		ip--
+		if ip > a {
+			literals(ip - a)
+		}
+		l := cmp(r+3, ip+3, ipLimit+9)
+		match(l)
+		ip = setNextHash(setNextHash(ip + l))
+		a = ip
+	}
+	literals(uint32(len(ib)) - a)
+	return n
 }
