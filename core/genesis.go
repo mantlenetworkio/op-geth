@@ -73,6 +73,11 @@ type Genesis struct {
 	BaseFee       *big.Int    `json:"baseFeePerGas"` // EIP-1559
 	ExcessBlobGas *uint64     `json:"excessBlobGas"` // EIP-4844
 	BlobGasUsed   *uint64     `json:"blobGasUsed"`   // EIP-4844
+
+	// StateHash represents the genesis state, to allow instantiation of a chain with missing initial state.
+	// Chains with history pruning, or extraordinarily large genesis allocation (e.g. after a regenesis event)
+	// may utilize this to get started, and then state-sync the latest state, while still verifying the header chain.
+	StateHash *common.Hash `json:"stateHash,omitempty"`
 }
 
 // copy copies the genesis.
@@ -441,9 +446,15 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, triedb *triedb.Database, g
 		return nil, common.Hash{}, nil, err
 	}
 
+	var genesisTimestamp *uint64
+	if genesis != nil {
+		genesisTimestamp = &genesis.Timestamp
+	}
+
+	// OP-Stack diff: provide genesis timestamp (may be nil), to check bedrock-migration compat with config.
 	// TODO(rjl493456442) better to define the comparator of chain config
 	// and short circuit if the chain config is not changed.
-	compatErr := storedCfg.CheckCompatible(newCfg, head.Number.Uint64(), head.Time)
+	compatErr := storedCfg.CheckCompatible(newCfg, head.Number.Uint64(), head.Time, genesisTimestamp)
 	if compatErr != nil && ((head.Number.Uint64() != 0 && compatErr.RewindToBlock != 0) || (head.Time != 0 && compatErr.RewindToTime != 0)) {
 		return newCfg, ghash, compatErr, nil
 	}

@@ -32,6 +32,8 @@ func TestCheckCompatible(t *testing.T) {
 		headBlock     uint64
 		headTimestamp uint64
 		wantErr       *ConfigCompatError
+
+		genesisTimestamp *uint64
 	}
 	tests := []test{
 		{stored: AllEthashProtocolChanges, new: AllEthashProtocolChanges, headBlock: 0, headTimestamp: 0, wantErr: nil},
@@ -113,7 +115,7 @@ func TestCheckCompatible(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		err := test.stored.CheckCompatible(test.new, test.headBlock, test.headTimestamp)
+		err := test.stored.CheckCompatible(test.new, test.headBlock, test.headTimestamp, test.genesisTimestamp)
 		if !reflect.DeepEqual(err, test.wantErr) {
 			t.Errorf("error mismatch:\nstored: %v\nnew: %v\nheadBlock: %v\nheadTimestamp: %v\nerr: %v\nwant: %v", test.stored, test.new, test.headBlock, test.headTimestamp, err, test.wantErr)
 		}
