@@ -269,6 +269,8 @@ type LegacyPool struct {
 
 	l1CostFn txpool.L1CostFunc // To apply L1 costs as rollup, optional field, may be nil.
 
+	rollupCostFn txpool.RollupCostFunc // Additional rollup cost function, optional field, may be nil.
+
 	// Preconf variables
 	preconfReadyCh       chan struct{}
 	preconfReadyOnce     sync.Once
@@ -626,9 +628,15 @@ func (pool *LegacyPool) validateTx(tx *types.Transaction) error {
 			if list := pool.pending[addr]; list != nil {
 				if tx := list.txs.Get(nonce); tx != nil {
 					cost := tx.Cost()
-					if pool.l1CostFn != nil {
-						if l1Cost := pool.l1CostFn(tx.RollupCostData(), tx.IsDepositTx(), tx.To()); l1Cost != nil { // add rollup cost
-							cost = cost.Add(cost, l1Cost)
+					if(pool.chainconfig.IsMantleArsia(pool.currentHead.Load().Time)) {
+						if l1Cost := pool.rollupCostFn(tx); l1Cost != nil {
+							cost = cost.Add(cost, l1Cost.ToBig())
+						}
+					} else {
+						if pool.l1CostFn != nil {
+							if l1Cost := pool.l1CostFn(tx.RollupCostData(), tx.IsDepositTx(), tx.To()); l1Cost != nil { // add rollup cost
+								cost = cost.Add(cost, l1Cost)
+							}
 						}
 					}
 					return cost
@@ -636,6 +644,7 @@ func (pool *LegacyPool) validateTx(tx *types.Transaction) error {
 			}
 			return nil
 		},
+		RollupCostFn: pool.rollupCostFn,
 		L1CostFn: pool.l1CostFn,
 	}
 	if err := txpool.ValidateTransactionWithState(tx, pool.currentHead.Load(), pool.signer, opts); err != nil {
@@ -1517,11 +1526,21 @@ func (pool *LegacyPool) reset(oldHead, newHead *types.Header) {
 	pool.currentState = statedb
 	pool.pendingNonces = newNoncer(statedb)
 
-	if costFn := types.NewL1CostFunc(pool.chainconfig, statedb); costFn != nil {
-		pool.l1CostFn = func(rollupCostData types.RollupCostData, isDepositTx bool, to *common.Address) *big.Int {
-			return costFn(newHead.Number.Uint64(), newHead.Time, rollupCostData, isDepositTx, to)
+	if(pool.chainconfig.IsMantleArsia(newHead.Time)) {
+		if costFn := types.NewTotalRollupCostFunc(pool.chainconfig, statedb); costFn != nil {
+			pool.rollupCostFn = func(tx types.RollupTransaction) *uint256.Int {
+				return costFn(tx, newHead.Time)
+			}
+		}
+	} else {
+		if costFn := types.NewL1CostFunc(pool.chainconfig, statedb); costFn != nil {
+			pool.l1CostFn = func(rollupCostData types.RollupCostData, isDepositTx bool, to *common.Address) *big.Int {
+				return costFn(newHead.Number.Uint64(), newHead.Time, rollupCostData, isDepositTx, to)
+			}
 		}
 	}
+
+
 
 	// Inject any transactions discarded due to reorgs
 	log.Debug("Reinjecting stale transactions", "count", len(reinject))

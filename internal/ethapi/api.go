@@ -1763,6 +1763,22 @@ func marshalReceipt(receipt *types.Receipt, blockHash common.Hash, blockNumber u
 		if receipt.TokenRatio != nil {
 			fields["tokenRatio"] = (*hexutil.Big)(receipt.TokenRatio)
 		}
+		if receipt.L1BlobBaseFee != nil {
+			fields["l1BlobBaseFee"] = (*hexutil.Big)(receipt.L1BlobBaseFee)
+		}
+		if receipt.L1BaseFeeScalar != nil {
+			fields["l1BaseFeeScalar"] = hexutil.Uint64(*receipt.L1BaseFeeScalar)
+		}
+		if receipt.L1BlobBaseFeeScalar != nil {
+			fields["l1BlobBaseFeeScalar"] = hexutil.Uint64(*receipt.L1BlobBaseFeeScalar)
+		}
+		// Fields added in Isthmus
+		if receipt.OperatorFeeScalar != nil {
+			fields["operatorFeeScalar"] = hexutil.Uint64(*receipt.OperatorFeeScalar)
+		}
+		if receipt.OperatorFeeConstant != nil {
+			fields["operatorFeeConstant"] = hexutil.Uint64(*receipt.OperatorFeeConstant)
+		}
 	}
 	if chainConfig.Optimism != nil && tx.IsDepositTx() && receipt.DepositNonce != nil {
 		fields["depositNonce"] = hexutil.Uint64(*receipt.DepositNonce)

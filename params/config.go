@@ -546,6 +546,8 @@ type ChainConfig struct {
 	Optimism *OptimismConfig `json:"optimism,omitempty"`
 }
 
+
+
 // EthashConfig is the consensus engine configs for proof-of-work based sealing.
 type EthashConfig struct{}
 
