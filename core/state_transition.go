@@ -363,11 +363,11 @@ func (st *stateTransition) buyGas(metaTxV3 bool) (*big.Int, error) {
 	if st.msg.RunMode == GasEstimationMode || st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode {
 		st.CalculateRollupCostDataFromMessage()
 	}
-	if(st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) ) {
-		if(st.evm.Context.L1CostFuncAresia != nil) {
+	if st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) {
+		if st.evm.Context.L1CostFuncAresia != nil {
 			l1Cost = st.evm.Context.L1CostFuncAresia(st.msg.RollupCostData, st.evm.Context.Time)
 		}
-		if(st.evm.Context.OperatorCostFunc != nil) {
+		if st.evm.Context.OperatorCostFunc != nil {
 			operatorCost := st.evm.Context.OperatorCostFunc(st.msg.GasLimit, st.evm.Context.Time)
 			l1Cost = new(big.Int).Add(l1Cost, operatorCost.ToBig())
 		}
@@ -383,7 +383,7 @@ func (st *stateTransition) buyGas(metaTxV3 bool) (*big.Int, error) {
 	if st.msg.GasFeeCap != nil {
 		balanceCheck.SetUint64(st.msg.GasLimit)
 		balanceCheck = balanceCheck.Mul(balanceCheck, st.msg.GasFeeCap)
-		if(st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time)) {
+		if st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) {
 			// add l1 cost to balance check
 			balanceCheck = balanceCheck.Add(balanceCheck, l1Cost)
 		}
@@ -523,7 +523,7 @@ func (st *stateTransition) preCheck(metaTxV3 bool) (*big.Int, error) {
 	if !msg.SkipTransactionChecks {
 		// Verify tx gas limit does not exceed EIP-7825 cap.
 		if !st.evm.ChainConfig().IsOptimism() && isOsaka && msg.GasLimit > params.MaxTxGas {
-			return nil,fmt.Errorf("%w (cap: %d, tx: %d)", ErrGasLimitTooHigh, params.MaxTxGas, msg.GasLimit)
+			return nil, fmt.Errorf("%w (cap: %d, tx: %d)", ErrGasLimitTooHigh, params.MaxTxGas, msg.GasLimit)
 		}
 		// Make sure the sender is an EOA
 		code := st.state.GetCode(msg.From)
@@ -832,7 +832,7 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 	peakGasUsed := st.gasUsed()
 
 	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
-		if(st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time)) {
+		if st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) {
 			st.gasRemaining += st.calcRefundArsia()
 		} else {
 			peakGasUsed = st.initialGas - st.gasRemaining*tokenRatio
@@ -858,7 +858,7 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 	}
 
 	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
-		if(st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time)) {
+		if st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) {
 			st.returnGasArsia()
 		} else {
 			st.returnGas(rules.IsMetaTxV3)
@@ -1001,7 +1001,6 @@ func (st *stateTransition) calcRefundArsia() uint64 {
 	}
 	return refund
 }
-
 
 // calcRefund computes refund counter, capped to a refund quotient.
 func (st *stateTransition) calcRefund(tokenRatio uint64, isMantleSkadi bool) uint64 {
