@@ -79,10 +79,15 @@ type Receipt struct {
 
 	// OVM legacy: extend receipts with their L1 price (if a rollup tx)
 	L1GasPrice *big.Int   `json:"l1GasPrice,omitempty"`
-	L1GasUsed  *big.Int   `json:"l1GasUsed,omitempty"`
-	L1Fee      *big.Int   `json:"l1Fee,omitempty"`
-	FeeScalar  *big.Float `json:"l1FeeScalar,omitempty"`
 	TokenRatio *big.Int   `json:"tokenRatio,omitempty"`
+	L1BlobBaseFee       *big.Int   `json:"l1BlobBaseFee,omitempty"`       // Always nil prior to the Ecotone hardfork
+	L1GasUsed           *big.Int   `json:"l1GasUsed,omitempty"`           // Present from pre-bedrock, deprecated as of Fjord
+	L1Fee               *big.Int   `json:"l1Fee,omitempty"`               // Present from pre-bedrock
+	FeeScalar           *big.Float `json:"l1FeeScalar,omitempty"`         // Present from pre-bedrock to Ecotone. Nil after Ecotone
+	L1BaseFeeScalar     *uint64    `json:"l1BaseFeeScalar,omitempty"`     // Always nil prior to the Ecotone hardfork
+	L1BlobBaseFeeScalar *uint64    `json:"l1BlobBaseFeeScalar,omitempty"` // Always nil prior to the Ecotone hardfork
+	OperatorFeeScalar   *uint64    `json:"operatorFeeScalar,omitempty"`   // Always nil prior to the Isthmus hardfork
+	OperatorFeeConstant *uint64    `json:"operatorFeeConstant,omitempty"` // Always nil prior to the Isthmus hardfork
 }
 
 type receiptMarshaling struct {
@@ -100,10 +105,15 @@ type receiptMarshaling struct {
 	// Optimism: extend receipts with their L1 price (if a rollup tx)
 	DepositNonce *hexutil.Uint64
 	L1GasPrice   *hexutil.Big
+	L1BlobBaseFee         *hexutil.Big
 	L1GasUsed    *hexutil.Big
 	L1Fee        *hexutil.Big
+	L1BaseFeeScalar       *hexutil.Uint64
+	L1BlobBaseFeeScalar   *hexutil.Uint64
 	FeeScalar    *big.Float
 	TokenRatio   *hexutil.Big
+	OperatorFeeScalar     *hexutil.Uint64
+	OperatorFeeConstant   *hexutil.Uint64
 }
 
 // receiptRLP is the consensus encoding of a receipt.
@@ -137,6 +147,11 @@ type storedReceiptRLP struct {
 	L1GasUsed  *big.Int `rlp:"optional"`
 	L1GasPrice *big.Int `rlp:"optional"`
 	L1Fee      *big.Int `rlp:"optional"`
+	L1BlobBaseFee *big.Int `rlp:"optional"`
+	L1BaseFeeScalar *uint64 `rlp:"optional"`
+	L1BlobBaseFeeScalar *uint64 `rlp:"optional"`
+	OperatorFeeScalar *uint64 `rlp:"optional"`
+	OperatorFeeConstant *uint64 `rlp:"optional"`
 	FeeScalar  string   `rlp:"optional"`
 	TokenRatio *big.Int `rlp:"optional"`
 }
@@ -465,6 +480,11 @@ func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 		L1GasPrice:        r.L1GasPrice,
 		L1Fee:             r.L1Fee,
 		FeeScalar:         feeScalar,
+		L1BlobBaseFee:     r.L1BlobBaseFee,
+		L1BaseFeeScalar:   r.L1BaseFeeScalar,
+		L1BlobBaseFeeScalar: r.L1BlobBaseFeeScalar,
+		OperatorFeeScalar: r.OperatorFeeScalar,
+		OperatorFeeConstant: r.OperatorFeeConstant,
 		TokenRatio:        r.TokenRatio,
 	}
 
@@ -552,6 +572,11 @@ func decodeStoredReceiptRLP(r *ReceiptForStorage, blob []byte) error {
 	r.L1Fee = stored.L1Fee
 	r.FeeScalar = scalar
 	r.TokenRatio = stored.TokenRatio
+	r.L1BlobBaseFee = stored.L1BlobBaseFee
+	r.L1BaseFeeScalar = stored.L1BaseFeeScalar
+	r.L1BlobBaseFeeScalar = stored.L1BlobBaseFeeScalar
+	r.OperatorFeeScalar = stored.OperatorFeeScalar
+	r.OperatorFeeConstant = stored.OperatorFeeConstant
 	return nil
 }
 

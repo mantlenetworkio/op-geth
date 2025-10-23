@@ -200,9 +200,10 @@ func MakeReceipt(evm *vm.EVM, result *ExecutionResult, statedb *state.StateDB, b
 		// otherwise must be nil.
 		receipt.DepositNonce = &nonce
 	}
+	
 
 	// used to record l1 fee
-	l1BaseFee, overhead, scalar, scaled, tokenRatio := types.DeriveL1GasInfo(statedb)
+	l1BaseFee, overhead, scalar, scaled, tokenRatio:= types.DeriveL1GasInfo(statedb)
 
 	// used to record calculating l1 fee for txs from Layer2
 	if !tx.IsDepositTx() {
@@ -212,6 +213,30 @@ func MakeReceipt(evm *vm.EVM, result *ExecutionResult, statedb *state.StateDB, b
 		receipt.L1Fee = types.L1Cost(gas, l1BaseFee, overhead, scalar, tokenRatio)
 		receipt.FeeScalar = scaled
 		receipt.TokenRatio = tokenRatio
+		if(config.IsMantleArsia(blockTime)) {
+			l1BaseFeeScalar, l1BlobBaseFeeScalar, l1BlobBaseFee, operatorFeeScalar, operatorFeeConstant := types.DeriveL1GasInfoArsia(statedb)
+			receipt.L1BlobBaseFee = l1BlobBaseFee
+			// calculate the rollup cost + operator cost
+			rollupCostFn := types.NewTotalRollupCostFunc(config, statedb)
+			rollupCost := rollupCostFn(tx, blockTime)
+			receipt.L1Fee = rollupCost.ToBig()
+			if l1BaseFeeScalar != nil {
+				v := l1BaseFeeScalar.Uint64()
+				receipt.L1BaseFeeScalar = &v
+			}
+			if l1BlobBaseFeeScalar != nil {
+				v := l1BlobBaseFeeScalar.Uint64()
+				receipt.L1BlobBaseFeeScalar = &v
+			}
+			if operatorFeeScalar != nil {
+				v := operatorFeeScalar.Uint64()
+				receipt.OperatorFeeScalar = &v
+			}
+			if operatorFeeConstant != nil {
+				v := operatorFeeConstant.Uint64()
+				receipt.OperatorFeeConstant = &v
+			}
+		}
 	}
 
 	if tx.Type() == types.BlobTxType {

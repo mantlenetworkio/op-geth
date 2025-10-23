@@ -49,6 +49,8 @@ func NewEVMBlockContext(header *types.Header, chain ChainContext, author *common
 		baseFee     *big.Int
 		blobBaseFee *big.Int
 		random      *common.Hash
+		operatorCostFn types.OperatorCostFunc
+		l1CostFuncAresia types.L1CostFuncArsia
 	)
 
 	// If we don't have an explicit author (i.e. not mining), extract from the header
@@ -66,6 +68,10 @@ func NewEVMBlockContext(header *types.Header, chain ChainContext, author *common
 	if header.Difficulty.Sign() == 0 {
 		random = &header.MixDigest
 	}
+	if config.IsMantleArsia(header.Time) {
+		operatorCostFn = types.NewOperatorCostFunc(config, statedb)
+		l1CostFuncAresia = types.NewL1CostFuncArsia(config, statedb)
+	}
 	return vm.BlockContext{
 		CanTransfer: CanTransfer,
 		Transfer:    Transfer,
@@ -79,6 +85,8 @@ func NewEVMBlockContext(header *types.Header, chain ChainContext, author *common
 		GasLimit:    header.GasLimit,
 		Random:      random,
 		L1CostFunc:  types.NewL1CostFunc(config, statedb),
+		OperatorCostFunc: operatorCostFn,
+		L1CostFuncAresia: l1CostFuncAresia,
 	}
 }
 

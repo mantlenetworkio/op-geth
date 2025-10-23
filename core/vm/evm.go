@@ -59,6 +59,12 @@ type BlockContext struct {
 	// L1CostFunc returns the L1 cost of the rollup message, the function may be nil, or return nil
 	L1CostFunc types.L1CostFunc
 
+	// L1CostFunc returns the L1 cost of the rollup message, the function may be nil, or return nil
+	L1CostFuncAresia types.L1CostFuncArsia
+	// OperatorCostFunc returns the operator cost. The function may be nil
+	OperatorCostFunc types.OperatorCostFunc
+
+
 	// Block information
 	Coinbase    common.Address // Provides information for COINBASE
 	GasLimit    uint64         // Provides information for GASLIMIT
