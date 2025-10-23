@@ -26,12 +26,11 @@ import (
 	"github.com/holiman/uint256"
 )
 
-
 var (
-	L1BaseFeeSlot  = common.BigToHash(big.NewInt(1))
-	OverheadSlot   = common.BigToHash(big.NewInt(5))
-	ScalarSlot     = common.BigToHash(big.NewInt(6))
-		// L1BlobBaseFeeSlot was added with the Ecotone upgrade and stores the blobBaseFee L1 gas
+	L1BaseFeeSlot = common.BigToHash(big.NewInt(1))
+	OverheadSlot  = common.BigToHash(big.NewInt(5))
+	ScalarSlot    = common.BigToHash(big.NewInt(6))
+	// L1BlobBaseFeeSlot was added with the Ecotone upgrade and stores the blobBaseFee L1 gas
 	// attribute.
 	L1BlobBaseFeeSlot = common.BigToHash(big.NewInt(7))
 	// L1FeeScalarsSlot as of the Ecotone upgrade stores the 32-bit basefeeScalar and
@@ -39,18 +38,16 @@ var (
 	// `BlobBaseFeeScalarSlotOffset` respectively.
 	L1FeeScalarsSlot = common.BigToHash(big.NewInt(3))
 
-	TokenRatioSlot = common.BigToHash(big.NewInt(0))
+	TokenRatioSlot        = common.BigToHash(big.NewInt(0))
 	OperatorFeeParamsSlot = common.BigToHash(big.NewInt(8))
-	sixteen        = big.NewInt(16)
+	sixteen               = big.NewInt(16)
 
 	L1BlockAddr   = common.HexToAddress("0x4200000000000000000000000000000000000015")
 	GasOracleAddr = common.HexToAddress("0x420000000000000000000000000000000000000F")
 	Decimals      = big.NewInt(1_000_000)
-	fjordDivisor   = big.NewInt(1_000_000_000_000)
+	fjordDivisor  = big.NewInt(1_000_000_000_000)
 
 	EcotoneL1AttributesSelector = []byte{0x44, 0x0a, 0x5e, 0x20}
-
-
 
 	L1CostIntercept  = big.NewInt(-42_585_600)
 	L1CostFastlzCoef = big.NewInt(836_500)
@@ -59,13 +56,14 @@ var (
 	MinTransactionSizeScaled = new(big.Int).Mul(MinTransactionSize, big.NewInt(1e6))
 
 	emptyScalars = make([]byte, 8)
-	oneMillion     = big.NewInt(1_000_000)
+	oneMillion   = big.NewInt(1_000_000)
 )
 
 type RollupCostData struct {
 	Zeroes, Ones uint64
 	FastLzSize   uint64
 }
+
 const (
 	// The two 4-byte Ecotone fee scalar values are packed into the same storage slot as the 8-byte
 	// sequence number and have the following Solidity offsets within the slot. Note that Solidity
@@ -79,8 +77,6 @@ const (
 	// array. baseFeeScalar is in the first four bytes of the segment, blobBaseFeeScalar the next
 	// four.
 	scalarSectionStart = 32 - BaseFeeScalarSlotOffset - 4
-
-	
 )
 
 func init() {
@@ -102,7 +98,6 @@ type RollupTransaction interface {
 // TotalRollupCostFunc is used in the transaction pool to determine the total rollup cost,
 // including both the data availability fee and the operator fee. It returns nil if both costs are nil.
 type TotalRollupCostFunc func(tx RollupTransaction, blockTime uint64) *uint256.Int
-
 
 type operatorCostFunc func(gasUsed uint64) *uint256.Int
 
@@ -127,7 +122,6 @@ func (r RollupCostData) DataGas(time uint64, cfg *params.ChainConfig) (gas uint6
 	}
 	return gas
 }
-
 
 // EstimatedDASize estimates the number of bytes the transaction will occupy in its DA batch using the Fjord linear
 // regression model.
@@ -178,7 +172,9 @@ func NewL1CostFunc(config *params.ChainConfig, statedb StateGetter) L1CostFunc {
 
 func NewL1CostFuncBeforeArsia(config *params.ChainConfig, statedb StateGetter, blockTime uint64) l1CostFuncArisa {
 	return func(rollupCostData RollupCostData) (fee, gasUsed *big.Int) {
-
+		if rollupCostData == (RollupCostData{}) {
+			return nil, nil // Do not charge if there is no rollup cost-data (e.g. RPC call or deposit)
+		}
 		rollupDataGas := rollupCostData.DataGas(blockTime, config) // Only fake txs for RPC view-calls are 0.
 		if config.Optimism == nil || rollupDataGas == 0 {
 			return common.Big0, common.Big0
@@ -199,6 +195,7 @@ func NewL1CostFuncBeforeArsia(config *params.ChainConfig, statedb StateGetter, b
 		return l1CostFee, gasWithOverhead
 	}
 }
+
 func NewL1CostFuncArsia(config *params.ChainConfig, statedb StateGetter) L1CostFuncArsia {
 	if config.Optimism == nil {
 		return nil
@@ -224,7 +221,7 @@ func NewL1CostFuncArsia(config *params.ChainConfig, statedb StateGetter) L1CostF
 			bytes.Equal(emptyScalars, l1FeeScalars[scalarSectionStart:scalarSectionStart+8])
 		if firstEcotoneBlock {
 			log.Info("using bedrock l1 cost func for first Arisa block", "time", blockTime)
-			return NewL1CostFuncBeforeArsia(config,statedb,blockTime)
+			return NewL1CostFuncBeforeArsia(config, statedb, blockTime)
 		}
 
 		l1BaseFeeScalar, l1BlobBaseFeeScalar := ExtractEcotoneFeeParams(l1FeeScalars)
@@ -280,7 +277,6 @@ func NewL1CostFuncFjord(l1BaseFee, l1BlobBaseFee, baseFeeScalar, blobFeeScalar, 
 	}
 }
 
-
 func (cd RollupCostData) estimatedDASizeScaled() *big.Int {
 	fastLzSize := new(big.Int).SetUint64(cd.FastLzSize)
 	estimatedSize := new(big.Int).Add(L1CostIntercept, new(big.Int).Mul(L1CostFastlzCoef, fastLzSize))
@@ -290,7 +286,6 @@ func (cd RollupCostData) estimatedDASizeScaled() *big.Int {
 	}
 	return estimatedSize
 }
-
 
 func L1Cost(rollupDataGas uint64, l1BaseFee, overhead, scalar, tokenRatio *big.Int) *big.Int {
 	l1GasUsed := new(big.Int).SetUint64(rollupDataGas)
@@ -338,7 +333,6 @@ func NewTotalRollupCostFunc(config *params.ChainConfig, statedb StateGetter) Tot
 		return totalCost
 	}
 }
-
 
 // NewOperatorCostFunc returns a function used for calculating operator fees, or nil if this is
 // not an op-stack chain.
@@ -396,7 +390,7 @@ func newOperatorCostFunc(operatorFeeScalar *big.Int, operatorFeeConstant *big.In
 // DeriveL1GasInfo reads L1 gas related information to be included
 // on the receipt
 func DeriveL1GasInfo(state StateGetter) (*big.Int, *big.Int, *big.Int, *big.Float, *big.Int) {
-	l1BaseFee, overhead, scalar, scaled:= readL1BlockStorageSlots(L1BlockAddr, state)
+	l1BaseFee, overhead, scalar, scaled := readL1BlockStorageSlots(L1BlockAddr, state)
 	tokenRatio := readGPOStorageSlots(GasOracleAddr, state)
 	return l1BaseFee, overhead, scalar, scaled, tokenRatio
 }
@@ -407,7 +401,7 @@ func DeriveL1GasInfoArsia(state StateGetter) (*big.Int, *big.Int, *big.Int, *big
 	l1BaseFeeScalar, l1BlobBaseFeeScalar := ExtractEcotoneFeeParams(l1FeeScalars)
 	operatorFeeParams := state.GetState(L1BlockAddr, OperatorFeeParamsSlot)
 	if operatorFeeParams == (common.Hash{}) {
-		return l1BaseFeeScalar, l1BlobBaseFeeScalar, l1BlobBaseFee,nil, nil
+		return l1BaseFeeScalar, l1BlobBaseFeeScalar, l1BlobBaseFee, nil, nil
 	}
 	operatorFeeScalar, operatorFeeConstant := ExtractOperatorFeeParams(operatorFeeParams)
 
@@ -421,14 +415,13 @@ func ExtractEcotoneFeeParams(l1FeeParams []byte) (l1BaseFeeScalar, l1BlobBaseFee
 	return
 }
 
-
-func readL1BlockStorageSlots(addr common.Address, state StateGetter) (*big.Int, *big.Int, *big.Int, *big.Float,) {
+func readL1BlockStorageSlots(addr common.Address, state StateGetter) (*big.Int, *big.Int, *big.Int, *big.Float) {
 	l1BaseFee := state.GetState(addr, L1BaseFeeSlot)
 	overhead := state.GetState(addr, OverheadSlot)
 	scalar := state.GetState(addr, ScalarSlot)
 	scaled := scaleDecimals(scalar.Big(), Decimals)
 
-	return l1BaseFee.Big(), overhead.Big(), scalar.Big(),scaled
+	return l1BaseFee.Big(), overhead.Big(), scalar.Big(), scaled
 }
 
 func ExtractOperatorFeeParams(operatorFeeParams common.Hash) (operatorFeeScalar, operatorFeeConstant *big.Int) {
@@ -436,7 +429,6 @@ func ExtractOperatorFeeParams(operatorFeeParams common.Hash) (operatorFeeScalar,
 	operatorFeeConstant = new(big.Int).SetBytes(operatorFeeParams[24:32])
 	return
 }
-
 
 func readGPOStorageSlots(addr common.Address, state StateGetter) *big.Int {
 	tokenRatio := state.GetState(addr, TokenRatioSlot)
