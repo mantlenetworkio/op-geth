@@ -72,6 +72,13 @@ type PayloadAttributes struct {
 	GasLimit *uint64 `json:"gasLimit,omitempty" gencodec:"optional"`
 	// BaseFee is a field for rollups: if set, this sets the exact base fee the block produced with.
 	BaseFee *big.Int `json:"baseFee,omitempty" gencodec:"optional"`
+	// EIP1559Params is a field for rollups implementing the Holocene upgrade,
+	// and contains encoded EIP-1559 parameters. See:
+	// https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#eip1559params-encoding
+	EIP1559Params []byte `json:"eip1559Params,omitempty" gencodec:"optional"`
+	// MinBaseFee is a field for rollups implementing the minimum base fee feature.
+	// See https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/jovian/exec-engine.md#minimum-base-fee-in-payloadattributesv3
+	MinBaseFee *uint64 `json:"minBaseFee,omitempty" gencodec:"optional"`
 }
 
 // JSON type overrides for PayloadAttributes.
