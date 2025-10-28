@@ -149,9 +149,11 @@ type generateParams struct {
 	beaconRoot  *common.Hash      // The beacon root (cancun field).
 	noTxs       bool              // Flag whether an empty block without any transaction is expected
 
-	txs      []*types.Transaction // Optimism addition: txs forced into the block via engine API
-	gasLimit *uint64              // Optimism addition: override gas limit of the block to build
-	baseFee  *big.Int             // Optimism addition: override base fee of the block to build
+	eip1559Params []byte               // Optional EIP-1559 parameters
+	txs           []*types.Transaction // Optimism addition: txs forced into the block via engine API
+	gasLimit      *uint64              // Optimism addition: override gas limit of the block to build
+	baseFee       *big.Int             // Optimism addition: override base fee of the block to build
+	minBaseFee    *uint64              // Optional minimum base fee
 }
 
 // generateWork generates a sealing block based on the given parameters.
@@ -300,7 +302,7 @@ func (miner *Miner) prepareWork(genParams *generateParams, witness bool) (*envir
 		header.MixDigest = genParams.random
 	}
 	// Set baseFee and GasLimit if we are on an EIP-1559 chain
-	if miner.chainConfig.IsLondon(header.Number) {
+	if miner.chainConfig.IsLondon(header.Number) && !miner.chainConfig.IsMantleArsia(header.Time) {
 		header.BaseFee = eip1559.CalcBaseFee(miner.chainConfig, parent)
 		if miner.chainConfig.IsMantleBaseFee(header.Time) {
 			header.BaseFee = genParams.baseFee
@@ -316,12 +318,36 @@ func (miner *Miner) prepareWork(genParams *generateParams, witness bool) (*envir
 			header.GasLimit = core.CalcGasLimit(parentGasLimit, miner.config.GasCeil)
 		}
 	}
+	if miner.chainConfig.IsMantleArsia(header.Time) {
+		header.BaseFee = eip1559.CalcBaseFee(miner.chainConfig, parent)
+		if !miner.chainConfig.IsLondon(parent.Number) {
+			parentGasLimit := parent.GasLimit * miner.chainConfig.ElasticityMultiplier()
+			header.GasLimit = core.CalcGasLimit(parentGasLimit, miner.config.GasCeil)
+		}
+	}
 	if genParams.gasLimit != nil { // override gas limit if specified
 		header.GasLimit = *genParams.gasLimit
 	} else if miner.chain.Config().Optimism != nil && miner.config.GasCeil != 0 {
 		// configure the gas limit of pending blocks with the miner gas limit config when using optimism
 		header.GasLimit = miner.config.GasCeil
 	}
+
+	if cfg := miner.chainConfig; cfg.IsMantleArsia(header.Time) {
+		if err := eip1559.ValidateHolocene1559Params(genParams.eip1559Params); err != nil {
+			return nil, err
+		}
+		// If this is a holocene block and the params are 0, we must convert them to their previous
+		// constants in the header.
+		d, e := eip1559.DecodeHolocene1559Params(genParams.eip1559Params)
+		if d == 0 {
+			d = miner.chainConfig.BaseFeeChangeDenominator()
+			e = miner.chainConfig.ElasticityMultiplier()
+		}
+		header.Extra = eip1559.EncodeOptimismExtraData(cfg, header.Time, d, e, genParams.minBaseFee)
+	} else if genParams.eip1559Params != nil {
+		return nil, errors.New("got eip1559 params, expected none")
+	}
+
 	// Run the consensus preparation with the default or customized consensus engine.
 	// Note that the `header.Time` may be changed.
 	if err := miner.engine.Prepare(miner.chain, header); err != nil {
