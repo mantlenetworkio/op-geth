@@ -229,17 +229,19 @@ func (miner *Miner) buildPayload(args *BuildPayloadArgs, witness bool) (*Payload
 	// enough to run. The empty payload can at least make sure there is something
 	// to deliver for not missing slot.
 	emptyParams := &generateParams{
-		timestamp:   args.Timestamp,
-		forceTime:   true,
-		parentHash:  args.Parent,
-		coinbase:    args.FeeRecipient,
-		random:      args.Random,
-		withdrawals: args.Withdrawals,
-		beaconRoot:  args.BeaconRoot,
-		noTxs:       true,
-		txs:         args.Transactions,
-		gasLimit:    args.GasLimit,
-		baseFee:     args.BaseFee,
+		timestamp:     args.Timestamp,
+		forceTime:     true,
+		parentHash:    args.Parent,
+		coinbase:      args.FeeRecipient,
+		random:        args.Random,
+		withdrawals:   args.Withdrawals,
+		beaconRoot:    args.BeaconRoot,
+		noTxs:         true,
+		txs:           args.Transactions,
+		gasLimit:      args.GasLimit,
+		eip1559Params: args.EIP1559Params,
+		minBaseFee:    args.MinBaseFee,
+		baseFee:       args.BaseFee,
 	}
 	empty := miner.generateWork(emptyParams, witness)
 	if empty.err != nil {
@@ -258,17 +260,19 @@ func (miner *Miner) buildPayload(args *BuildPayloadArgs, witness bool) (*Payload
 	}
 
 	fullParams := &generateParams{
-		timestamp:   args.Timestamp,
-		forceTime:   true,
-		parentHash:  args.Parent,
-		coinbase:    args.FeeRecipient,
-		random:      args.Random,
-		withdrawals: args.Withdrawals,
-		beaconRoot:  args.BeaconRoot,
-		noTxs:       false,
-		txs:         args.Transactions,
-		gasLimit:    args.GasLimit,
-		baseFee:     args.BaseFee,
+		timestamp:     args.Timestamp,
+		forceTime:     true,
+		parentHash:    args.Parent,
+		coinbase:      args.FeeRecipient,
+		random:        args.Random,
+		withdrawals:   args.Withdrawals,
+		beaconRoot:    args.BeaconRoot,
+		noTxs:         false,
+		txs:           args.Transactions,
+		gasLimit:      args.GasLimit,
+		baseFee:       args.BaseFee,
+		eip1559Params: args.EIP1559Params,
+		minBaseFee:    args.MinBaseFee,
 	}
 
 	// Since we skip building the empty block when using the tx pool, we need to explicitly

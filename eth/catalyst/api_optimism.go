@@ -5,13 +5,22 @@ import (
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/beacon/engine"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/metrics"
+
+	// "github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
 )
 
 // checkOptimismPayload performs Optimism-specific checks on the payload data (called during [(*ConsensusAPI).newPayload]).
 func checkOptimismPayload(params engine.ExecutableData, cfg *params.ChainConfig) error {
+	// ExtraData validation
+	if cfg.IsMantleArsia(params.Timestamp) {
+		if err := eip1559.ValidateOptimismExtraData(cfg, params.Timestamp, params.ExtraData); err != nil {
+			return err
+		}
+	}
+
 	if cfg.IsMantleSkadi(params.Timestamp) {
 		if params.WithdrawalsRoot == nil {
 			return errors.New("nil withdrawalsRoot post-Skadi")
@@ -23,10 +32,10 @@ func checkOptimismPayload(params engine.ExecutableData, cfg *params.ChainConfig)
 	return nil
 }
 
-var (
-	requiredProtocolDeltaGauge    = metrics.NewRegisteredGauge("superchain/required/delta", nil)
-	recommendedProtocolDeltaGauge = metrics.NewRegisteredGauge("superchain/recommended/delta", nil)
-)
+// var (
+// 	requiredProtocolDeltaGauge    = metrics.NewRegisteredGauge("superchain/required/delta", nil)
+// 	recommendedProtocolDeltaGauge = metrics.NewRegisteredGauge("superchain/recommended/delta", nil)
+// )
 
 type SuperchainSignal struct {
 	Recommended params.ProtocolVersion `json:"recommended"`
