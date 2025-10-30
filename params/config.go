@@ -1319,40 +1319,40 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	if isForkTimestampIncompatible(c.BPO5Time, newcfg.BPO5Time, headTimestamp, genesisTimestamp) {
 		return newTimestampCompatError("BPO5 fork timestamp", c.BPO5Time, newcfg.BPO5Time)
 	}
-	if isForkTimestampIncompatible(c.AmsterdamTime, newcfg.AmsterdamTime, headTimestamp) {
+	if isForkTimestampIncompatible(c.AmsterdamTime, newcfg.AmsterdamTime, headTimestamp, genesisTimestamp) {
 		return newTimestampCompatError("Amsterdam fork timestamp", c.AmsterdamTime, newcfg.AmsterdamTime)
 	}
 	if isForkBlockIncompatible(c.BedrockBlock, newcfg.BedrockBlock, headNumber) {
 		return newBlockCompatError("Bedrock fork block", c.BedrockBlock, newcfg.BedrockBlock)
 	}
-	if isForkTimestampIncompatible(c.RegolithTime, newcfg.RegolithTime, headTimestamp) {
+	if isForkTimestampIncompatible(c.RegolithTime, newcfg.RegolithTime, headTimestamp, genesisTimestamp) {
 		return newTimestampCompatError("Regolith fork timestamp", c.RegolithTime, newcfg.RegolithTime)
 	}
-	if isForkTimestampIncompatible(c.BaseFeeTime, newcfg.BaseFeeTime, headTimestamp) {
+	if isForkTimestampIncompatible(c.BaseFeeTime, newcfg.BaseFeeTime, headTimestamp, genesisTimestamp) {
 		return newTimestampCompatError("Mantle BaseFee fork timestamp", c.BaseFeeTime, newcfg.BaseFeeTime)
 	}
-	if isForkTimestampIncompatible(c.BVMETHMintUpgradeTime, newcfg.BVMETHMintUpgradeTime, headTimestamp) {
+	if isForkTimestampIncompatible(c.BVMETHMintUpgradeTime, newcfg.BVMETHMintUpgradeTime, headTimestamp, genesisTimestamp) {
 		return newTimestampCompatError("Mantle BVMETHMint fork timestamp", c.BVMETHMintUpgradeTime, newcfg.BVMETHMintUpgradeTime)
 	}
-	if isForkTimestampIncompatible(c.MetaTxV2UpgradeTime, newcfg.MetaTxV2UpgradeTime, headTimestamp) {
+	if isForkTimestampIncompatible(c.MetaTxV2UpgradeTime, newcfg.MetaTxV2UpgradeTime, headTimestamp, genesisTimestamp) {
 		return newTimestampCompatError("Mantle MetaTxV2 fork timestamp", c.MetaTxV2UpgradeTime, newcfg.MetaTxV2UpgradeTime)
 	}
-	if isForkTimestampIncompatible(c.MetaTxV3UpgradeTime, newcfg.MetaTxV3UpgradeTime, headTimestamp) {
+	if isForkTimestampIncompatible(c.MetaTxV3UpgradeTime, newcfg.MetaTxV3UpgradeTime, headTimestamp, genesisTimestamp) {
 		return newTimestampCompatError("Mantle MetaTxV3 fork timestamp", c.MetaTxV3UpgradeTime, newcfg.MetaTxV3UpgradeTime)
 	}
-	if isForkTimestampIncompatible(c.ProxyOwnerUpgradeTime, newcfg.ProxyOwnerUpgradeTime, headTimestamp) {
+	if isForkTimestampIncompatible(c.ProxyOwnerUpgradeTime, newcfg.ProxyOwnerUpgradeTime, headTimestamp, genesisTimestamp) {
 		return newTimestampCompatError("Mantle ProxyOwner fork timestamp", c.ProxyOwnerUpgradeTime, newcfg.ProxyOwnerUpgradeTime)
 	}
-	if isForkTimestampIncompatible(c.MantleEverestTime, newcfg.MantleEverestTime, headTimestamp) {
+	if isForkTimestampIncompatible(c.MantleEverestTime, newcfg.MantleEverestTime, headTimestamp, genesisTimestamp) {
 		return newTimestampCompatError("Mantle Everest fork timestamp", c.MantleEverestTime, newcfg.MantleEverestTime)
 	}
-	if isForkTimestampIncompatible(c.MantleSkadiTime, newcfg.MantleSkadiTime, headTimestamp) {
+	if isForkTimestampIncompatible(c.MantleSkadiTime, newcfg.MantleSkadiTime, headTimestamp, genesisTimestamp) {
 		return newTimestampCompatError("Mantle Skadi fork timestamp", c.MantleSkadiTime, newcfg.MantleSkadiTime)
 	}
-	if isForkTimestampIncompatible(c.MantleLimbTime, newcfg.MantleLimbTime, headTimestamp) {
+	if isForkTimestampIncompatible(c.MantleLimbTime, newcfg.MantleLimbTime, headTimestamp, genesisTimestamp) {
 		return newTimestampCompatError("Mantle Limb fork timestamp", c.MantleLimbTime, newcfg.MantleLimbTime)
 	}
-	if isForkTimestampIncompatible(c.MantleArsiaTime, newcfg.MantleArsiaTime, headTimestamp) {
+	if isForkTimestampIncompatible(c.MantleArsiaTime, newcfg.MantleArsiaTime, headTimestamp, genesisTimestamp) {
 		return newTimestampCompatError("Mantle Arsia fork timestamp", c.MantleArsiaTime, newcfg.MantleArsiaTime)
 	}
 	return nil
