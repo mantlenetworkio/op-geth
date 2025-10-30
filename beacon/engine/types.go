@@ -85,8 +85,9 @@ type PayloadAttributes struct {
 type payloadAttributesMarshaling struct {
 	Timestamp hexutil.Uint64
 
-	Transactions []hexutil.Bytes
-	GasLimit     *hexutil.Uint64
+	Transactions  []hexutil.Bytes
+	GasLimit      *hexutil.Uint64
+	EIP1559Params hexutil.Bytes
 }
 
 //go:generate go run github.com/fjl/gencodec -type ExecutableData -field-override executableDataMarshaling -out gen_ed.go
