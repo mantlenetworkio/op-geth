@@ -224,7 +224,8 @@ func (c *preconfChecker) UpdateOptimismSyncStatus(newOptimismSyncStatus *preconf
 // unsafe_l2.l1_origin.number normal growth
 // engine_sync_target.number normal growth
 func (c *preconfChecker) isSyncStatusOk(newStatus *preconf.OptimismSyncStatus) bool {
-	return c.optimismSyncStatus.HeadL1.Number <= newStatus.HeadL1.Number &&
+	return newStatus.HeadL1.Number > 0 &&
+		c.optimismSyncStatus.HeadL1.Number <= newStatus.HeadL1.Number &&
 		c.optimismSyncStatus.UnsafeL2.Number <= newStatus.UnsafeL2.Number &&
 		c.optimismSyncStatus.UnsafeL2.L1Origin.Number <= newStatus.UnsafeL2.L1Origin.Number &&
 		c.optimismSyncStatus.EngineSyncTarget.Number <= newStatus.EngineSyncTarget.Number

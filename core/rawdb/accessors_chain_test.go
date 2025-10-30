@@ -814,13 +814,13 @@ func TestParseLegacyReceiptRLP(t *testing.T) {
 
 	data, err := rlp.EncodeToBytes(receipt)
 	require.NoError(t, err)
-	var result storedReceiptRLP
+	var result types.ReceiptForStorage
 	err = rlp.DecodeBytes(data, &result)
 	require.NoError(t, err)
 	require.Equal(t, receipt.L1GasUsed, result.L1GasUsed)
 	require.Equal(t, receipt.L1GasPrice, result.L1GasPrice)
 	require.Equal(t, receipt.L1Fee, result.L1Fee)
-	require.Equal(t, receipt.FeeScalar, result.FeeScalar)
+	require.Equal(t, receipt.FeeScalar, result.FeeScalar.String())
 }
 
 func TestDeriveLogFields(t *testing.T) {

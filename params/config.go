@@ -412,25 +412,25 @@ var (
 		Max:            9,
 		UpdateFraction: 5007716,
 	}
-	// DefaultBPO1BlobConfig is the default blob configuration for the Osaka fork.
+	// DefaultBPO1BlobConfig is the default blob configuration for the BPO1 fork.
 	DefaultBPO1BlobConfig = &BlobConfig{
 		Target:         10,
 		Max:            15,
 		UpdateFraction: 8346193,
 	}
-	// DefaultBPO1BlobConfig is the default blob configuration for the Osaka fork.
+	// DefaultBPO2BlobConfig is the default blob configuration for the BPO2 fork.
 	DefaultBPO2BlobConfig = &BlobConfig{
 		Target:         14,
 		Max:            21,
 		UpdateFraction: 11684671,
 	}
-	// DefaultBPO1BlobConfig is the default blob configuration for the Osaka fork.
+	// DefaultBPO3BlobConfig is the default blob configuration for the BPO3 fork.
 	DefaultBPO3BlobConfig = &BlobConfig{
 		Target:         21,
 		Max:            32,
 		UpdateFraction: 20609697,
 	}
-	// DefaultBPO1BlobConfig is the default blob configuration for the Osaka fork.
+	// DefaultBPO4BlobConfig is the default blob configuration for the BPO4 fork.
 	DefaultBPO4BlobConfig = &BlobConfig{
 		Target:         14,
 		Max:            21,
@@ -483,16 +483,17 @@ type ChainConfig struct {
 
 	// Fork scheduling was switched from blocks to timestamps here
 
-	ShanghaiTime *uint64 `json:"shanghaiTime,omitempty"` // Shanghai switch time (nil = no fork, 0 = already on shanghai)
-	CancunTime   *uint64 `json:"cancunTime,omitempty"`   // Cancun switch time (nil = no fork, 0 = already on cancun)
-	PragueTime   *uint64 `json:"pragueTime,omitempty"`   // Prague switch time (nil = no fork, 0 = already on prague)
-	OsakaTime    *uint64 `json:"osakaTime,omitempty"`    // Osaka switch time (nil = no fork, 0 = already on osaka)
-	VerkleTime   *uint64 `json:"verkleTime,omitempty"`   // Verkle switch time (nil = no fork, 0 = already on verkle)
-	BPO1Time     *uint64 `json:"bpo1Time,omitempty"`     // BPO1 switch time (nil = no fork, 0 = already on bpo1)
-	BPO2Time     *uint64 `json:"bpo2Time,omitempty"`     // BPO2 switch time (nil = no fork, 0 = already on bpo2)
-	BPO3Time     *uint64 `json:"bpo3Time,omitempty"`     // BPO3 switch time (nil = no fork, 0 = already on bpo3)
-	BPO4Time     *uint64 `json:"bpo4Time,omitempty"`     // BPO4 switch time (nil = no fork, 0 = already on bpo4)
-	BPO5Time     *uint64 `json:"bpo5Time,omitempty"`     // BPO5 switch time (nil = no fork, 0 = already on bpo5)
+	ShanghaiTime  *uint64 `json:"shanghaiTime,omitempty"`  // Shanghai switch time (nil = no fork, 0 = already on shanghai)
+	CancunTime    *uint64 `json:"cancunTime,omitempty"`    // Cancun switch time (nil = no fork, 0 = already on cancun)
+	PragueTime    *uint64 `json:"pragueTime,omitempty"`    // Prague switch time (nil = no fork, 0 = already on prague)
+	OsakaTime     *uint64 `json:"osakaTime,omitempty"`     // Osaka switch time (nil = no fork, 0 = already on osaka)
+	BPO1Time      *uint64 `json:"bpo1Time,omitempty"`      // BPO1 switch time (nil = no fork, 0 = already on bpo1)
+	BPO2Time      *uint64 `json:"bpo2Time,omitempty"`      // BPO2 switch time (nil = no fork, 0 = already on bpo2)
+	BPO3Time      *uint64 `json:"bpo3Time,omitempty"`      // BPO3 switch time (nil = no fork, 0 = already on bpo3)
+	BPO4Time      *uint64 `json:"bpo4Time,omitempty"`      // BPO4 switch time (nil = no fork, 0 = already on bpo4)
+	BPO5Time      *uint64 `json:"bpo5Time,omitempty"`      // BPO5 switch time (nil = no fork, 0 = already on bpo5)
+	AmsterdamTime *uint64 `json:"amsterdamTime,omitempty"` // Amsterdam switch time (nil = no fork, 0 = already on amsterdam)
+	VerkleTime    *uint64 `json:"verkleTime,omitempty"`    // Verkle switch time (nil = no fork, 0 = already on verkle)
 
 	BedrockBlock *big.Int `json:"bedrockBlock,omitempty"` // Bedrock switch block (nil = no fork, 0 = already on optimism bedrock)
 	RegolithTime *uint64  `json:"regolithTime,omitempty"` // Regolith switch time (nil = no fork, 0 = already on optimism regolith)
@@ -546,8 +547,6 @@ type ChainConfig struct {
 	Optimism *OptimismConfig `json:"optimism,omitempty"`
 }
 
-
-
 // EthashConfig is the consensus engine configs for proof-of-work based sealing.
 type EthashConfig struct{}
 
@@ -579,6 +578,125 @@ func (o *OptimismConfig) String() string {
 	return "optimism"
 }
 
+// String implements the fmt.Stringer interface, returning a string representation
+// of ChainConfig.
+func (c *ChainConfig) String() string {
+	result := fmt.Sprintf("ChainConfig{ChainID: %v", c.ChainID)
+
+	// Add block-based forks
+	if c.HomesteadBlock != nil {
+		result += fmt.Sprintf(", HomesteadBlock: %v", c.HomesteadBlock)
+	}
+	if c.DAOForkBlock != nil {
+		result += fmt.Sprintf(", DAOForkBlock: %v", c.DAOForkBlock)
+	}
+	if c.EIP150Block != nil {
+		result += fmt.Sprintf(", EIP150Block: %v", c.EIP150Block)
+	}
+	if c.EIP155Block != nil {
+		result += fmt.Sprintf(", EIP155Block: %v", c.EIP155Block)
+	}
+	if c.EIP158Block != nil {
+		result += fmt.Sprintf(", EIP158Block: %v", c.EIP158Block)
+	}
+	if c.ByzantiumBlock != nil {
+		result += fmt.Sprintf(", ByzantiumBlock: %v", c.ByzantiumBlock)
+	}
+	if c.ConstantinopleBlock != nil {
+		result += fmt.Sprintf(", ConstantinopleBlock: %v", c.ConstantinopleBlock)
+	}
+	if c.PetersburgBlock != nil {
+		result += fmt.Sprintf(", PetersburgBlock: %v", c.PetersburgBlock)
+	}
+	if c.IstanbulBlock != nil {
+		result += fmt.Sprintf(", IstanbulBlock: %v", c.IstanbulBlock)
+	}
+	if c.MuirGlacierBlock != nil {
+		result += fmt.Sprintf(", MuirGlacierBlock: %v", c.MuirGlacierBlock)
+	}
+	if c.BerlinBlock != nil {
+		result += fmt.Sprintf(", BerlinBlock: %v", c.BerlinBlock)
+	}
+	if c.LondonBlock != nil {
+		result += fmt.Sprintf(", LondonBlock: %v", c.LondonBlock)
+	}
+	if c.ArrowGlacierBlock != nil {
+		result += fmt.Sprintf(", ArrowGlacierBlock: %v", c.ArrowGlacierBlock)
+	}
+	if c.GrayGlacierBlock != nil {
+		result += fmt.Sprintf(", GrayGlacierBlock: %v", c.GrayGlacierBlock)
+	}
+	if c.MergeNetsplitBlock != nil {
+		result += fmt.Sprintf(", MergeNetsplitBlock: %v", c.MergeNetsplitBlock)
+	}
+
+	// Add timestamp-based forks
+	if c.ShanghaiTime != nil {
+		result += fmt.Sprintf(", ShanghaiTime: %v", *c.ShanghaiTime)
+	}
+	if c.CancunTime != nil {
+		result += fmt.Sprintf(", CancunTime: %v", *c.CancunTime)
+	}
+	if c.PragueTime != nil {
+		result += fmt.Sprintf(", PragueTime: %v", *c.PragueTime)
+	}
+	if c.OsakaTime != nil {
+		result += fmt.Sprintf(", OsakaTime: %v", *c.OsakaTime)
+	}
+	if c.BPO1Time != nil {
+		result += fmt.Sprintf(", BPO1Time: %v", *c.BPO1Time)
+	}
+	if c.BPO2Time != nil {
+		result += fmt.Sprintf(", BPO2Time: %v", *c.BPO2Time)
+	}
+	if c.BPO3Time != nil {
+		result += fmt.Sprintf(", BPO3Time: %v", *c.BPO3Time)
+	}
+	if c.BPO4Time != nil {
+		result += fmt.Sprintf(", BPO4Time: %v", *c.BPO4Time)
+	}
+	if c.BPO5Time != nil {
+		result += fmt.Sprintf(", BPO5Time: %v", *c.BPO5Time)
+	}
+	if c.AmsterdamTime != nil {
+		result += fmt.Sprintf(", AmsterdamTime: %v", *c.AmsterdamTime)
+	}
+	if c.VerkleTime != nil {
+		result += fmt.Sprintf(", VerkleTime: %v", *c.VerkleTime)
+	}
+
+	// mantle
+	if c.RegolithTime != nil {
+		result += fmt.Sprintf(", RegolithTime: %v", *c.RegolithTime)
+	}
+	if c.BaseFeeTime != nil {
+		result += fmt.Sprintf(", MantleBaseFeeTime: %v", *c.BaseFeeTime)
+	}
+	if c.BVMETHMintUpgradeTime != nil {
+		result += fmt.Sprintf(", MantleBVMETHMintUpgradeTime: %v", *c.BVMETHMintUpgradeTime)
+	}
+	if c.MetaTxV2UpgradeTime != nil {
+		result += fmt.Sprintf(", MantleMetaTxV2UpgradeTime: %v", *c.MetaTxV2UpgradeTime)
+	}
+	if c.MetaTxV3UpgradeTime != nil {
+		result += fmt.Sprintf(", MantleMetaTxV3UpgradeTime: %v", *c.MetaTxV3UpgradeTime)
+	}
+	if c.ProxyOwnerUpgradeTime != nil {
+		result += fmt.Sprintf(", MantleSkadiTime: %v", *c.ProxyOwnerUpgradeTime)
+	}
+	if c.MantleEverestTime != nil {
+		result += fmt.Sprintf(", MantleLimbTime: %v", *c.MantleEverestTime)
+	}
+	if c.MantleSkadiTime != nil {
+		result += fmt.Sprintf(", MantleSkadiTime: %v", *c.MantleSkadiTime)
+	}
+	if c.MantleLimbTime != nil {
+		result += fmt.Sprintf(", MantleLimbTime: %v", *c.MantleLimbTime)
+	}
+	result += "}"
+	return result
+}
+
 // Description returns a human-readable description of ChainConfig.
 func (c *ChainConfig) Description() string {
 	var banner string
@@ -605,34 +723,32 @@ func (c *ChainConfig) Description() string {
 	// makes sense for mainnet should be optional at printing to avoid bloating
 	// the output for testnets and private networks.
 	banner += "Pre-Merge hard forks (block based):\n"
-	banner += fmt.Sprintf(" - Homestead:                   #%-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/homestead.md)\n", c.HomesteadBlock)
+	banner += fmt.Sprintf(" - Homestead:                   #%-8v\n", c.HomesteadBlock)
 	if c.DAOForkBlock != nil {
-		banner += fmt.Sprintf(" - DAO Fork:                    #%-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/dao-fork.md)\n", c.DAOForkBlock)
+		banner += fmt.Sprintf(" - DAO Fork:                    #%-8v\n", c.DAOForkBlock)
 	}
-	banner += fmt.Sprintf(" - Tangerine Whistle (EIP 150): #%-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/tangerine-whistle.md)\n", c.EIP150Block)
-	banner += fmt.Sprintf(" - Spurious Dragon/1 (EIP 155): #%-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/spurious-dragon.md)\n", c.EIP155Block)
-	banner += fmt.Sprintf(" - Spurious Dragon/2 (EIP 158): #%-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/spurious-dragon.md)\n", c.EIP155Block)
-	banner += fmt.Sprintf(" - Byzantium:                   #%-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/byzantium.md)\n", c.ByzantiumBlock)
-	banner += fmt.Sprintf(" - Constantinople:              #%-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/constantinople.md)\n", c.ConstantinopleBlock)
-	banner += fmt.Sprintf(" - Petersburg:                  #%-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/petersburg.md)\n", c.PetersburgBlock)
-	banner += fmt.Sprintf(" - Istanbul:                    #%-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/istanbul.md)\n", c.IstanbulBlock)
+	banner += fmt.Sprintf(" - Tangerine Whistle (EIP 150): #%-8v\n", c.EIP150Block)
+	banner += fmt.Sprintf(" - Spurious Dragon/1 (EIP 155): #%-8v\n", c.EIP155Block)
+	banner += fmt.Sprintf(" - Spurious Dragon/2 (EIP 158): #%-8v\n", c.EIP158Block)
+	banner += fmt.Sprintf(" - Byzantium:                   #%-8v\n", c.ByzantiumBlock)
+	banner += fmt.Sprintf(" - Constantinople:              #%-8v\n", c.ConstantinopleBlock)
+	banner += fmt.Sprintf(" - Petersburg:                  #%-8v\n", c.PetersburgBlock)
+	banner += fmt.Sprintf(" - Istanbul:                    #%-8v\n", c.IstanbulBlock)
 	if c.MuirGlacierBlock != nil {
-		banner += fmt.Sprintf(" - Muir Glacier:                #%-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/muir-glacier.md)\n", c.MuirGlacierBlock)
+		banner += fmt.Sprintf(" - Muir Glacier:                #%-8v\n", c.MuirGlacierBlock)
 	}
-	banner += fmt.Sprintf(" - Berlin:                      #%-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/berlin.md)\n", c.BerlinBlock)
-	banner += fmt.Sprintf(" - London:                      #%-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/london.md)\n", c.LondonBlock)
+	banner += fmt.Sprintf(" - Berlin:                      #%-8v\n", c.BerlinBlock)
+	banner += fmt.Sprintf(" - London:                      #%-8v\n", c.LondonBlock)
 	if c.ArrowGlacierBlock != nil {
-		banner += fmt.Sprintf(" - Arrow Glacier:               #%-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/arrow-glacier.md)\n", c.ArrowGlacierBlock)
+		banner += fmt.Sprintf(" - Arrow Glacier:               #%-8v\n", c.ArrowGlacierBlock)
 	}
 	if c.GrayGlacierBlock != nil {
-		banner += fmt.Sprintf(" - Gray Glacier:                #%-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/gray-glacier.md)\n", c.GrayGlacierBlock)
+		banner += fmt.Sprintf(" - Gray Glacier:                #%-8v\n", c.GrayGlacierBlock)
 	}
 	banner += "\n"
 
 	// Add a special section for the merge as it's non-obvious
 	banner += "Merge configured:\n"
-	banner += " - Hard-fork specification:    https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/paris.md\n"
-	banner += " - Network known to be merged\n"
 	banner += fmt.Sprintf(" - Total terminal difficulty:  %v\n", c.TerminalTotalDifficulty)
 	if c.MergeNetsplitBlock != nil {
 		banner += fmt.Sprintf(" - Merge netsplit block:       #%-8v\n", c.MergeNetsplitBlock)
@@ -642,38 +758,70 @@ func (c *ChainConfig) Description() string {
 	// Create a list of forks post-merge
 	banner += "Post-Merge hard forks (timestamp based):\n"
 	if c.ShanghaiTime != nil {
-		banner += fmt.Sprintf(" - Shanghai:                    @%-10v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/shanghai.md)\n", *c.ShanghaiTime)
+		banner += fmt.Sprintf(" - Shanghai:                    @%-10v\n", *c.ShanghaiTime)
 	}
 	if c.CancunTime != nil {
-		banner += fmt.Sprintf(" - Cancun:                      @%-10v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/cancun.md)\n", *c.CancunTime)
+		banner += fmt.Sprintf(" - Cancun:                      @%-10v blob: (%s)\n", *c.CancunTime, "nil")
 	}
 	if c.PragueTime != nil {
-		banner += fmt.Sprintf(" - Prague:                      @%-10v\n", *c.PragueTime)
+		banner += fmt.Sprintf(" - Prague:                      @%-10v blob: (%s)\n", *c.PragueTime, "nil")
 	}
 	if c.OsakaTime != nil {
-		banner += fmt.Sprintf(" - Osaka:                      @%-10v\n", *c.OsakaTime)
-	}
-	if c.VerkleTime != nil {
-		banner += fmt.Sprintf(" - Verkle:                      @%-10v\n", *c.VerkleTime)
+		banner += fmt.Sprintf(" - Osaka:                       @%-10v blob: (%s)\n", *c.OsakaTime, "nil")
 	}
 	if c.BPO1Time != nil {
-		banner += fmt.Sprintf(" - BPO1:                      @%-10v\n", *c.BPO1Time)
+		banner += fmt.Sprintf(" - BPO1:                        @%-10v blob: (%s)\n", *c.BPO1Time, "nil")
 	}
 	if c.BPO2Time != nil {
-		banner += fmt.Sprintf(" - BPO2:                      @%-10v\n", *c.BPO2Time)
+		banner += fmt.Sprintf(" - BPO2:                        @%-10v blob: (%s)\n", *c.BPO2Time, "nil")
 	}
 	if c.BPO3Time != nil {
-		banner += fmt.Sprintf(" - BPO3:                      @%-10v\n", *c.BPO3Time)
+		banner += fmt.Sprintf(" - BPO3:                        @%-10v blob: (%s)\n", *c.BPO3Time, "nil")
 	}
 	if c.BPO4Time != nil {
-		banner += fmt.Sprintf(" - BPO4:                      @%-10v\n", *c.BPO4Time)
+		banner += fmt.Sprintf(" - BPO4:                        @%-10v blob: (%s)\n", *c.BPO4Time, "nil")
 	}
 	if c.BPO5Time != nil {
-		banner += fmt.Sprintf(" - BPO5:                      @%-10v\n", *c.BPO5Time)
+		banner += fmt.Sprintf(" - BPO5:                        @%-10v blob: (%s)\n", *c.BPO5Time, "nil")
 	}
+	if c.AmsterdamTime != nil {
+		banner += fmt.Sprintf(" - Amsterdam:					  @%-10v blob: (%s)\n", *c.AmsterdamTime, "nil")
+	}
+	if c.VerkleTime != nil {
+		banner += fmt.Sprintf(" - Verkle:                      @%-10v blob: (%s)\n", *c.VerkleTime, "nil")
+	}
+
 	if c.RegolithTime != nil {
 		banner += fmt.Sprintf(" - Regolith:                    @%-10v\n", *c.RegolithTime)
 	}
+
+	// Mantle upgrade info
+	if c.BaseFeeTime != nil {
+		banner += fmt.Sprintf(" - Mantle BaseFee:              @%-10v\n", *c.BaseFeeTime)
+	}
+	if c.BVMETHMintUpgradeTime != nil {
+		banner += fmt.Sprintf(" - Mantle BVMETHMint:           @%-10v\n", *c.BVMETHMintUpgradeTime)
+	}
+	if c.MetaTxV2UpgradeTime != nil {
+		banner += fmt.Sprintf(" - Mantle MetaTxV2:             @%-10v\n", *c.MetaTxV2UpgradeTime)
+	}
+	if c.MetaTxV3UpgradeTime != nil {
+		banner += fmt.Sprintf(" - Mantle MetaTxV3:             @%-10v\n", *c.MetaTxV3UpgradeTime)
+	}
+	if c.ProxyOwnerUpgradeTime != nil {
+		banner += fmt.Sprintf(" - Mantle ProxyOwner:           @%-10v\n", *c.ProxyOwnerUpgradeTime)
+	}
+	if c.MantleEverestTime != nil {
+		banner += fmt.Sprintf(" - Mantle Everest:              @%-10v\n", *c.MantleEverestTime)
+	}
+	if c.MantleSkadiTime != nil {
+		banner += fmt.Sprintf(" - Mantle Skadi:                @%-10v\n", *c.MantleSkadiTime)
+	}
+	if c.MantleLimbTime != nil {
+		banner += fmt.Sprintf(" - Mantle Limb:                 @%-10v\n", *c.MantleLimbTime)
+	}
+
+	banner += fmt.Sprintf("\nAll fork specifications can be found at https://ethereum.github.io/execution-specs/src/ethereum/forks/\n")
 	return banner
 }
 
@@ -684,17 +832,26 @@ type BlobConfig struct {
 	UpdateFraction uint64 `json:"baseFeeUpdateFraction"`
 }
 
+// String implement fmt.Stringer, returning string format blob config.
+func (bc *BlobConfig) String() string {
+	if bc == nil {
+		return "nil"
+	}
+	return fmt.Sprintf("target: %d, max: %d, fraction: %d", bc.Target, bc.Max, bc.UpdateFraction)
+}
+
 // BlobScheduleConfig determines target and max number of blobs allow per fork.
 type BlobScheduleConfig struct {
-	Cancun *BlobConfig `json:"cancun,omitempty"`
-	Prague *BlobConfig `json:"prague,omitempty"`
-	Osaka  *BlobConfig `json:"osaka,omitempty"`
-	Verkle *BlobConfig `json:"verkle,omitempty"`
-	BPO1   *BlobConfig `json:"bpo1,omitempty"`
-	BPO2   *BlobConfig `json:"bpo2,omitempty"`
-	BPO3   *BlobConfig `json:"bpo3,omitempty"`
-	BPO4   *BlobConfig `json:"bpo4,omitempty"`
-	BPO5   *BlobConfig `json:"bpo5,omitempty"`
+	Cancun    *BlobConfig `json:"cancun,omitempty"`
+	Prague    *BlobConfig `json:"prague,omitempty"`
+	Osaka     *BlobConfig `json:"osaka,omitempty"`
+	Verkle    *BlobConfig `json:"verkle,omitempty"`
+	BPO1      *BlobConfig `json:"bpo1,omitempty"`
+	BPO2      *BlobConfig `json:"bpo2,omitempty"`
+	BPO3      *BlobConfig `json:"bpo3,omitempty"`
+	BPO4      *BlobConfig `json:"bpo4,omitempty"`
+	BPO5      *BlobConfig `json:"bpo5,omitempty"`
+	Amsterdam *BlobConfig `json:"amsterdam,omitempty"`
 }
 
 // IsHomestead returns whether num is either equal to the homestead block or greater.
@@ -809,11 +966,6 @@ func (c *ChainConfig) IsOsaka(num *big.Int, time uint64) bool {
 	return c.IsLondon(num) && isTimestampForked(c.OsakaTime, time)
 }
 
-// IsVerkle returns whether time is either equal to the Verkle fork time or greater.
-func (c *ChainConfig) IsVerkle(num *big.Int, time uint64) bool {
-	return c.IsLondon(num) && isTimestampForked(c.VerkleTime, time)
-}
-
 // IsBPO1 returns whether time is either equal to the BPO1 fork time or greater.
 func (c *ChainConfig) IsBPO1(num *big.Int, time uint64) bool {
 	return c.IsLondon(num) && isTimestampForked(c.BPO1Time, time)
@@ -837,6 +989,16 @@ func (c *ChainConfig) IsBPO4(num *big.Int, time uint64) bool {
 // IsBPO5 returns whether time is either equal to the BPO5 fork time or greater.
 func (c *ChainConfig) IsBPO5(num *big.Int, time uint64) bool {
 	return c.IsLondon(num) && isTimestampForked(c.BPO5Time, time)
+}
+
+// IsAmsterdam returns whether time is either equal to the Amsterdam fork time or greater.
+func (c *ChainConfig) IsAmsterdam(num *big.Int, time uint64) bool {
+	return c.IsLondon(num) && isTimestampForked(c.AmsterdamTime, time)
+}
+
+// IsVerkle returns whether time is either equal to the Verkle fork time or greater.
+func (c *ChainConfig) IsVerkle(num *big.Int, time uint64) bool {
+	return c.IsLondon(num) && isTimestampForked(c.VerkleTime, time)
 }
 
 // IsVerkleGenesis checks whether the verkle fork is activated at the genesis block.
@@ -977,6 +1139,7 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "bpo3", timestamp: c.BPO3Time, optional: true},
 		{name: "bpo4", timestamp: c.BPO4Time, optional: true},
 		{name: "bpo5", timestamp: c.BPO5Time, optional: true},
+		{name: "amsterdam", timestamp: c.AmsterdamTime, optional: true},
 	} {
 		if lastFork.name != "" {
 			switch {
@@ -1040,6 +1203,7 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "bpo3", timestamp: c.BPO3Time, config: bsc.BPO3},
 		{name: "bpo4", timestamp: c.BPO4Time, config: bsc.BPO4},
 		{name: "bpo5", timestamp: c.BPO5Time, config: bsc.BPO5},
+		{name: "amsterdam", timestamp: c.AmsterdamTime, config: bsc.Amsterdam},
 	} {
 		if cur.config != nil {
 			if err := cur.config.validate(); err != nil {
@@ -1155,35 +1319,41 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	if isForkTimestampIncompatible(c.BPO5Time, newcfg.BPO5Time, headTimestamp, genesisTimestamp) {
 		return newTimestampCompatError("BPO5 fork timestamp", c.BPO5Time, newcfg.BPO5Time)
 	}
+	if isForkTimestampIncompatible(c.AmsterdamTime, newcfg.AmsterdamTime, headTimestamp) {
+		return newTimestampCompatError("Amsterdam fork timestamp", c.AmsterdamTime, newcfg.AmsterdamTime)
+	}
 	if isForkBlockIncompatible(c.BedrockBlock, newcfg.BedrockBlock, headNumber) {
 		return newBlockCompatError("Bedrock fork block", c.BedrockBlock, newcfg.BedrockBlock)
 	}
-	if isForkTimestampIncompatible(c.RegolithTime, newcfg.RegolithTime, headTimestamp, genesisTimestamp) {
+	if isForkTimestampIncompatible(c.RegolithTime, newcfg.RegolithTime, headTimestamp) {
 		return newTimestampCompatError("Regolith fork timestamp", c.RegolithTime, newcfg.RegolithTime)
 	}
-	if isForkTimestampIncompatible(c.CanyonTime, newcfg.CanyonTime, headTimestamp, genesisTimestamp) {
-		return newTimestampCompatError("Canyon fork timestamp", c.CanyonTime, newcfg.CanyonTime)
+	if isForkTimestampIncompatible(c.BaseFeeTime, newcfg.BaseFeeTime, headTimestamp) {
+		return newTimestampCompatError("Mantle BaseFee fork timestamp", c.BaseFeeTime, newcfg.BaseFeeTime)
 	}
-	if isForkTimestampIncompatible(c.EcotoneTime, newcfg.EcotoneTime, headTimestamp, genesisTimestamp) {
-		return newTimestampCompatError("Ecotone fork timestamp", c.EcotoneTime, newcfg.EcotoneTime)
+	if isForkTimestampIncompatible(c.BVMETHMintUpgradeTime, newcfg.BVMETHMintUpgradeTime, headTimestamp) {
+		return newTimestampCompatError("Mantle BVMETHMint fork timestamp", c.BVMETHMintUpgradeTime, newcfg.BVMETHMintUpgradeTime)
 	}
-	if isForkTimestampIncompatible(c.FjordTime, newcfg.FjordTime, headTimestamp, genesisTimestamp) {
-		return newTimestampCompatError("Fjord fork timestamp", c.FjordTime, newcfg.FjordTime)
+	if isForkTimestampIncompatible(c.MetaTxV2UpgradeTime, newcfg.MetaTxV2UpgradeTime, headTimestamp) {
+		return newTimestampCompatError("Mantle MetaTxV2 fork timestamp", c.MetaTxV2UpgradeTime, newcfg.MetaTxV2UpgradeTime)
 	}
-	if isForkTimestampIncompatible(c.GraniteTime, newcfg.GraniteTime, headTimestamp, genesisTimestamp) {
-		return newTimestampCompatError("Granite fork timestamp", c.GraniteTime, newcfg.GraniteTime)
+	if isForkTimestampIncompatible(c.MetaTxV3UpgradeTime, newcfg.MetaTxV3UpgradeTime, headTimestamp) {
+		return newTimestampCompatError("Mantle MetaTxV3 fork timestamp", c.MetaTxV3UpgradeTime, newcfg.MetaTxV3UpgradeTime)
 	}
-	if isForkTimestampIncompatible(c.HoloceneTime, newcfg.HoloceneTime, headTimestamp, genesisTimestamp) {
-		return newTimestampCompatError("Holocene fork timestamp", c.HoloceneTime, newcfg.HoloceneTime)
+	if isForkTimestampIncompatible(c.ProxyOwnerUpgradeTime, newcfg.ProxyOwnerUpgradeTime, headTimestamp) {
+		return newTimestampCompatError("Mantle ProxyOwner fork timestamp", c.ProxyOwnerUpgradeTime, newcfg.ProxyOwnerUpgradeTime)
 	}
-	if isForkTimestampIncompatible(c.IsthmusTime, newcfg.IsthmusTime, headTimestamp, genesisTimestamp) {
-		return newTimestampCompatError("Isthmus fork timestamp", c.IsthmusTime, newcfg.IsthmusTime)
+	if isForkTimestampIncompatible(c.MantleEverestTime, newcfg.MantleEverestTime, headTimestamp) {
+		return newTimestampCompatError("Mantle Everest fork timestamp", c.MantleEverestTime, newcfg.MantleEverestTime)
 	}
-	if isForkTimestampIncompatible(c.JovianTime, newcfg.JovianTime, headTimestamp, genesisTimestamp) {
-		return newTimestampCompatError("Jovian fork timestamp", c.JovianTime, newcfg.JovianTime)
+	if isForkTimestampIncompatible(c.MantleSkadiTime, newcfg.MantleSkadiTime, headTimestamp) {
+		return newTimestampCompatError("Mantle Skadi fork timestamp", c.MantleSkadiTime, newcfg.MantleSkadiTime)
 	}
-	if isForkTimestampIncompatible(c.InteropTime, newcfg.InteropTime, headTimestamp, genesisTimestamp) {
-		return newTimestampCompatError("Interop fork timestamp", c.InteropTime, newcfg.InteropTime)
+	if isForkTimestampIncompatible(c.MantleLimbTime, newcfg.MantleLimbTime, headTimestamp) {
+		return newTimestampCompatError("Mantle Limb fork timestamp", c.MantleLimbTime, newcfg.MantleLimbTime)
+	}
+	if isForkTimestampIncompatible(c.MantleArsiaTime, newcfg.MantleArsiaTime, headTimestamp) {
+		return newTimestampCompatError("Mantle Arsia fork timestamp", c.MantleArsiaTime, newcfg.MantleArsiaTime)
 	}
 	return nil
 }
@@ -1210,6 +1380,8 @@ func (c *ChainConfig) LatestFork(time uint64) forks.Fork {
 	london := c.LondonBlock
 
 	switch {
+	case c.IsAmsterdam(london, time):
+		return forks.Amsterdam
 	case c.IsBPO5(london, time):
 		return forks.BPO5
 	case c.IsBPO4(london, time):
@@ -1462,7 +1634,7 @@ type Rules struct {
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
 	IsBerlin, IsLondon                                      bool
 	IsMerge, IsShanghai, IsCancun, IsPrague, IsOsaka        bool
-	IsVerkle                                                bool
+	IsAmsterdam, IsVerkle                                   bool
 	IsOptimismBedrock, IsOptimismRegolith                   bool
 	IsOptimismCanyon, IsOptimismFjord                       bool
 	IsOptimismGranite, IsOptimismHolocene                   bool
@@ -1483,33 +1655,30 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 	isMerge = isMerge && c.IsLondon(num)
 	isVerkle := isMerge && c.IsVerkle(num, timestamp)
 	return Rules{
-		ChainID:                   new(big.Int).Set(chainID),
-		IsHomestead:               c.IsHomestead(num),
-		IsEIP150:                  c.IsEIP150(num),
-		IsEIP155:                  c.IsEIP155(num),
-		IsEIP158:                  c.IsEIP158(num),
-		IsByzantium:               c.IsByzantium(num),
-		IsConstantinople:          c.IsConstantinople(num),
-		IsPetersburg:              c.IsPetersburg(num),
-		IsIstanbul:                c.IsIstanbul(num),
-		IsBerlin:                  c.IsBerlin(num),
-		IsEIP2929:                 c.IsBerlin(num) && !isVerkle,
-		IsLondon:                  c.IsLondon(num),
-		IsMerge:                   isMerge,
-		IsShanghai:                isMerge && c.IsShanghai(num, timestamp),
-		IsCancun:                  isMerge && c.IsCancun(num, timestamp),
-		IsPrague:                  isMerge && c.IsPrague(num, timestamp),
-		IsOsaka:                   isMerge && c.IsOsaka(num, timestamp),
-		IsVerkle:                  isVerkle,
-		IsEIP4762:                 isVerkle,
-		IsOptimismBedrock:         isMerge && c.IsOptimismBedrock(num),
-		IsOptimismRegolith:        isMerge && c.IsOptimismRegolith(timestamp),
-		IsOptimismCanyon:          isMerge && c.IsOptimismCanyon(timestamp),
-		IsOptimismFjord:           isMerge && c.IsOptimismFjord(timestamp),
-		IsOptimismGranite:         isMerge && c.IsOptimismGranite(timestamp),
-		IsOptimismHolocene:        isMerge && c.IsOptimismHolocene(timestamp),
-		IsOptimismIsthmus:         isMerge && c.IsOptimismIsthmus(timestamp),
-		IsOptimismJovian:          isMerge && c.IsOptimismJovian(timestamp),
+		ChainID:          new(big.Int).Set(chainID),
+		IsHomestead:      c.IsHomestead(num),
+		IsEIP150:         c.IsEIP150(num),
+		IsEIP155:         c.IsEIP155(num),
+		IsEIP158:         c.IsEIP158(num),
+		IsByzantium:      c.IsByzantium(num),
+		IsConstantinople: c.IsConstantinople(num),
+		IsPetersburg:     c.IsPetersburg(num),
+		IsIstanbul:       c.IsIstanbul(num),
+		IsBerlin:         c.IsBerlin(num),
+		IsEIP2929:        c.IsBerlin(num) && !isVerkle,
+		IsLondon:         c.IsLondon(num),
+		IsMerge:          isMerge,
+		IsShanghai:       isMerge && c.IsShanghai(num, timestamp),
+		IsCancun:         isMerge && c.IsCancun(num, timestamp),
+		IsPrague:         isMerge && c.IsPrague(num, timestamp),
+		IsOsaka:          isMerge && c.IsOsaka(num, timestamp),
+		IsAmsterdam:      isMerge && c.IsAmsterdam(num, timestamp),
+		IsVerkle:         isVerkle,
+		IsEIP4762:        isVerkle,
+
+		// Mantle Upgrade
+		IsOptimismBedrock:         c.IsOptimismBedrock(num),
+		IsOptimismRegolith:        c.IsOptimismRegolith(timestamp),
 		IsMantleBaseFee:           c.IsMantleBaseFee(timestamp),
 		IsMantleBVMETHMintUpgrade: c.IsMantleBVMETHMintUpgrade(timestamp),
 		IsMetaTxV2:                c.IsMetaTxV2(timestamp),

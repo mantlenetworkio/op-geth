@@ -6,10 +6,10 @@ import (
 
 // Mantle chain config
 var (
-	MantleMainnetChainId  = big.NewInt(5000)
-	MantleSepoliaChainId  = big.NewInt(5003)
-	MantleHoodiQA3ChainId = big.NewInt(561113)
-	MantleLocalChainId    = big.NewInt(1337)
+	MantleMainnetChainId    = big.NewInt(5000)
+	MantleSepoliaChainId    = big.NewInt(5003)
+	MantleSepoliaQA6ChainId = big.NewInt(1115511106)
+	MantleLocalChainId      = big.NewInt(1337)
 )
 
 var (
@@ -37,8 +37,8 @@ var (
 		MantleLimbTime:        nil,
 		MantleArsiaTime:       nil,
 	}
-	MantleHoodiQA3UpgradeConfig = MantleUpgradeChainConfig{
-		ChainID:               MantleHoodiQA3ChainId,
+	MantleSepoliaQA6UpgradeConfig = MantleUpgradeChainConfig{
+		ChainID:               MantleSepoliaQA6ChainId,
 		BaseFeeTime:           u64Ptr(0),
 		BVMETHMintUpgradeTime: u64Ptr(0),
 		MetaTxV2UpgradeTime:   u64Ptr(0),
@@ -69,8 +69,8 @@ var (
 		ProxyOwnerUpgradeTime: nil,
 		MantleEverestTime:     u64Ptr(0),
 		MantleSkadiTime:       u64Ptr(0),
-		MantleLimbTime:        nil,
-		MantleArsiaTime:       nil,
+		MantleLimbTime:        u64Ptr(0),
+		MantleArsiaTime:       u64Ptr(0),
 	}
 )
 
@@ -97,8 +97,8 @@ func GetUpgradeConfigForMantle(chainID *big.Int) *MantleUpgradeChainConfig {
 		return &MantleMainnetUpgradeConfig
 	case MantleSepoliaChainId.Int64():
 		return &MantleSepoliaUpgradeConfig
-	case MantleHoodiQA3ChainId.Int64():
-		return &MantleHoodiQA3UpgradeConfig
+	case MantleSepoliaQA6ChainId.Int64():
+		return &MantleSepoliaQA6UpgradeConfig
 	case MantleLocalChainId.Int64():
 		return &MantleLocalUpgradeConfig
 	default:
