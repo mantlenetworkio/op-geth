@@ -302,29 +302,20 @@ func (miner *Miner) prepareWork(genParams *generateParams, witness bool) (*envir
 		header.MixDigest = genParams.random
 	}
 	// Set baseFee and GasLimit if we are on an EIP-1559 chain
-	if miner.chainConfig.IsLondon(header.Number) && !miner.chainConfig.IsMantleArsia(header.Time) {
-		header.BaseFee = eip1559.CalcBaseFee(miner.chainConfig, parent)
-		if miner.chainConfig.IsMantleBaseFee(header.Time) {
+	if miner.chainConfig.IsLondon(header.Number) {
+		if miner.chainConfig.IsMantleBaseFee(header.Time) && genParams.baseFee != nil && !miner.chainConfig.IsMantleArsia(header.Time) {
 			header.BaseFee = genParams.baseFee
-		}
-		if genParams.baseFee == nil {
+			log.Debug("header base fee from catalyst generation parameters", "baseFee", header.BaseFee.String())
+		} else {
 			header.BaseFee = eip1559.CalcBaseFee(miner.chainConfig, parent)
 			log.Debug("header base fee from eip1559 calculator", "baseFee", header.BaseFee.String())
-		} else {
-			log.Debug("header base fee from catalyst generation parameters", "baseFee", header.BaseFee.String())
 		}
 		if !miner.chainConfig.IsLondon(parent.Number) {
 			parentGasLimit := parent.GasLimit * miner.chainConfig.ElasticityMultiplier()
 			header.GasLimit = core.CalcGasLimit(parentGasLimit, miner.config.GasCeil)
 		}
 	}
-	if miner.chainConfig.IsMantleArsia(header.Time) {
-		header.BaseFee = eip1559.CalcBaseFee(miner.chainConfig, parent)
-		if !miner.chainConfig.IsLondon(parent.Number) {
-			parentGasLimit := parent.GasLimit * miner.chainConfig.ElasticityMultiplier()
-			header.GasLimit = core.CalcGasLimit(parentGasLimit, miner.config.GasCeil)
-		}
-	}
+
 	if genParams.gasLimit != nil { // override gas limit if specified
 		header.GasLimit = *genParams.gasLimit
 	} else if miner.chain.Config().Optimism != nil && miner.config.GasCeil != 0 {

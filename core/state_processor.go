@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"math/big"
 
+	// "github.com/ethereum/go-ethereum/log"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/core/state"
@@ -27,6 +29,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -198,16 +201,16 @@ func MakeReceipt(evm *vm.EVM, result *ExecutionResult, statedb *state.StateDB, b
 	}
 	receipt.TxHash = tx.Hash()
 	receipt.GasUsed = result.UsedGas
+	log.Info("gas used", "gas used", receipt.GasUsed)
 
 	if tx.IsDepositTx() && config.IsOptimismRegolith(evm.Context.Time) {
 		// The actual nonce for deposit transactions is only recorded from Regolith onwards and
 		// otherwise must be nil.
 		receipt.DepositNonce = &nonce
 	}
-	
 
 	// used to record l1 fee
-	l1BaseFee, overhead, scalar, scaled, tokenRatio:= types.DeriveL1GasInfo(statedb)
+	l1BaseFee, overhead, scalar, scaled, tokenRatio := types.DeriveL1GasInfo(statedb)
 
 	// used to record calculating l1 fee for txs from Layer2
 	if !tx.IsDepositTx() {
@@ -217,13 +220,17 @@ func MakeReceipt(evm *vm.EVM, result *ExecutionResult, statedb *state.StateDB, b
 		receipt.L1Fee = types.L1Cost(gas, l1BaseFee, overhead, scalar, tokenRatio)
 		receipt.FeeScalar = scaled
 		receipt.TokenRatio = tokenRatio
-		if(config.IsMantleArsia(blockTime)) {
+		if config.IsMantleArsia(blockTime) {
 			l1BaseFeeScalar, l1BlobBaseFeeScalar, l1BlobBaseFee, operatorFeeScalar, operatorFeeConstant := types.DeriveL1GasInfoArsia(statedb)
 			receipt.L1BlobBaseFee = l1BlobBaseFee
-			// calculate the rollup cost + operator cost
-			rollupCostFn := types.NewTotalRollupCostFunc(config, statedb)
-			rollupCost := rollupCostFn(tx, blockTime)
-			receipt.L1Fee = rollupCost.ToBig()
+			L1GasUsedFn := types.NewL1CostFuncArsiaGasUsed(config, statedb)
+			receipt.L1GasUsed = L1GasUsedFn(tx.RollupCostData(), blockTime)
+			// calculate l1 fee
+			l1CostFn := types.NewL1CostFuncArsia(config, statedb)
+			receipt.L1Fee = l1CostFn(tx.RollupCostData(), blockTime)
+			// log.Info("hash", "hash", tx.Hash())
+			// log.Info("l1 fee", "l1 fee", receipt.L1Fee.String())
+			// log.Info("l1 gas used", "l1 gas used", receipt.L1GasUsed.String())
 			if l1BaseFeeScalar != nil {
 				v := l1BaseFeeScalar.Uint64()
 				receipt.L1BaseFeeScalar = &v

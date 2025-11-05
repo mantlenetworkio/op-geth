@@ -140,7 +140,11 @@ type L1CostFunc func(blockNum uint64, blockTime uint64, dataGas RollupCostData, 
 
 type L1CostFuncArsia func(rcd RollupCostData, blockTime uint64) *big.Int
 
+type L1CostFuncArsiaGasUsed func(rcd RollupCostData, blockTime uint64) *big.Int
+
 type l1CostFuncArisa func(rcd RollupCostData) (fee, gasUsed *big.Int)
+
+type l1CostFuncArsiaGasUsed func(rcd RollupCostData) (calldataGasUsed *big.Int)
 
 // NewL1CostFunc returns a function used for calculating L1 fee cost.
 // This depends on the oracles because gas costs can change over time.
@@ -208,9 +212,13 @@ func NewL1CostFuncArsia(config *params.ChainConfig, statedb StateGetter) L1CostF
 		// point to allow deposit transactions from the block to be processed first by state
 		// transition.  This behavior is consensus critical!
 		l1FeeScalars := statedb.GetState(L1BlockAddr, L1FeeScalarsSlot).Bytes()
+		// log.Info("l1FeeScalars", "l1FeeScalars", l1FeeScalars)
 		l1BlobBaseFee := statedb.GetState(L1BlockAddr, L1BlobBaseFeeSlot).Big()
+		// log.Info("l1BlobBaseFee", "l1BlobBaseFee", l1BlobBaseFee)
 		l1BaseFee := statedb.GetState(L1BlockAddr, L1BaseFeeSlot).Big()
+		// log.Info("l1BaseFee", "l1BaseFee", l1BaseFee)
 		tokenRatio := statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
+		// log.Info("tokenRatio", "tokenRatio", tokenRatio)
 
 		// Edge case: the very first Ecotone block requires we use the Bedrock cost
 		// function. We detect this scenario by checking if the Ecotone parameters are
@@ -225,6 +233,8 @@ func NewL1CostFuncArsia(config *params.ChainConfig, statedb StateGetter) L1CostF
 		}
 
 		l1BaseFeeScalar, l1BlobBaseFeeScalar := ExtractEcotoneFeeParams(l1FeeScalars)
+		// log.Info("l1BaseFeeScalar", "l1BaseFeeScalar", l1BaseFeeScalar)
+		// log.Info("l1BlobBaseFeeScalar", "l1BlobBaseFeeScalar", l1BlobBaseFeeScalar)
 
 		return NewL1CostFuncFjord(
 			l1BaseFee,
@@ -253,6 +263,68 @@ func NewL1CostFuncArsia(config *params.ChainConfig, statedb StateGetter) L1CostF
 	}
 }
 
+func NewL1CostFuncArsiaGasUsed(config *params.ChainConfig, statedb StateGetter) L1CostFuncArsiaGasUsed {
+	if config.Optimism == nil {
+		return nil
+	}
+	forBlock := ^uint64(0)
+	var cachedFunc l1CostFuncArsiaGasUsed
+	selectFunc := func(blockTime uint64) l1CostFuncArsiaGasUsed {
+
+		// Note: the various state variables below are not initialized from the DB until this
+		// point to allow deposit transactions from the block to be processed first by state
+		// transition.  This behavior is consensus critical!
+		l1FeeScalars := statedb.GetState(L1BlockAddr, L1FeeScalarsSlot).Bytes()
+		l1BlobBaseFee := statedb.GetState(L1BlockAddr, L1BlobBaseFeeSlot).Big()
+
+		// Edge case: the very first Ecotone block requires we use the Bedrock cost
+		// function. We detect this scenario by checking if the Ecotone parameters are
+		// unset. Note here we rely on assumption that the scalar parameters are adjacent
+		// in the buffer and l1BaseFeeScalar comes first. We need to check this prior to
+		// other forks, as the first block of Fjord and Ecotone could be the same block.
+		firstEcotoneBlock := l1BlobBaseFee.BitLen() == 0 &&
+			bytes.Equal(emptyScalars, l1FeeScalars[scalarSectionStart:scalarSectionStart+8])
+		if firstEcotoneBlock {
+			log.Info("using bedrock l1 cost func for first Arisa block", "time", blockTime)
+			return func(costData RollupCostData) (calldataGasUsed *big.Int) {
+				rollupDataGas := costData.DataGas(blockTime, config) // Only fake txs for RPC view-calls are 0.
+				if config.Optimism == nil || rollupDataGas == 0 {
+					return common.Big0
+				}
+				overhead := statedb.GetState(L1BlockAddr, OverheadSlot).Big()
+
+				gasWithOverhead := new(big.Int).SetUint64(rollupDataGas)
+				gasWithOverhead.Add(gasWithOverhead, overhead)
+				return gasWithOverhead
+			}
+		}
+
+		return (func(costData RollupCostData) (calldataGasUsed *big.Int) {
+			estimatedSize := costData.estimatedDASizeScaled()
+			calldataGasUsed = new(big.Int).Mul(estimatedSize, new(big.Int).SetUint64(params.TxDataNonZeroGasEIP2028))
+			calldataGasUsed.Div(calldataGasUsed, big.NewInt(1e6))
+			return calldataGasUsed
+		})
+	}
+
+	return func(rollupCostData RollupCostData, blockTime uint64) *big.Int {
+		if rollupCostData == (RollupCostData{}) {
+			return nil // Do not charge if there is no rollup cost-data (e.g. RPC call or deposit).
+		}
+		if forBlock != blockTime {
+			if forBlock != ^uint64(0) {
+				// best practice is not to re-use l1 cost funcs across different blocks, but we
+				// make it work just in case.
+				log.Info("l1 cost func re-used for different L1 block", "oldTime", forBlock, "newTime", blockTime)
+			}
+			forBlock = blockTime
+			cachedFunc = selectFunc(blockTime)
+		}
+		gasUsed := cachedFunc(rollupCostData)
+		return gasUsed
+	}
+}
+
 func NewL1CostFuncFjord(l1BaseFee, l1BlobBaseFee, baseFeeScalar, blobFeeScalar, tokenRatio *big.Int) l1CostFuncArisa {
 	return func(costData RollupCostData) (fee, calldataGasUsed *big.Int) {
 		// Fjord L1 cost function:
@@ -265,13 +337,17 @@ func NewL1CostFuncFjord(l1BaseFee, l1BlobBaseFee, baseFeeScalar, blobFeeScalar, 
 		blobCostPerByte := new(big.Int).Mul(blobFeeScalar, l1BlobBaseFee)
 		l1FeeScaled := new(big.Int).Add(calldataCostPerByte, blobCostPerByte)
 		estimatedSize := costData.estimatedDASizeScaled()
+		// log.Info("estimatedSize", "estimatedSize", estimatedSize.String())
 		l1CostScaled := new(big.Int).Mul(estimatedSize, l1FeeScaled)
+		// log.Info("l1CostScaled", "l1CostScaled", l1CostScaled.String())
 		l1Cost := new(big.Int).Div(l1CostScaled, fjordDivisor)
+		// log.Info("l1Cost", "l1Cost", l1Cost.String())
 		l1Cost = new(big.Int).Mul(l1Cost, tokenRatio)
-		l1Cost = new(big.Int).Div(l1Cost, Decimals)
+		// log.Info("l1Cost after tokenRatio", "l1Cost", l1Cost.String())
 
 		calldataGasUsed = new(big.Int).Mul(estimatedSize, new(big.Int).SetUint64(params.TxDataNonZeroGasEIP2028))
 		calldataGasUsed.Div(calldataGasUsed, big.NewInt(1e6))
+		// log.Info("calldataGasUsed", "calldataGasUsed", calldataGasUsed.String(), "l1cost0000", l1Cost.String())
 
 		return l1Cost, calldataGasUsed
 	}
@@ -376,7 +452,6 @@ func newOperatorCostFunc(operatorFeeScalar *big.Int, operatorFeeConstant *big.In
 		fee = fee.Mul(fee, operatorFeeScalar)
 		fee = fee.Div(fee, oneMillion)
 		fee = fee.Add(fee, operatorFeeConstant)
-
 		feeU256, overflow := uint256.FromBig(fee)
 		if overflow {
 			// This should never happen, as (u64.max * u32.max / 1e6) + u64.max is an int of bit length 77

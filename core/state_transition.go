@@ -365,8 +365,9 @@ func (st *stateTransition) buyGas(metaTxV3 bool) (*big.Int, error) {
 		st.CalculateRollupCostDataFromMessage()
 	}
 	if st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) {
-		if st.evm.Context.L1CostFuncAresia != nil {
-			l1Cost = st.evm.Context.L1CostFuncAresia(st.msg.RollupCostData, st.evm.Context.Time)
+		// l1cost means l1cost + operator cost
+		if st.evm.Context.L1CostFuncArsia != nil {
+			l1Cost = st.evm.Context.L1CostFuncArsia(st.msg.RollupCostData, st.evm.Context.Time)
 		}
 		if st.evm.Context.OperatorCostFunc != nil {
 			operatorCost := st.evm.Context.OperatorCostFunc(st.msg.GasLimit, st.evm.Context.Time)
@@ -705,6 +706,7 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 
 	// Check clauses 1-3, buy gas if everything is correct
 	tokenRatio := st.state.GetState(types.GasOracleAddr, types.TokenRatioSlot).Big().Uint64()
+	// for arsia, l1cost means l1cost + operator cost
 	l1Cost, err := st.preCheck(rules.IsMetaTxV3)
 	if err != nil {
 		return nil, err
@@ -920,13 +922,19 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 			return nil, fmt.Errorf("base fee value exceeds uint256: %d", feeU256)
 		}
 		st.state.AddBalance(params.OptimismBaseFeeRecipient, feeU256, tracing.BalanceIncreaseRewardTransactionFee)
-		//if cost := st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupDataGas, st.msg.IsDepositTx); cost != nil {
-		//	st.state.AddBalance(params.OptimismL1FeeRecipient, cost)
-		//}
 		if st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) {
+			if l1Cost := st.evm.Context.L1CostFuncArsia(st.msg.RollupCostData, st.evm.Context.Time); l1Cost != nil {
+				amtU256, overflow := uint256.FromBig(l1Cost)
+				if overflow {
+					return nil, fmt.Errorf("optimism l1 cost overflows U256: %d", l1Cost)
+				}
+				// log.Info("l1Cost111222", "l1Cost", l1Cost.String(), "amtU256", amtU256.String())
+				st.state.AddBalance(params.OptimismL1FeeRecipient, amtU256, tracing.BalanceIncreaseRewardTransactionFee)
+			}
 			// Operator Fee refunds are only applied if Isthmus is active and the transaction is *not* a deposit.
 			st.refundOperatorCost()
 			operatorFeeCost := st.evm.Context.OperatorCostFunc(st.gasUsed(), st.evm.Context.Time)
+			// log.Info("operatorFeeCost111", "operatorFeeCost", operatorFeeCost.String(), "st.gasUsed()", st.gasUsed())
 			st.state.AddBalance(params.OptimismOperatorFeeRecipient, operatorFeeCost, tracing.BalanceIncreaseRewardTransactionFee)
 		}
 	}

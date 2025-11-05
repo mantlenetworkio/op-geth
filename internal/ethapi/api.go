@@ -835,7 +835,7 @@ func doCall(ctx context.Context, b Backend, args TransactionArgs, state *state.S
 	} else {
 		gp.AddGas(globalGasCap)
 	}
-	return applyMessage(ctx, b, args, state, header, timeout, gp, &blockCtx, &vm.Config{NoBaseFee: true}, precompiles,runMode)
+	return applyMessage(ctx, b, args, state, header, timeout, gp, &blockCtx, &vm.Config{NoBaseFee: true}, precompiles, runMode)
 }
 
 func applyMessage(ctx context.Context, b Backend, args TransactionArgs, state *state.StateDB, header *types.Header, timeout time.Duration, gp *core.GasPool, blockContext *vm.BlockContext, vmConfig *vm.Config, precompiles vm.PrecompiledContracts, runMode core.RunMode) (*core.ExecutionResult, error) {
@@ -1775,7 +1775,9 @@ func MarshalReceipt(receipt *types.Receipt, blockHash common.Hash, blockNumber u
 		fields["l1GasPrice"] = (*hexutil.Big)(receipt.L1GasPrice)
 		fields["l1GasUsed"] = (*hexutil.Big)(receipt.L1GasUsed)
 		fields["l1Fee"] = (*hexutil.Big)(receipt.L1Fee)
-		fields["l1FeeScalar"] = receipt.FeeScalar.String()
+		if receipt.FeeScalar != nil {
+			fields["l1FeeScalar"] = receipt.FeeScalar.String()
+		}
 		if receipt.TokenRatio != nil {
 			fields["tokenRatio"] = (*hexutil.Big)(receipt.TokenRatio)
 		}
