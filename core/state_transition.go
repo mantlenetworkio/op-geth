@@ -358,7 +358,6 @@ func (st *stateTransition) buyGas(metaTxV3 bool) (*big.Int, error) {
 
 	mgval := new(big.Int).SetUint64(st.msg.GasLimit)
 	mgval.Mul(mgval, st.msg.GasPrice)
-	// log.Info("mgval", "mgval", mgval.String())
 
 	var l1Cost *big.Int
 	if st.msg.RunMode == GasEstimationMode || st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode {
@@ -378,7 +377,6 @@ func (st *stateTransition) buyGas(metaTxV3 bool) (*big.Int, error) {
 			}
 		}
 		// add l1 cost to mgval
-		// log.Info("l1Cost", "l1Cost", l1Cost.String())
 		if l1Cost != nil {
 			mgval = mgval.Add(mgval, l1Cost)
 		}
@@ -389,7 +387,6 @@ func (st *stateTransition) buyGas(metaTxV3 bool) (*big.Int, error) {
 	}
 
 	balanceCheck := new(big.Int).Set(mgval)
-	// log.Info("balanceCheck", "balanceCheck", balanceCheck.String())
 	if st.msg.GasFeeCap != nil {
 		balanceCheck.SetUint64(st.msg.GasLimit)
 		balanceCheck = balanceCheck.Mul(balanceCheck, st.msg.GasFeeCap)
@@ -400,7 +397,6 @@ func (st *stateTransition) buyGas(metaTxV3 bool) (*big.Int, error) {
 	}
 	balanceCheck.Add(balanceCheck, st.msg.Value)
 
-	// log.Info("balanceCheck2", "balanceCheck", balanceCheck.String())
 	if st.evm.ChainConfig().IsCancun(st.evm.Context.BlockNumber, st.evm.Context.Time) {
 		if blobGas := st.blobGasUsed(); blobGas > 0 {
 			// Check that the user has enough funds to cover blobGasUsed * tx.BlobGasFeeCap
@@ -455,7 +451,6 @@ func (st *stateTransition) buyGas(metaTxV3 bool) (*big.Int, error) {
 		}
 	}
 
-	log.Info("balanceCheck3", "balanceCheck", balanceCheck.String())
 	if err := st.gp.SubGas(st.msg.GasLimit); err != nil {
 		return nil, err
 	}
@@ -466,7 +461,6 @@ func (st *stateTransition) buyGas(metaTxV3 bool) (*big.Int, error) {
 	st.gasRemaining = st.msg.GasLimit
 
 	st.initialGas = st.msg.GasLimit
-	log.Info("balanceCheck4", "balanceCheck", balanceCheck.String())
 	if st.msg.RunMode != GasEstimationWithSkipCheckBalanceMode && st.msg.RunMode != EthcallMode {
 		if st.msg.MetaTxParams != nil {
 			sponsorAmount, selfPayAmount := types.CalculateSponsorPercentAmount(st.msg.MetaTxParams, mgval)
@@ -483,7 +477,6 @@ func (st *stateTransition) buyGas(metaTxV3 bool) (*big.Int, error) {
 			st.state.SubBalance(st.msg.From, mgvalU256, tracing.BalanceDecreaseGasBuy)
 		}
 	}
-	log.Info("balanceCheck5", "balanceCheck", balanceCheck.String())
 
 	return l1Cost, nil
 }

@@ -212,13 +212,9 @@ func NewL1CostFuncArsia(config *params.ChainConfig, statedb StateGetter) L1CostF
 		// point to allow deposit transactions from the block to be processed first by state
 		// transition.  This behavior is consensus critical!
 		l1FeeScalars := statedb.GetState(L1BlockAddr, L1FeeScalarsSlot).Bytes()
-		// log.Info("l1FeeScalars", "l1FeeScalars", l1FeeScalars)
 		l1BlobBaseFee := statedb.GetState(L1BlockAddr, L1BlobBaseFeeSlot).Big()
-		// log.Info("l1BlobBaseFee", "l1BlobBaseFee", l1BlobBaseFee)
 		l1BaseFee := statedb.GetState(L1BlockAddr, L1BaseFeeSlot).Big()
-		// log.Info("l1BaseFee", "l1BaseFee", l1BaseFee)
 		tokenRatio := statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
-		// log.Info("tokenRatio", "tokenRatio", tokenRatio)
 
 		// Edge case: the very first Ecotone block requires we use the Bedrock cost
 		// function. We detect this scenario by checking if the Ecotone parameters are
@@ -233,8 +229,6 @@ func NewL1CostFuncArsia(config *params.ChainConfig, statedb StateGetter) L1CostF
 		}
 
 		l1BaseFeeScalar, l1BlobBaseFeeScalar := ExtractEcotoneFeeParams(l1FeeScalars)
-		// log.Info("l1BaseFeeScalar", "l1BaseFeeScalar", l1BaseFeeScalar)
-		// log.Info("l1BlobBaseFeeScalar", "l1BlobBaseFeeScalar", l1BlobBaseFeeScalar)
 
 		return NewL1CostFuncFjord(
 			l1BaseFee,

@@ -1775,7 +1775,7 @@ func MarshalReceipt(receipt *types.Receipt, blockHash common.Hash, blockNumber u
 		fields["l1GasPrice"] = (*hexutil.Big)(receipt.L1GasPrice)
 		fields["l1GasUsed"] = (*hexutil.Big)(receipt.L1GasUsed)
 		fields["l1Fee"] = (*hexutil.Big)(receipt.L1Fee)
-		if receipt.FeeScalar != nil {
+		if receipt.FeeScalar != nil && receipt.FeeScalar.Cmp(big.NewFloat(0)) != 0 {
 			fields["l1FeeScalar"] = receipt.FeeScalar.String()
 		}
 		if receipt.TokenRatio != nil {
