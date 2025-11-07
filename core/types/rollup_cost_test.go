@@ -34,7 +34,6 @@ var (
 	// the emptyTx is out of bounds for the linear regression so it uses the minimum size
 
 	bedrockGas      = big.NewInt(1618)
-	arisaGas        = big.NewInt(480)
 	minimumArsiaGas = big.NewInt(1600) // fastlz size of minimum txn, 100_000_000 * 16 / 1e6
 )
 
