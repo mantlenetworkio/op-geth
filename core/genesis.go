@@ -343,6 +343,13 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 		cfg.PragueTime = mantleUpgradeChainConfig.MantleSkadiTime
 		// active standard EVM version (osaka)  in mantle limb time
 		cfg.OsakaTime = mantleUpgradeChainConfig.MantleLimbTime
+
+		if cfg.Optimism == nil {
+			cfg.Optimism = &params.OptimismConfig{
+				EIP1559Elasticity:  4,
+				EIP1559Denominator: 50,
+			}
+		}
 	}
 
 	return cfg.CheckConfigForkOrder()
