@@ -184,6 +184,7 @@ func (s *StateDB) DumpToCollector(c DumpCollector, conf *DumpConfig) (nextKey []
 				}
 				key := s.trie.GetKey(storageIt.Key)
 				if key == nil {
+					log.Error("Failed to get key from iterator", "key", common.Bytes2Hex(storageIt.Key))
 					continue
 				}
 				account.Storage[common.BytesToHash(key)] = common.Bytes2Hex(content)
