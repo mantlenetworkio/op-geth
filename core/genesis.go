@@ -327,24 +327,50 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 	// mantle
 	mantleUpgradeChainConfig := params.GetUpgradeConfigForMantle(cfg.ChainID)
 	if o.ApplyMantleUpgrades && mantleUpgradeChainConfig != nil {
-		cfg.BaseFeeTime = mantleUpgradeChainConfig.BaseFeeTime
-		cfg.BVMETHMintUpgradeTime = mantleUpgradeChainConfig.BVMETHMintUpgradeTime
-		cfg.MetaTxV2UpgradeTime = mantleUpgradeChainConfig.MetaTxV2UpgradeTime
-		cfg.MetaTxV3UpgradeTime = mantleUpgradeChainConfig.MetaTxV3UpgradeTime
-		cfg.ProxyOwnerUpgradeTime = mantleUpgradeChainConfig.ProxyOwnerUpgradeTime
-		cfg.MantleEverestTime = mantleUpgradeChainConfig.MantleEverestTime
-		cfg.MantleSkadiTime = mantleUpgradeChainConfig.MantleSkadiTime
-		cfg.MantleLimbTime = mantleUpgradeChainConfig.MantleLimbTime
-		cfg.MantleArsiaTime = mantleUpgradeChainConfig.MantleArsiaTime
+		if cfg.BaseFeeTime == nil {
+			cfg.BaseFeeTime = mantleUpgradeChainConfig.BaseFeeTime
+		}
+		if cfg.BVMETHMintUpgradeTime == nil {
+			cfg.BVMETHMintUpgradeTime = mantleUpgradeChainConfig.BVMETHMintUpgradeTime
+		}
+		if cfg.MetaTxV2UpgradeTime == nil {
+			cfg.MetaTxV2UpgradeTime = mantleUpgradeChainConfig.MetaTxV2UpgradeTime
+		}
+		if cfg.MetaTxV3UpgradeTime == nil {
+			cfg.MetaTxV3UpgradeTime = mantleUpgradeChainConfig.MetaTxV3UpgradeTime
+		}
+		if cfg.ProxyOwnerUpgradeTime == nil {
+			cfg.ProxyOwnerUpgradeTime = mantleUpgradeChainConfig.ProxyOwnerUpgradeTime
+		}
+		if cfg.MantleEverestTime == nil {
+			cfg.MantleEverestTime = mantleUpgradeChainConfig.MantleEverestTime
+		}
+		if cfg.MantleSkadiTime == nil {
+			cfg.MantleSkadiTime = mantleUpgradeChainConfig.MantleSkadiTime
+		}
+		if cfg.MantleLimbTime == nil {
+			cfg.MantleLimbTime = mantleUpgradeChainConfig.MantleLimbTime
+		}
+		if cfg.MantleArsiaTime == nil {
+			cfg.MantleArsiaTime = mantleUpgradeChainConfig.MantleArsiaTime
+		}
 
 		// active standard EVM version (shanghai/cancun/prague)  in mantle skadi time
-		cfg.ShanghaiTime = mantleUpgradeChainConfig.MantleSkadiTime
-		cfg.CancunTime = mantleUpgradeChainConfig.MantleSkadiTime
-		cfg.PragueTime = mantleUpgradeChainConfig.MantleSkadiTime
+		if cfg.ShanghaiTime == nil {
+			cfg.ShanghaiTime = mantleUpgradeChainConfig.MantleSkadiTime
+		}
+		if cfg.CancunTime == nil {
+			cfg.CancunTime = mantleUpgradeChainConfig.MantleSkadiTime
+		}
+		if cfg.PragueTime == nil {
+			cfg.PragueTime = mantleUpgradeChainConfig.MantleSkadiTime
+		}
 		// active standard EVM version (osaka)  in mantle limb time
-		cfg.OsakaTime = mantleUpgradeChainConfig.MantleLimbTime
+		if cfg.OsakaTime == nil {
+			cfg.OsakaTime = mantleUpgradeChainConfig.MantleLimbTime
+		}
 
-		if cfg.Optimism == nil {
+		if cfg.MantleArsiaTime != nil && cfg.Optimism == nil {
 			cfg.Optimism = &params.OptimismConfig{
 				EIP1559Elasticity:  4,
 				EIP1559Denominator: 50,
