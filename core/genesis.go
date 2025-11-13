@@ -344,7 +344,7 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 		// active standard EVM version (osaka)  in mantle limb time
 		cfg.OsakaTime = mantleUpgradeChainConfig.MantleLimbTime
 
-		if cfg.Optimism == nil {
+		if cfg.MantleArsiaTime != nil {
 			cfg.Optimism = &params.OptimismConfig{
 				EIP1559Elasticity:  4,
 				EIP1559Denominator: 50,
