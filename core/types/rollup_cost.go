@@ -56,7 +56,7 @@ var (
 	MinTransactionSizeScaled = new(big.Int).Mul(MinTransactionSize, big.NewInt(1e6))
 
 	emptyScalars = make([]byte, 8)
-	oneMillion   = big.NewInt(1_000_000)
+	oneHundred   = big.NewInt(100)
 )
 
 type RollupCostData struct {
@@ -444,7 +444,7 @@ func newOperatorCostFunc(operatorFeeScalar *big.Int, operatorFeeConstant *big.In
 	return func(gas uint64) *uint256.Int {
 		fee := new(big.Int).SetUint64(gas)
 		fee = fee.Mul(fee, operatorFeeScalar)
-		fee = fee.Div(fee, oneMillion)
+		fee = fee.Mul(fee, oneHundred)
 		fee = fee.Add(fee, operatorFeeConstant)
 		feeU256, overflow := uint256.FromBig(fee)
 		if overflow {
