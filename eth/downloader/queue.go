@@ -130,6 +130,7 @@ func (f *fetchResult) Done(kind uint) bool {
 
 type OPStackChainConfig interface {
 	IsOptimismWithSkadi(time uint64) bool
+	IsMantleArsia(time uint64) bool
 }
 
 // queue represents hashes that are either need fetching or are being fetched
@@ -625,7 +626,8 @@ func (q *queue) DeliverBodies(id string, txLists [][]*types.Transaction, txListH
 				}
 			}
 		}
-		if header.BlobGasUsed != nil {
+		isMantleArsia := q.opConfig != nil && q.opConfig.IsMantleArsia(header.Time)
+		if header.BlobGasUsed != nil && !isMantleArsia {
 			if want := *header.BlobGasUsed / params.BlobTxBlobGasPerBlob; uint64(blobs) != want { // div because the header is surely good vs the body might be bloated
 				return errInvalidBody
 			}

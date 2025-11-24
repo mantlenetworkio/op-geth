@@ -1797,6 +1797,12 @@ func MarshalReceipt(receipt *types.Receipt, blockHash common.Hash, blockNumber u
 		if receipt.OperatorFeeConstant != nil {
 			fields["operatorFeeConstant"] = hexutil.Uint64(*receipt.OperatorFeeConstant)
 		}
+		// Fields added in Jovian
+		if receipt.DAFootprintGasScalar != nil {
+			fields["daFootprintGasScalar"] = hexutil.Uint64(*receipt.DAFootprintGasScalar)
+			// Jovian repurposes blobGasUsed for DA footprint gas used
+			fields["blobGasUsed"] = hexutil.Uint64(receipt.BlobGasUsed)
+		}
 	}
 	if chainConfig.Optimism != nil && tx.IsDepositTx() && receipt.DepositNonce != nil {
 		fields["depositNonce"] = hexutil.Uint64(*receipt.DepositNonce)
