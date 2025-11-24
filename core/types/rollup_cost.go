@@ -30,7 +30,7 @@ import (
 )
 
 var (
-	JovianL1AttributesSelector = []byte{0x3d, 0xb6, 0xbe, 0x2b}
+	MantleArsiaL1AttributesSelector = []byte{0x49, 0xe7, 0x23, 0x83}
 
 	L1BaseFeeSlot = common.BigToHash(big.NewInt(1))
 	OverheadSlot  = common.BigToHash(big.NewInt(5))
@@ -526,8 +526,8 @@ func ExtractDAFootprintGasScalar(data []byte) (uint16, error) {
 		return 0, fmt.Errorf("L1 attributes transaction data too short for DA footprint gas scalar: %d", len(data))
 	}
 	// Future forks need to be added here
-	if !bytes.Equal(data[0:4], JovianL1AttributesSelector) {
-		return 0, fmt.Errorf("L1 attributes transaction data does not have Jovian selector")
+	if !bytes.Equal(data[0:4], MantleArsiaL1AttributesSelector) {
+		return 0, fmt.Errorf("L1 attributes transaction data does not have Arsia selector")
 	}
 	daFootprintGasScalar := binary.BigEndian.Uint16(data[JovianL1AttributesLen-2 : JovianL1AttributesLen])
 	return daFootprintGasScalar, nil
