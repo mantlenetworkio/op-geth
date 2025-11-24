@@ -116,6 +116,23 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 		}
 	}
 
+	// OP Stack Jovian DA footprint block limit.
+	if v.config.IsMantleArsia(header.Time) {
+		if header.BlobGasUsed == nil {
+			return errors.New("nil blob gas used in post-Jovian block header, should store DA footprint")
+		}
+		blobGasUsed := *header.BlobGasUsed
+		daFootprint, err := types.CalcDAFootprint(block.Transactions())
+		if err != nil {
+			return fmt.Errorf("failed to calculate DA footprint: %w", err)
+		} else if blobGasUsed != daFootprint {
+			return fmt.Errorf("invalid DA footprint in blobGasUsed field (remote: %d local: %d)", blobGasUsed, daFootprint)
+		}
+		if daFootprint > block.GasLimit() {
+			return fmt.Errorf("DA footprint %d exceeds block gas limit %d", daFootprint, block.GasLimit())
+		}
+	}
+
 	// Ancestor block must be known.
 	if !v.bc.HasBlockAndState(block.ParentHash(), block.NumberU64()-1) {
 		if !v.bc.HasBlock(block.ParentHash(), block.NumberU64()-1) {

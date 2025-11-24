@@ -78,8 +78,18 @@ func CalcBaseFee(config *params.ChainConfig, parent *types.Header) *big.Int {
 	}
 
 	parentGasTarget := parent.GasLimit / elasticity
-	// If the parent gasUsed is the same as the target, the baseFee remains unchanged.
-	if parent.GasUsed == parentGasTarget {
+	parentGasMetered := parent.GasUsed
+	if config.IsMantleArsia(parent.Time) {
+		if parent.BlobGasUsed == nil {
+			panic("Jovian parent block has nil BlobGasUsed")
+		} else if *parent.BlobGasUsed > parent.GasUsed {
+			// Jovian updates the base fee based on the maximum of total transactions gas used and total DA footprint (which is
+			// stored in the BlobGasUsed field of the header).
+			parentGasMetered = *parent.BlobGasUsed
+		}
+	}
+	// If the parent gasMetered is the same as the target, the baseFee remains unchanged.
+	if parentGasMetered == parentGasTarget {
 		baseFee = new(big.Int).Set(parent.BaseFee)
 	} else {
 		var (
@@ -87,10 +97,10 @@ func CalcBaseFee(config *params.ChainConfig, parent *types.Header) *big.Int {
 			denom = new(big.Int)
 		)
 
-		if parent.GasUsed > parentGasTarget {
+		if parentGasMetered > parentGasTarget {
 			// If the parent block used more gas than its target, the baseFee should increase.
 			// max(1, parentBaseFee * gasUsedDelta / parentGasTarget / baseFeeChangeDenominator)
-			num.SetUint64(parent.GasUsed - parentGasTarget)
+			num.SetUint64(parentGasMetered - parentGasTarget)
 			num.Mul(num, parent.BaseFee)
 			num.Div(num, denom.SetUint64(parentGasTarget))
 			num.Div(num, denom.SetUint64(denominator))
@@ -103,7 +113,7 @@ func CalcBaseFee(config *params.ChainConfig, parent *types.Header) *big.Int {
 		} else {
 			// Otherwise if the parent block used less gas than its target, the baseFee should decrease.
 			// max(0, parentBaseFee * gasUsedDelta / parentGasTarget / baseFeeChangeDenominator)
-			num.SetUint64(parentGasTarget - parent.GasUsed)
+			num.SetUint64(parentGasTarget - parentGasMetered)
 			num.Mul(num, parent.BaseFee)
 			num.Div(num, denom.SetUint64(parentGasTarget))
 			num.Div(num, denom.SetUint64(denominator))

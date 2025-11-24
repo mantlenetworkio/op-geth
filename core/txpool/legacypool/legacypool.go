@@ -551,9 +551,23 @@ func (pool *LegacyPool) pendingWithFilter(filter txpool.PendingFilter) map[commo
 				}
 			}
 		}
+		// OP-Stack addition: exclude by max-da-size filter
+		if filter.MaxDATxSize != nil {
+			for i, tx := range txs {
+				estimate := tx.RollupCostData().EstimatedDASize()
+				if estimate.Cmp(filter.MaxDATxSize) > 0 {
+					log.Debug("filtering tx that exceeds max da tx size",
+						"hash", tx.Hash(), "txda", estimate, "dalimit", filter.MaxDATxSize)
+					txs = txs[:i]
+					break
+				}
+			}
+		}
+
 		if len(txs) > 0 {
 			lazies := make([]*txpool.LazyTransaction, len(txs))
 			for i := 0; i < len(txs); i++ {
+				daBytes := txs[i].RollupCostData().EstimatedDASize()
 				lazies[i] = &txpool.LazyTransaction{
 					Pool:      pool,
 					Hash:      txs[i].Hash(),
@@ -563,6 +577,7 @@ func (pool *LegacyPool) pendingWithFilter(filter txpool.PendingFilter) map[commo
 					GasTipCap: uint256.MustFromBig(txs[i].GasTipCap()),
 					Gas:       txs[i].Gas(),
 					BlobGas:   txs[i].BlobGas(),
+					DABytes:   daBytes,
 				}
 			}
 			pending[addr] = lazies
@@ -609,7 +624,7 @@ func (pool *LegacyPool) validateTx(tx *types.Transaction) error {
 			if list := pool.pending[addr]; list != nil {
 				if tx := list.txs.Get(nonce); tx != nil {
 					cost := tx.Cost()
-					if(pool.chainconfig.IsMantleArsia(pool.currentHead.Load().Time)) {
+					if pool.chainconfig.IsMantleArsia(pool.currentHead.Load().Time) {
 						if l1Cost := pool.rollupCostFn(tx); l1Cost != nil {
 							cost = cost.Add(cost, l1Cost.ToBig())
 						}
@@ -626,7 +641,7 @@ func (pool *LegacyPool) validateTx(tx *types.Transaction) error {
 			return nil
 		},
 		RollupCostFn: pool.rollupCostFn,
-		L1CostFn: pool.l1CostFn,
+		L1CostFn:     pool.l1CostFn,
 	}
 	if err := txpool.ValidateTransactionWithState(tx, pool.currentHead.Load(), pool.signer, opts); err != nil {
 		return err
@@ -1485,7 +1500,7 @@ func (pool *LegacyPool) reset(oldHead, newHead *types.Header) {
 	pool.currentState = statedb
 	pool.pendingNonces = newNoncer(statedb)
 
-	if(pool.chainconfig.IsMantleArsia(newHead.Time)) {
+	if pool.chainconfig.IsMantleArsia(newHead.Time) {
 		if costFn := types.NewTotalRollupCostFunc(pool.chainconfig, statedb); costFn != nil {
 			pool.rollupCostFn = func(tx types.RollupTransaction) *uint256.Int {
 				return costFn(tx, newHead.Time)
@@ -1498,8 +1513,6 @@ func (pool *LegacyPool) reset(oldHead, newHead *types.Header) {
 			}
 		}
 	}
-
-
 
 	// Inject any transactions discarded due to reorgs
 	log.Debug("Reinjecting stale transactions", "count", len(reinject))

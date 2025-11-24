@@ -33,8 +33,14 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/eth/tracers"
 	"github.com/ethereum/go-ethereum/event"
+	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/preconf"
+)
+
+var (
+	maxDATxSizeGauge    = metrics.NewRegisteredGauge("miner/maxDATxSize", nil)
+	maxDABlockSizeGauge = metrics.NewRegisteredGauge("miner/maxDABlockSize", nil)
 )
 
 // Backend wraps all methods required for mining. Only full node is capable
@@ -61,6 +67,9 @@ type Config struct {
 
 	EffectiveGasCeil uint64 // if non-zero, a gas ceiling to apply independent of the header's gaslimit value
 	PreconfConfig    *preconf.MinerConfig
+
+	MaxDATxSize    *big.Int `toml:",omitempty"` // if non-nil, don't include any txs with data availability size larger than this in any built block
+	MaxDABlockSize *big.Int `toml:",omitempty"` // if non-nil, then don't build a block requiring more than this amount of total data availability
 }
 
 // DefaultConfig contains default settings for miner.
@@ -212,4 +221,28 @@ func (miner *Miner) getPending() *newPayloadResult {
 	}
 	miner.pending.update(header.Hash(), ret)
 	return ret
+}
+
+// SetMaxDASize sets the maximum data availability size currently allowed for inclusion. 0 means no maximum.
+func (miner *Miner) SetMaxDASize(maxTxSize, maxBlockSize *big.Int) {
+	convertZeroToNil := func(v *big.Int) *big.Int {
+		if v != nil && v.BitLen() == 0 {
+			return nil
+		}
+		return v
+	}
+	convertNilToZero := func(v *big.Int) int64 {
+		if v == nil {
+			return 0
+		}
+		return v.Int64()
+	}
+
+	miner.confMu.Lock()
+	miner.config.MaxDATxSize = convertZeroToNil(maxTxSize)
+	miner.config.MaxDABlockSize = convertZeroToNil(maxBlockSize)
+	miner.confMu.Unlock()
+
+	maxDATxSizeGauge.Update(convertNilToZero(maxTxSize))
+	maxDABlockSizeGauge.Update(convertNilToZero(maxBlockSize))
 }

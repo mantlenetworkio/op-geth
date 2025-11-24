@@ -56,6 +56,9 @@ type environment struct {
 	coinbase common.Address
 	evm      *vm.EVM
 
+	// OP-Stack addition: DA footprint block limit
+	daFootprintGasScalar uint16
+
 	header   *types.Header
 	txs      []*types.Transaction
 	receipts []*types.Receipt
@@ -369,6 +372,17 @@ func (miner *Miner) prepareWork(genParams *generateParams, witness bool) (*envir
 	if miner.chainConfig.IsPrague(header.Number, header.Time) {
 		core.ProcessParentBlockHash(header.ParentHash, env.evm)
 	}
+
+	if miner.chainConfig.IsMantleArsia(header.Time) {
+		if len(genParams.txs) == 0 || !genParams.txs[0].IsDepositTx() {
+			return nil, errors.New("missing L1 attributes deposit transaction")
+		}
+		env.daFootprintGasScalar, err = types.ExtractDAFootprintGasScalar(genParams.txs[0].Data())
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return env, nil
 }
 
@@ -473,6 +487,12 @@ func (miner *Miner) commitTransactions(env *environment, plainTxs, blobTxs *tran
 	if env.gasPool == nil {
 		env.gasPool = new(core.GasPool).AddGas(gasLimit)
 	}
+
+	// OP-Stack additions: throttling and DA footprint limit
+	blockDABytes := new(big.Int)
+	isMantleArsia := miner.chainConfig.IsMantleArsia(env.header.Time)
+	minTransactionDAFootprint := types.MinTransactionSize.Uint64() * uint64(env.daFootprintGasScalar)
+
 	for {
 		// Check interruption signal and abort building if it's fired.
 		if interrupt != nil {
@@ -485,6 +505,17 @@ func (miner *Miner) commitTransactions(env *environment, plainTxs, blobTxs *tran
 			log.Trace("Not enough gas for further transactions", "have", env.gasPool, "want", params.TxGas)
 			break
 		}
+
+		var daFootprintLeft uint64
+		if isMantleArsia {
+			daFootprintLeft = gasLimit - *env.header.BlobGasUsed
+			// If we don't have enough DA space for any further transactions then we're done.
+			if daFootprintLeft < minTransactionDAFootprint {
+				log.Debug("Not enough DA space for further transactions", "have", daFootprintLeft, "want", minTransactionDAFootprint)
+				break
+			}
+		}
+
 		// If we don't have enough blob space for any further blob transactions,
 		// skip that list altogether
 		if !blobTxs.Empty() && env.blobs >= eip4844.MaxBlobsPerBlock(miner.chainConfig, env.header.Time) {
@@ -534,6 +565,37 @@ func (miner *Miner) commitTransactions(env *environment, plainTxs, blobTxs *tran
 			}
 		}
 
+		// OP-Stack addition: Jovian DA footprint limit
+		var txDAFootprint uint64
+		// Note that commitTransaction is only called after deposit transactions have already been committed,
+		// so we don't need to resolve the transaction here and exclude deposits.
+		if isMantleArsia {
+			txDAFootprint = ltx.DABytes.Uint64() * uint64(env.daFootprintGasScalar)
+			if daFootprintLeft < txDAFootprint {
+				log.Debug("Not enough DA space left for transaction", "hash", ltx.Hash, "left", daFootprintLeft, "needed", txDAFootprint)
+				txs.Pop()
+				continue
+			}
+		}
+
+		// OP-Stack addition: sequencer throttling
+		daBytesAfter := new(big.Int)
+		if ltx.DABytes != nil && miner.config.MaxDABlockSize != nil {
+			daBytesAfter.Add(blockDABytes, ltx.DABytes)
+			if daBytesAfter.Cmp(miner.config.MaxDABlockSize) > 0 {
+				log.Debug("adding tx would exceed block DA size limit",
+					"hash", ltx.Hash, "txda", ltx.DABytes, "blockda", blockDABytes, "dalimit", miner.config.MaxDABlockSize)
+				txs.Pop()
+				// If the number of remaining bytes is too few to hold even the minimum possible transaction size,
+				// then we can stop early.
+				daBytesRemaining := new(big.Int).Sub(miner.config.MaxDABlockSize, daBytesAfter)
+				if daBytesRemaining.Cmp(types.MinTransactionSize) < 0 {
+					break
+				}
+				continue
+			}
+		}
+
 		// Transaction seems to fit, pull it up from the pool
 		tx := ltx.Resolve()
 		if tx == nil {
@@ -570,6 +632,10 @@ func (miner *Miner) commitTransactions(env *environment, plainTxs, blobTxs *tran
 
 		case errors.Is(err, nil):
 			// Everything ok, collect the logs and shift in the next transaction from the same account
+			blockDABytes = daBytesAfter
+			if isMantleArsia {
+				*env.header.BlobGasUsed += txDAFootprint
+			}
 			txs.Shift()
 
 		default:
@@ -598,7 +664,8 @@ func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *environment) 
 
 	// Retrieve the pending transactions pre-filtered by the 1559/4844 dynamic fees
 	filter := txpool.PendingFilter{
-		MinTip: uint256.MustFromBig(tip),
+		MinTip:      uint256.MustFromBig(tip),
+		MaxDATxSize: miner.config.MaxDATxSize,
 	}
 	if env.header.BaseFee != nil {
 		filter.BaseFee = uint256.MustFromBig(env.header.BaseFee)
