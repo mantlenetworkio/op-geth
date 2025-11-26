@@ -46,7 +46,7 @@ var (
 		ProxyOwnerUpgradeTime: nil,
 		MantleEverestTime:     u64Ptr(0),
 		MantleSkadiTime:       u64Ptr(1_749_798_000),
-		MantleLimbTime:        nil,
+		MantleLimbTime:        u64Ptr(1_762_412_400),
 		MantleArsiaTime:       nil,
 	}
 	MantleLocalUpgradeConfig = MantleUpgradeChainConfig{
