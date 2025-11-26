@@ -7,8 +7,6 @@ import (
 	"github.com/ethereum/go-ethereum/beacon/engine"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/log"
-
-	// "github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -31,11 +29,6 @@ func checkOptimismPayload(params engine.ExecutableData, cfg *params.ChainConfig)
 
 	return nil
 }
-
-// var (
-// 	requiredProtocolDeltaGauge    = metrics.NewRegisteredGauge("superchain/required/delta", nil)
-// 	recommendedProtocolDeltaGauge = metrics.NewRegisteredGauge("superchain/recommended/delta", nil)
-// )
 
 type SuperchainSignal struct {
 	Recommended params.ProtocolVersion `json:"recommended"`

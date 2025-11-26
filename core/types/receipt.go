@@ -146,16 +146,17 @@ type storedReceiptRLP struct {
 	DepositNonce *uint64 `rlp:"optional"`
 
 	// used to record calculating l1 fee for txs from Layer2
-	L1GasUsed           *big.Int `rlp:"optional"`
-	L1GasPrice          *big.Int `rlp:"optional"`
-	L1Fee               *big.Int `rlp:"optional"`
-	L1BlobBaseFee       *big.Int `rlp:"optional"`
-	L1BaseFeeScalar     *uint64  `rlp:"optional"`
-	L1BlobBaseFeeScalar *uint64  `rlp:"optional"`
-	OperatorFeeScalar   *uint64  `rlp:"optional"`
-	OperatorFeeConstant *uint64  `rlp:"optional"`
-	FeeScalar           string   `rlp:"optional"`
-	TokenRatio          *big.Int `rlp:"optional"`
+	L1GasUsed            *big.Int `rlp:"optional"`
+	L1GasPrice           *big.Int `rlp:"optional"`
+	L1Fee                *big.Int `rlp:"optional"`
+	L1BlobBaseFee        *big.Int `rlp:"optional"`
+	L1BaseFeeScalar      *uint64  `rlp:"optional"`
+	L1BlobBaseFeeScalar  *uint64  `rlp:"optional"`
+	OperatorFeeScalar    *uint64  `rlp:"optional"`
+	OperatorFeeConstant  *uint64  `rlp:"optional"`
+	FeeScalar            string   `rlp:"optional"`
+	TokenRatio           *big.Int `rlp:"optional"`
+	DAFootprintGasScalar *uint64  `rlp:"optional"`
 }
 
 // LegacyOptimismStoredReceiptRLP is the pre bedrock storage encoding of a
@@ -474,20 +475,21 @@ func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 		feeScalar = r.FeeScalar.String()
 	}
 	enc := &storedReceiptRLP{
-		PostStateOrStatus:   (*Receipt)(r).statusEncoding(),
-		CumulativeGasUsed:   r.CumulativeGasUsed,
-		Logs:                make([]*LogForStorage, len(r.Logs)),
-		DepositNonce:        r.DepositNonce,
-		L1GasUsed:           r.L1GasUsed,
-		L1GasPrice:          r.L1GasPrice,
-		L1Fee:               r.L1Fee,
-		FeeScalar:           feeScalar,
-		L1BlobBaseFee:       r.L1BlobBaseFee,
-		L1BaseFeeScalar:     r.L1BaseFeeScalar,
-		L1BlobBaseFeeScalar: r.L1BlobBaseFeeScalar,
-		OperatorFeeScalar:   r.OperatorFeeScalar,
-		OperatorFeeConstant: r.OperatorFeeConstant,
-		TokenRatio:          r.TokenRatio,
+		PostStateOrStatus:    (*Receipt)(r).statusEncoding(),
+		CumulativeGasUsed:    r.CumulativeGasUsed,
+		Logs:                 make([]*LogForStorage, len(r.Logs)),
+		DepositNonce:         r.DepositNonce,
+		L1GasUsed:            r.L1GasUsed,
+		L1GasPrice:           r.L1GasPrice,
+		L1Fee:                r.L1Fee,
+		FeeScalar:            feeScalar,
+		L1BlobBaseFee:        r.L1BlobBaseFee,
+		L1BaseFeeScalar:      r.L1BaseFeeScalar,
+		L1BlobBaseFeeScalar:  r.L1BlobBaseFeeScalar,
+		OperatorFeeScalar:    r.OperatorFeeScalar,
+		OperatorFeeConstant:  r.OperatorFeeConstant,
+		TokenRatio:           r.TokenRatio,
+		DAFootprintGasScalar: r.DAFootprintGasScalar,
 	}
 
 	for i, log := range r.Logs {
@@ -579,6 +581,7 @@ func decodeStoredReceiptRLP(r *ReceiptForStorage, blob []byte) error {
 	r.L1BlobBaseFeeScalar = stored.L1BlobBaseFeeScalar
 	r.OperatorFeeScalar = stored.OperatorFeeScalar
 	r.OperatorFeeConstant = stored.OperatorFeeConstant
+	r.DAFootprintGasScalar = stored.DAFootprintGasScalar
 	return nil
 }
 

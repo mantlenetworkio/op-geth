@@ -35,12 +35,6 @@ var (
 	HoodiGenesisHash   = common.HexToHash("0xbbe312868b376a3001692a646dd2d7d1e4406380dfd86b98aa8a34d1557c971b")
 )
 
-// const (
-// 	OPMainnetChainID   = 10
-// 	BaseMainnetChainID = 8453
-// 	baseSepoliaChainID = 84532
-// )
-
 func newUint64(val uint64) *uint64 { return &val }
 
 var (

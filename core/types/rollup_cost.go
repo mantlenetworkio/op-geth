@@ -339,17 +339,12 @@ func NewL1CostFuncFjord(l1BaseFee, l1BlobBaseFee, baseFeeScalar, blobFeeScalar, 
 		blobCostPerByte := new(big.Int).Mul(blobFeeScalar, l1BlobBaseFee)
 		l1FeeScaled := new(big.Int).Add(calldataCostPerByte, blobCostPerByte)
 		estimatedSize := costData.estimatedDASizeScaled()
-		// log.Info("estimatedSize", "estimatedSize", estimatedSize.String())
 		l1CostScaled := new(big.Int).Mul(estimatedSize, l1FeeScaled)
-		// log.Info("l1CostScaled", "l1CostScaled", l1CostScaled.String())
 		l1Cost := new(big.Int).Div(l1CostScaled, fjordDivisor)
-		// log.Info("l1Cost", "l1Cost", l1Cost.String())
 		l1Cost = new(big.Int).Mul(l1Cost, tokenRatio)
-		// log.Info("l1Cost after tokenRatio", "l1Cost", l1Cost.String())
 
 		calldataGasUsed = new(big.Int).Mul(estimatedSize, new(big.Int).SetUint64(params.TxDataNonZeroGasEIP2028))
 		calldataGasUsed.Div(calldataGasUsed, big.NewInt(1e6))
-		// log.Info("calldataGasUsed", "calldataGasUsed", calldataGasUsed.String(), "l1cost0000", l1Cost.String())
 
 		return l1Cost, calldataGasUsed
 	}

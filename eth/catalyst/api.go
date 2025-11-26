@@ -528,8 +528,6 @@ func (api *ConsensusAPI) GetBlobsV1(hashes []common.Hash) ([]*engine.BlobAndProo
 	if len(hashes) > 128 {
 		return nil, engine.TooLargeRequest.With(fmt.Errorf("requested blob count too large: %v", len(hashes)))
 	}
-	//todo:
-	// blobs, _, proofs, err := api.eth.BlobTxPool().GetBlobs(hashes, types.BlobSidecarVersion0, false)
 
 	blobs, _, proofs, err := api.eth.BlobTxPool().GetBlobs(hashes, types.BlobSidecarVersion0, false)
 	if err != nil {
@@ -591,14 +589,12 @@ func (api *ConsensusAPI) GetBlobsV2(hashes []common.Hash) ([]*engine.BlobAndProo
 		getBlobsV2RequestMiss.Inc(1)
 		return nil, nil
 	}
-	// getBlobsV2RequestHit.Inc(1)
+	getBlobsV2RequestHit.Inc(1)
 
 	blobs, _, proofs, err := api.eth.BlobTxPool().GetBlobs(hashes, types.BlobSidecarVersion1, false)
 	if err != nil {
 		return nil, engine.InvalidParams.With(err)
 	}
-	//todo:
-	// To comply with API spec, check again that we really got all data needed
 	for _, blob := range blobs {
 		if blob == nil {
 			getBlobsV2RequestMiss.Inc(1)
