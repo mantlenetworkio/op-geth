@@ -198,6 +198,10 @@ type Config struct {
 	RollupHistoricalRPCTimeout   time.Duration
 	RollupDisableTxPoolGossip    bool
 	RollupDisableTxPoolAdmission bool
+
+	// Optimism features. Ignored by Mantle.
+	InteropMessageRPC       string `toml:",omitempty"`
+	InteropMempoolFiltering bool   `toml:",omitempty"`
 }
 
 // CreateConsensusEngine creates a consensus engine for the given chain config.

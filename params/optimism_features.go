@@ -13,6 +13,25 @@ import (
 
 // To work with optimism op-node
 
+var InteropCrossL2InboxAddress = common.HexToAddress("0x4200000000000000000000000000000000000022")
+
+// ===============================================
+// = protocol_params.go
+// ===============================================
+
+const (
+	Bn256PairingMaxInputSizeGranite uint64 = 112687 // Maximum input size for an elliptic curve pairing check
+
+	Bls12381G1MulMaxInputSizeIsthmus   uint64 = 513760 // Maximum input size for BLS12-381 G1 multiple-scalar-multiply operation
+	Bls12381G2MulMaxInputSizeIsthmus   uint64 = 488448 // Maximum input size for BLS12-381 G2 multiple-scalar-multiply operation
+	Bls12381PairingMaxInputSizeIsthmus uint64 = 235008 // Maximum input size for BLS12-381 pairing check
+
+	Bn256PairingMaxInputSizeJovian    uint64 = 81984  // bn256Pairing limit (427 pairs)
+	Bls12381G1MulMaxInputSizeJovian   uint64 = 288960 // BLS12-381 G1 MSM limit (1,806 pairs)
+	Bls12381G2MulMaxInputSizeJovian   uint64 = 278784 // BLS12-381 G2 MSM limit (968 pairs)
+	Bls12381PairingMaxInputSizeJovian uint64 = 156672 // BLS12-381 pairing limit (408 pairs)
+)
+
 // ===============================================
 // = config.go
 // ===============================================
@@ -41,31 +60,35 @@ func (c *ChainConfig) IsRegolith(time uint64) bool {
 }
 
 func (c *ChainConfig) IsCanyon(time uint64) bool {
-	return c.IsMantleArsia(time)
+	return isTimestampForked(c.CanyonTime, time)
 }
 
 func (c *ChainConfig) IsEcotone(time uint64) bool {
-	return c.IsMantleArsia(time)
+	return isTimestampForked(c.EcotoneTime, time)
 }
 
 func (c *ChainConfig) IsFjord(time uint64) bool {
-	return c.IsMantleArsia(time)
+	return isTimestampForked(c.FjordTime, time)
 }
 
 func (c *ChainConfig) IsGranite(time uint64) bool {
-	return c.IsMantleArsia(time)
+	return isTimestampForked(c.GraniteTime, time)
 }
 
 func (c *ChainConfig) IsHolocene(time uint64) bool {
-	return c.IsMantleArsia(time)
+	return isTimestampForked(c.HoloceneTime, time)
 }
 
 func (c *ChainConfig) IsIsthmus(time uint64) bool {
-	return c.IsMantleArsia(time)
+	return isTimestampForked(c.IsthmusTime, time)
 }
 
 func (c *ChainConfig) IsJovian(time uint64) bool {
-	return c.IsMantleArsia(time)
+	return isTimestampForked(c.JovianTime, time)
+}
+
+func (c *ChainConfig) IsInterop(time uint64) bool {
+	return isTimestampForked(c.InteropTime, time)
 }
 
 // IsOptimism returns whether the node is an optimism node or not.
@@ -80,11 +103,6 @@ func (c *ChainConfig) IsOptimismBedrock(num *big.Int) bool {
 
 func (c *ChainConfig) IsOptimismRegolith(time uint64) bool {
 	return c.IsOptimism() && c.IsRegolith(time)
-}
-
-// IsOptimismPreBedrock returns true iff this is an optimism node & bedrock is not yet active
-func (c *ChainConfig) IsOptimismPreBedrock(num *big.Int) bool {
-	return c.IsOptimism() && !c.IsBedrock(num)
 }
 
 func (c *ChainConfig) IsOptimismCanyon(time uint64) bool {
@@ -113,6 +131,11 @@ func (c *ChainConfig) IsOptimismIsthmus(time uint64) bool {
 
 func (c *ChainConfig) IsOptimismJovian(time uint64) bool {
 	return c.IsOptimism() && c.IsJovian(time)
+}
+
+// IsOptimismPreBedrock returns true iff this is an optimism node & bedrock is not yet active
+func (c *ChainConfig) IsOptimismPreBedrock(num *big.Int) bool {
+	return c.IsOptimism() && !c.IsBedrock(num)
 }
 
 func (c *ChainConfig) HasOptimismWithdrawalsRoot(blockTime uint64) bool {
