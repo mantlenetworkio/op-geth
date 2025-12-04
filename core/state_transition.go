@@ -360,29 +360,18 @@ func (st *stateTransition) buyGas(metaTxV3 bool) (*big.Int, error) {
 	mgval.Mul(mgval, st.msg.GasPrice)
 
 	var l1Cost *big.Int
+	var operatorCost *uint256.Int
 	if st.msg.RunMode == GasEstimationMode || st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode {
 		st.CalculateRollupCostDataFromMessage()
 	}
-	if st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) {
-		// l1cost means l1cost + operator cost coz we need to pay operator cost and l1 cost when executing tx
-		if st.evm.Context.L1CostFuncArsia != nil {
-			l1Cost = st.evm.Context.L1CostFuncArsia(st.msg.RollupCostData, st.evm.Context.Time)
-		}
-		if st.evm.Context.OperatorCostFunc != nil {
-			operatorCost := st.evm.Context.OperatorCostFunc(st.msg.GasLimit, st.evm.Context.Time)
-			if l1Cost != nil {
-				l1Cost = new(big.Int).Add(l1Cost, operatorCost.ToBig())
-			} else {
-				l1Cost = operatorCost.ToBig()
-			}
-		}
-		// add l1 cost to mgval
+	if st.evm.Context.L1CostFunc != nil && st.msg.RunMode != EthcallMode {
+		l1Cost = st.evm.Context.L1CostFunc(st.msg.RollupCostData, st.evm.Context.Time)
 		if l1Cost != nil {
 			mgval = mgval.Add(mgval, l1Cost)
 		}
-	} else {
-		if st.evm.Context.L1CostFunc != nil && st.msg.RunMode != EthcallMode {
-			l1Cost = st.evm.Context.L1CostFunc(st.evm.Context.BlockNumber.Uint64(), st.evm.Context.Time, st.msg.RollupCostData, st.msg.IsDepositTx, st.msg.To)
+		if st.evm.Context.OperatorCostFunc != nil {
+			operatorCost = st.evm.Context.OperatorCostFunc(st.msg.GasLimit, st.evm.Context.Time)
+			mgval = mgval.Add(mgval, operatorCost.ToBig())
 		}
 	}
 
@@ -391,8 +380,12 @@ func (st *stateTransition) buyGas(metaTxV3 bool) (*big.Int, error) {
 		balanceCheck.SetUint64(st.msg.GasLimit)
 		balanceCheck = balanceCheck.Mul(balanceCheck, st.msg.GasFeeCap)
 		if st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) {
-			// add l1 cost to balance check
-			balanceCheck = balanceCheck.Add(balanceCheck, l1Cost)
+			if l1Cost != nil {
+				balanceCheck.Add(balanceCheck, l1Cost)
+			}
+			if operatorCost != nil {
+				balanceCheck.Add(balanceCheck, operatorCost.ToBig())
+			}
 		}
 	}
 	balanceCheck.Add(balanceCheck, st.msg.Value)
@@ -915,14 +908,14 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 			return nil, fmt.Errorf("base fee value exceeds uint256: %d", feeU256)
 		}
 		st.state.AddBalance(params.OptimismBaseFeeRecipient, feeU256, tracing.BalanceIncreaseRewardTransactionFee)
-		if st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) {
-			if l1Cost := st.evm.Context.L1CostFuncArsia(st.msg.RollupCostData, st.evm.Context.Time); l1Cost != nil {
-				amtU256, overflow := uint256.FromBig(l1Cost)
-				if overflow {
-					return nil, fmt.Errorf("optimism l1 cost overflows U256: %d", l1Cost)
-				}
-				st.state.AddBalance(params.OptimismL1FeeRecipient, amtU256, tracing.BalanceIncreaseRewardTransactionFee)
+		if l1Cost := st.evm.Context.L1CostFunc(st.msg.RollupCostData, st.evm.Context.Time); l1Cost != nil {
+			amtU256, overflow := uint256.FromBig(l1Cost)
+			if overflow {
+				return nil, fmt.Errorf("optimism l1 cost overflows U256: %d", l1Cost)
 			}
+			st.state.AddBalance(params.OptimismL1FeeRecipient, amtU256, tracing.BalanceIncreaseRewardTransactionFee)
+		}
+		if st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) {
 			// Operator Fee refunds are only applied if Isthmus is active and the transaction is *not* a deposit.
 			st.refundOperatorCost()
 			operatorFeeCost := st.evm.Context.OperatorCostFunc(st.gasUsed(), st.evm.Context.Time)

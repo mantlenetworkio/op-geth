@@ -144,13 +144,13 @@ type StateGetter interface {
 
 // L1CostFunc is used in the state transition to determine the cost of a rollup message.
 // Returns nil if there is no cost.
-type L1CostFunc func(blockNum uint64, blockTime uint64, dataGas RollupCostData, isDepositTx bool, to *common.Address) *big.Int
-
-type L1CostFuncArsia func(rcd RollupCostData, blockTime uint64) *big.Int
+type L1CostFunc func(rcd RollupCostData, blockTime uint64) *big.Int
 
 type L1CostFuncArsiaGasUsed func(rcd RollupCostData, blockTime uint64) *big.Int
 
-type l1CostFuncArisa func(rcd RollupCostData) (fee, gasUsed *big.Int)
+// l1CostFunc is an internal version of L1CostFunc that also returns the gasUsed for use in
+// receipts.
+type l1CostFunc func(rcd RollupCostData) (fee, gasUsed *big.Int)
 
 type l1CostFuncArsiaGasUsed func(rcd RollupCostData) (calldataGasUsed *big.Int)
 
@@ -158,64 +158,15 @@ type l1CostFuncArsiaGasUsed func(rcd RollupCostData) (calldataGasUsed *big.Int)
 // This depends on the oracles because gas costs can change over time.
 // It returns nil if there is no applicable cost function.
 func NewL1CostFunc(config *params.ChainConfig, statedb StateGetter) L1CostFunc {
-	cacheBlockNum := ^uint64(0)
-	var l1BaseFee, overhead, scalar, tokenRatio *big.Int
-	return func(blockNum uint64, blockTime uint64, rollupCostData RollupCostData, isDepositTx bool, to *common.Address) *big.Int {
-		rollupDataGas := rollupCostData.DataGas(blockTime, config) // Only fake txs for RPC view-calls are 0.
-		if config.Optimism == nil || isDepositTx || rollupDataGas == 0 {
-			return common.Big0
-		}
-		if blockNum != cacheBlockNum {
-			l1BaseFee = statedb.GetState(L1BlockAddr, L1BaseFeeSlot).Big()
-			overhead = statedb.GetState(L1BlockAddr, OverheadSlot).Big()
-			scalar = statedb.GetState(L1BlockAddr, ScalarSlot).Big()
-			tokenRatio = statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
-			cacheBlockNum = blockNum
-		}
-
-		// update the tokenRatio, so set the cacheBlockNum as default value and query the latest tokenRatio next time
-		if to != nil && *to == GasOracleAddr {
-			cacheBlockNum = ^uint64(0)
-		}
-
-		return L1Cost(rollupDataGas, l1BaseFee, overhead, scalar, tokenRatio)
-	}
-}
-
-func NewL1CostFuncBeforeArsia(config *params.ChainConfig, statedb StateGetter, blockTime uint64) l1CostFuncArisa {
-	return func(rollupCostData RollupCostData) (fee, gasUsed *big.Int) {
-		if rollupCostData == (RollupCostData{}) {
-			return nil, nil // Do not charge if there is no rollup cost-data (e.g. RPC call or deposit)
-		}
-		rollupDataGas := rollupCostData.DataGas(blockTime, config) // Only fake txs for RPC view-calls are 0.
-		if config.Optimism == nil || rollupDataGas == 0 {
-			return common.Big0, common.Big0
-		}
-		l1BaseFee := statedb.GetState(L1BlockAddr, L1BaseFeeSlot).Big()
-		overhead := statedb.GetState(L1BlockAddr, OverheadSlot).Big()
-		scalar := statedb.GetState(L1BlockAddr, ScalarSlot).Big()
-		tokenRatio := statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
-
-		gasWithOverhead := new(big.Int).SetUint64(rollupDataGas)
-		gasWithOverhead.Add(gasWithOverhead, overhead)
-
-		l1Cost := new(big.Int).Mul(gasWithOverhead, l1BaseFee)
-		l1Cost.Mul(l1Cost, scalar)
-		l1Cost.Mul(l1Cost, tokenRatio)
-		l1CostFee := new(big.Int).Div(l1Cost, Decimals)
-
-		return l1CostFee, gasWithOverhead
-	}
-}
-
-func NewL1CostFuncArsia(config *params.ChainConfig, statedb StateGetter) L1CostFuncArsia {
 	if config.Optimism == nil {
 		return nil
 	}
 	forBlock := ^uint64(0)
-	var cachedFunc l1CostFuncArisa
-	selectFunc := func(blockTime uint64) l1CostFuncArisa {
-
+	var cachedFunc l1CostFunc
+	selectFunc := func(blockTime uint64) l1CostFunc {
+		if !config.IsMantleArsia(blockTime) {
+			return NewL1CostFuncBeforeArsia(config, statedb, blockTime)
+		}
 		// Note: the various state variables below are not initialized from the DB until this
 		// point to allow deposit transactions from the block to be processed first by state
 		// transition.  This behavior is consensus critical!
@@ -238,7 +189,7 @@ func NewL1CostFuncArsia(config *params.ChainConfig, statedb StateGetter) L1CostF
 
 		l1BaseFeeScalar, l1BlobBaseFeeScalar := ExtractEcotoneFeeParams(l1FeeScalars)
 
-		return NewL1CostFuncFjord(
+		return NewL1CostFuncArsia(
 			l1BaseFee,
 			l1BlobBaseFee,
 			l1BaseFeeScalar,
@@ -262,6 +213,32 @@ func NewL1CostFuncArsia(config *params.ChainConfig, statedb StateGetter) L1CostF
 		}
 		fee, _ := cachedFunc(rollupCostData)
 		return fee
+	}
+}
+
+func NewL1CostFuncBeforeArsia(config *params.ChainConfig, statedb StateGetter, blockTime uint64) l1CostFunc {
+	return func(rollupCostData RollupCostData) (fee, gasUsed *big.Int) {
+		if rollupCostData == (RollupCostData{}) {
+			return nil, nil // Do not charge if there is no rollup cost-data (e.g. RPC call or deposit)
+		}
+		rollupDataGas := rollupCostData.DataGas(blockTime, config) // Only fake txs for RPC view-calls are 0.
+		if config.Optimism == nil || rollupDataGas == 0 {
+			return common.Big0, common.Big0
+		}
+		l1BaseFee := statedb.GetState(L1BlockAddr, L1BaseFeeSlot).Big()
+		overhead := statedb.GetState(L1BlockAddr, OverheadSlot).Big()
+		scalar := statedb.GetState(L1BlockAddr, ScalarSlot).Big()
+		tokenRatio := statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
+
+		gasWithOverhead := new(big.Int).SetUint64(rollupDataGas)
+		gasWithOverhead.Add(gasWithOverhead, overhead)
+
+		l1Cost := new(big.Int).Mul(gasWithOverhead, l1BaseFee)
+		l1Cost.Mul(l1Cost, scalar)
+		l1Cost.Mul(l1Cost, tokenRatio)
+		l1CostFee := new(big.Int).Div(l1Cost, Decimals)
+
+		return l1CostFee, gasWithOverhead
 	}
 }
 
@@ -327,7 +304,16 @@ func NewL1CostFuncArsiaGasUsed(config *params.ChainConfig, statedb StateGetter) 
 	}
 }
 
-func NewL1CostFuncFjord(l1BaseFee, l1BlobBaseFee, baseFeeScalar, blobFeeScalar, tokenRatio *big.Int) l1CostFuncArisa {
+func NewL1CostFuncArsia(l1BaseFee, l1BlobBaseFee, baseFeeScalar, blobFeeScalar, tokenRatio *big.Int) l1CostFunc {
+	fjordCostFunc := NewL1CostFuncFjord(l1BaseFee, l1BlobBaseFee, baseFeeScalar, blobFeeScalar)
+	return func(costData RollupCostData) (fee, gasUsed *big.Int) {
+		fee, gasUsed = fjordCostFunc(costData)
+		fee = new(big.Int).Mul(fee, tokenRatio)
+		return fee, gasUsed
+	}
+}
+
+func NewL1CostFuncFjord(l1BaseFee, l1BlobBaseFee, baseFeeScalar, blobFeeScalar *big.Int) l1CostFunc {
 	return func(costData RollupCostData) (fee, calldataGasUsed *big.Int) {
 		// Fjord L1 cost function:
 		// l1FeeScaled = baseFeeScalar*l1BaseFee*16 + blobFeeScalar*l1BlobBaseFee
@@ -341,7 +327,6 @@ func NewL1CostFuncFjord(l1BaseFee, l1BlobBaseFee, baseFeeScalar, blobFeeScalar, 
 		estimatedSize := costData.estimatedDASizeScaled()
 		l1CostScaled := new(big.Int).Mul(estimatedSize, l1FeeScaled)
 		l1Cost := new(big.Int).Div(l1CostScaled, fjordDivisor)
-		l1Cost = new(big.Int).Mul(l1Cost, tokenRatio)
 
 		calldataGasUsed = new(big.Int).Mul(estimatedSize, new(big.Int).SetUint64(params.TxDataNonZeroGasEIP2028))
 		calldataGasUsed.Div(calldataGasUsed, big.NewInt(1e6))
@@ -373,7 +358,7 @@ func NewTotalRollupCostFunc(config *params.ChainConfig, statedb StateGetter) Tot
 	if !config.IsOptimism() {
 		return nil
 	}
-	l1CostFunc := NewL1CostFuncArsia(config, statedb)
+	l1CostFunc := NewL1CostFunc(config, statedb)
 	operatorCostFunc := NewOperatorCostFunc(config, statedb)
 
 	return func(tx RollupTransaction, blockTime uint64) *uint256.Int {

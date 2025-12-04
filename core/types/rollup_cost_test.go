@@ -27,18 +27,18 @@ var (
 
 	// below are the expected cost func outcomes for the above parameter settings on the emptyTx
 	// which is defined in transaction_test.go
-	ArsiaFee   = big.NewInt(3203000)
+	ArsiaFee   = big.NewInt(3203000000000)
 	bedrockFee = uint256.NewInt(11326000000000000000)
 
-	arisaOperatorFee = uint256.NewInt(1256417826611659930)
+	arisaOperatorFee = uint256.NewInt(1256650673615173860)
 	// the emptyTx is out of bounds for the linear regression so it uses the minimum size
 
 	bedrockGas      = big.NewInt(1618)
 	minimumArsiaGas = big.NewInt(1600) // fastlz size of minimum txn, 100_000_000 * 16 / 1e6
 )
 
-func TestFjordL1CostFuncMinimumBounds(t *testing.T) {
-	costFunc := NewL1CostFuncFjord(
+func TestArsiaL1CostFuncMinimumBounds(t *testing.T) {
+	costFunc := NewL1CostFuncArsia(
 		baseFee,
 		blobBaseFee,
 		baseFeeScalar,
@@ -73,15 +73,15 @@ func TestFjordL1CostFuncMinimumBounds(t *testing.T) {
 	}
 }
 
-// TestFjordL1CostSolidityParity tests that the cost function for the fjord upgrade matches a Solidity
+// TestArsiaL1CostSolidityParity tests that the cost function for the Arsia upgrade matches a Solidity
 // test to ensure the outputs are the same.
-func TestFjordL1CostSolidityParity(t *testing.T) {
-	costFunc := NewL1CostFuncFjord(
+func TestArsiaL1CostSolidityParity(t *testing.T) {
+	costFunc := NewL1CostFuncArsia(
 		big.NewInt(2*1e6),
 		big.NewInt(3*1e6),
 		big.NewInt(20),
 		big.NewInt(15),
-		big.NewInt(1000000),
+		big.NewInt(1),
 	)
 
 	c0, g0 := costFunc(RollupCostData{
@@ -144,7 +144,7 @@ func TestNewL1CostFuncArsia(t *testing.T) {
 	}
 	config.MantleArsiaTime = &time
 
-	costFunc := NewL1CostFuncArsia(config, statedb)
+	costFunc := NewL1CostFunc(config, statedb)
 	require.NotNil(t, costFunc)
 
 	// empty cost data should result in nil fee
@@ -160,7 +160,7 @@ func TestNewL1CostFuncArsia(t *testing.T) {
 	statedb.baseFeeScalar = 0
 	statedb.blobBaseFeeScalar = 0
 	statedb.blobBaseFee = new(big.Int)
-	costFunc = NewL1CostFuncArsia(config, statedb)
+	costFunc = NewL1CostFunc(config, statedb)
 	fee = costFunc(emptyTx.RollupCostData(), time)
 	require.NotNil(t, fee)
 	require.Equal(t, bedrockFee.Uint64(), fee.Uint64())

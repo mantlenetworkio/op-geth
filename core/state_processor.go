@@ -220,7 +220,7 @@ func MakeReceipt(evm *vm.EVM, result *ExecutionResult, statedb *state.StateDB, b
 			L1GasUsedFn := types.NewL1CostFuncArsiaGasUsed(config, statedb)
 			receipt.L1GasUsed = L1GasUsedFn(tx.RollupCostData(), blockTime)
 			// calculate l1 fee
-			l1CostFn := types.NewL1CostFuncArsia(config, statedb)
+			l1CostFn := types.NewL1CostFunc(config, statedb)
 			receipt.L1Fee = l1CostFn(tx.RollupCostData(), blockTime)
 			if l1BaseFeeScalar != nil {
 				v := l1BaseFeeScalar.Uint64()

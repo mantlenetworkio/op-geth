@@ -41,12 +41,11 @@ type ChainContext interface {
 // NewEVMBlockContext creates a new context for use in the EVM.
 func NewEVMBlockContext(header *types.Header, chain ChainContext, author *common.Address, config *params.ChainConfig, statedb types.StateGetter) vm.BlockContext {
 	var (
-		beneficiary     common.Address
-		baseFee         *big.Int
-		blobBaseFee     *big.Int
-		random          *common.Hash
-		operatorCostFn  types.OperatorCostFunc
-		l1CostFuncArsia types.L1CostFuncArsia
+		beneficiary    common.Address
+		baseFee        *big.Int
+		blobBaseFee    *big.Int
+		random         *common.Hash
+		operatorCostFn types.OperatorCostFunc
 	)
 
 	// If we don't have an explicit author (i.e. not mining), extract from the header
@@ -66,7 +65,6 @@ func NewEVMBlockContext(header *types.Header, chain ChainContext, author *common
 	}
 	if config.IsMantleArsia(header.Time) {
 		operatorCostFn = types.NewOperatorCostFunc(config, statedb)
-		l1CostFuncArsia = types.NewL1CostFuncArsia(config, statedb)
 	}
 	return vm.BlockContext{
 		CanTransfer:      CanTransfer,
@@ -82,7 +80,6 @@ func NewEVMBlockContext(header *types.Header, chain ChainContext, author *common
 		Random:           random,
 		L1CostFunc:       types.NewL1CostFunc(config, statedb),
 		OperatorCostFunc: operatorCostFn,
-		L1CostFuncArsia:  l1CostFuncArsia,
 	}
 }
 

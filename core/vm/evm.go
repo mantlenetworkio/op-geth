@@ -62,9 +62,6 @@ type BlockContext struct {
 	GetHash GetHashFunc
 	// L1CostFunc returns the L1 cost of the rollup message, the function may be nil, or return nil
 	L1CostFunc types.L1CostFunc
-
-	// L1CostFunc returns the L1 cost of the rollup message, the function may be nil, or return nil
-	L1CostFuncArsia types.L1CostFuncArsia
 	// OperatorCostFunc returns the operator cost. The function may be nil
 	OperatorCostFunc types.OperatorCostFunc
 
