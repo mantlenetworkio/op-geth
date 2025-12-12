@@ -59,6 +59,7 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/dnsdisc"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/preconf"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
 	gethversion "github.com/ethereum/go-ethereum/version"
@@ -333,7 +334,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		txPools = append(txPools, eth.blobTxPool)
 	}
 
-	eth.txPool, err = txpool.New(config.TxPool.PriceLimit, eth.blockchain,txPools)
+	eth.txPool, err = txpool.New(config.TxPool.PriceLimit, eth.blockchain, txPools)
 	if err != nil {
 		return nil, err
 	}
@@ -349,6 +350,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	} else if config.TxPool.JournalRemote {
 		pj := locals.NewPoolJournaler(config.TxPool.Journal, rejournal, eth.txPool)
 		stack.RegisterLifecycle(pj)
+	}
+	if config.Miner.PreconfConfig == nil {
+		config.Miner.PreconfConfig = &preconf.DefaultMinerConfig
 	}
 	if config.Miner.PreconfConfig.EnablePreconfChecker {
 		eth.preconfTxTracker = locals.NewPreconfTxTracker(config.TxPool.Journal+".preconf", rejournal, eth.txPool)
