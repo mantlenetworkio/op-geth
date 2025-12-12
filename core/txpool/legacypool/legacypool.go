@@ -350,6 +350,9 @@ func (pool *LegacyPool) Init(gasTip uint64, head *types.Header, reserver txpool.
 	pool.currentState = statedb
 	pool.pendingNonces = newNoncer(statedb)
 
+	// OP-Stack addition
+	pool.resetRollupCostFn(head.Time, statedb)
+
 	pool.wg.Add(1)
 	go pool.scheduleReorgLoop()
 
@@ -1500,24 +1503,21 @@ func (pool *LegacyPool) reset(oldHead, newHead *types.Header) {
 	pool.currentState = statedb
 	pool.pendingNonces = newNoncer(statedb)
 
-	if pool.chainconfig.IsMantleArsia(newHead.Time) {
-		if costFn := types.NewTotalRollupCostFunc(pool.chainconfig, statedb); costFn != nil {
-			pool.rollupCostFn = func(tx types.RollupTransaction) *uint256.Int {
-				return costFn(tx, newHead.Time)
-			}
-		}
-	} else {
-		if costFn := types.NewL1CostFunc(pool.chainconfig, statedb); costFn != nil {
-			pool.l1CostFn = func(rollupCostData types.RollupCostData, isDepositTx bool, to *common.Address) *big.Int {
-				return costFn(newHead.Number.Uint64(), newHead.Time, rollupCostData, isDepositTx, to)
-			}
-		}
-	}
+	// OP-Stack addition
+	pool.resetRollupCostFn(newHead.Time, statedb)
 
 	// Inject any transactions discarded due to reorgs
 	log.Debug("Reinjecting stale transactions", "count", len(reinject))
 	core.SenderCacher().Recover(pool.signer, reinject)
 	pool.addTxsLocked(reinject)
+}
+
+func (pool *LegacyPool) resetRollupCostFn(ts uint64, statedb *state.StateDB) {
+	if costFn := types.NewTotalRollupCostFunc(pool.chainconfig, statedb); costFn != nil {
+		pool.rollupCostFn = func(tx types.RollupTransaction) *uint256.Int {
+			return costFn(tx, ts)
+		}
+	}
 }
 
 // promoteExecutables moves transactions that have become processable from the
