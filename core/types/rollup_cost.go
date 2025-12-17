@@ -83,8 +83,9 @@ const (
 	// four.
 	scalarSectionStart = 32 - BaseFeeScalarSlotOffset - 4
 
-	IsthmusL1AttributesLen = 176
-	JovianL1AttributesLen  = 178
+	BedrockL1AttributesLen = 260
+	// IsthmusL1AttributesLen = 176
+	JovianL1AttributesLen = 178
 )
 
 func init() {
@@ -477,7 +478,8 @@ func CalcDAFootprint(txs []*Transaction) (uint64, error) {
 	// First Jovian block doesn't set the DA footprint gas scalar yet and
 	// it must not have user transactions.
 	data := txs[0].Data()
-	if len(data) == IsthmusL1AttributesLen {
+	log.Info("tx0 data length", "length", len(data))
+	if len(data) == BedrockL1AttributesLen {
 		if !txs[len(txs)-1].IsDepositTx() {
 			// sufficient to check last transaction because deposits precede non-deposit txs
 			return 0, errors.New("unexpected non-deposit transactions in Jovian activation block")
