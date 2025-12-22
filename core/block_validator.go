@@ -106,7 +106,7 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 	}
 
 	// Check blob gas usage.
-	if header.BlobGasUsed != nil {
+	if !v.config.IsOptimism() && header.BlobGasUsed != nil {
 		if want := *header.BlobGasUsed / params.BlobTxBlobGasPerBlob; uint64(blobs) != want { // div because the header is surely good vs the body might be bloated
 			return fmt.Errorf("blob gas used mismatch (header %v, calculated %v)", *header.BlobGasUsed, blobs*params.BlobTxBlobGasPerBlob)
 		}
