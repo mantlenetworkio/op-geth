@@ -254,7 +254,6 @@ type ValidationOptionsWithState struct {
 	L1CostFn L1CostFunc
 
 	RollupCostFn RollupCostFunc
-
 }
 
 // ValidateTransactionWithState is a helper method to check whether a transaction
@@ -288,7 +287,7 @@ func ValidateTransactionWithState(tx *types.Transaction, head *types.Header, sig
 		rules      = opts.Config.Rules(head.Number, head.Difficulty.Sign() == 0, head.Time)
 		tokenRatio = opts.State.GetState(types.GasOracleAddr, types.TokenRatioSlot).Big().Uint64()
 	)
-	if(opts.Config.IsMantleArsia(head.Time)) {
+	if opts.Config.IsMantleArsia(head.Time) {
 		cost256, overflow := TotalTxCost(tx, opts.RollupCostFn)
 		if overflow {
 			return fmt.Errorf("%w: total tx cost overflow", core.ErrInsufficientFunds)
@@ -311,8 +310,8 @@ func ValidateTransactionWithState(tx *types.Transaction, head *types.Header, sig
 		return err
 	}
 	var gasRemaining *big.Int
-	if(opts.Config.IsMantleArsia(head.Time)) {
-		if(tx.Gas() < intrGas){
+	if opts.Config.IsMantleArsia(head.Time) {
+		if tx.Gas() < intrGas {
 			return fmt.Errorf("%w: gas %v, minimum needed %v", core.ErrIntrinsicGas, tx.Gas(), intrGas)
 		}
 		gasRemaining = big.NewInt(int64(tx.Gas() - intrGas))
@@ -323,17 +322,14 @@ func ValidateTransactionWithState(tx *types.Transaction, head *types.Header, sig
 		gasRemaining = big.NewInt(int64(tx.Gas() - intrGas*tokenRatio))
 	}
 
-
-
-
 	// Ensure the transaction can cover floor data gas.
 	if opts.Config.IsPrague(head.Number, head.Time) {
 		floorDataGas, err := core.FloorDataGas(tx.Data())
 		if err != nil {
 			return err
 		}
-		if(opts.Config.IsMantleArsia(head.Time)) {
-			if(tx.Gas() < floorDataGas){
+		if opts.Config.IsMantleArsia(head.Time) {
+			if tx.Gas() < floorDataGas {
 				return fmt.Errorf("%w: gas %v, minimum needed %v", core.ErrFloorDataGas, tx.Gas(), floorDataGas)
 			}
 
@@ -350,7 +346,7 @@ func ValidateTransactionWithState(tx *types.Transaction, head *types.Header, sig
 			}
 		}
 	}
-	if(!opts.Config.IsMantleArsia(head.Time)) {
+	if !opts.Config.IsMantleArsia(head.Time) {
 		if opts.L1CostFn != nil {
 			if l1Cost := opts.L1CostFn(tx.RollupCostData(), tx.IsDepositTx(), tx.To()); l1Cost != nil {
 				txCost := new(big.Int).Mul(tx.GasPrice(), gasRemaining)
@@ -360,8 +356,8 @@ func ValidateTransactionWithState(tx *types.Transaction, head *types.Header, sig
 			}
 		}
 	}
-		//using gas remaining to check l1 cost
-		
+	//using gas remaining to check l1 cost
+
 	// Ensure the transactor has enough funds to cover for replacements or nonce
 	// expansions without overdrafts
 	spent := opts.ExistingExpenditure(from)
