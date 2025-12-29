@@ -337,7 +337,7 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 		cfg.MantleLimbTime = mantleUpgradeChainConfig.MantleLimbTime
 		cfg.MantleArsiaTime = mantleUpgradeChainConfig.MantleArsiaTime
 
-		// override optimism fork times (canyon/ecotone/fjord/granite/holocene/isthmus/jovian/interop)
+		// override optimism fork times (canyon/ecotone/fjord/granite/holocene/isthmus/jovian)
 		cfg.CanyonTime = mantleUpgradeChainConfig.MantleArsiaTime
 		cfg.EcotoneTime = mantleUpgradeChainConfig.MantleArsiaTime
 		cfg.FjordTime = mantleUpgradeChainConfig.MantleArsiaTime
@@ -345,7 +345,7 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 		cfg.HoloceneTime = mantleUpgradeChainConfig.MantleArsiaTime
 		cfg.IsthmusTime = mantleUpgradeChainConfig.MantleArsiaTime
 		cfg.JovianTime = mantleUpgradeChainConfig.MantleArsiaTime
-		cfg.InteropTime = mantleUpgradeChainConfig.MantleArsiaTime
+		// cfg.InteropTime = mantleUpgradeChainConfig.MantleArsiaTime
 
 		// active standard EVM version (shanghai/cancun/prague)  in mantle skadi time
 		cfg.ShanghaiTime = mantleUpgradeChainConfig.MantleSkadiTime
