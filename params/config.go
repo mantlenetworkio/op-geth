@@ -814,6 +814,9 @@ func (c *ChainConfig) Description() string {
 	if c.MantleLimbTime != nil {
 		banner += fmt.Sprintf(" - Mantle Limb:                 @%-10v\n", *c.MantleLimbTime)
 	}
+	if c.MantleArsiaTime != nil {
+		banner += fmt.Sprintf(" - Mantle Arsia:                @%-10v\n", *c.MantleArsiaTime)
+	}
 
 	banner += fmt.Sprintf("\nAll fork specifications can be found at https://ethereum.github.io/execution-specs/src/ethereum/forks/\n")
 	return banner
