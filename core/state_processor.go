@@ -209,14 +209,19 @@ func MakeReceipt(evm *vm.EVM, result *ExecutionResult, statedb *state.StateDB, b
 
 	// used to record l1 fee
 	l1BaseFee, overhead, scalar, scaled, tokenRatio := types.DeriveL1GasInfo(statedb)
-	receipt.L1GasPrice = l1BaseFee
-
 	// used to record calculating l1 fee for txs from Layer2
 	if !tx.IsDepositTx() {
-		receipt.TokenRatio = tokenRatio
+		if tokenRatio != nil {
+			receipt.TokenRatio = tokenRatio
+		}
+		if l1BaseFee != nil {
+			receipt.L1GasPrice = l1BaseFee
+		}
 		if config.IsMantleArsia(blockTime) {
 			l1BaseFeeScalar, l1BlobBaseFeeScalar, l1BlobBaseFee, operatorFeeScalar, operatorFeeConstant := types.DeriveL1GasInfoArsia(statedb)
-			receipt.L1BlobBaseFee = l1BlobBaseFee
+			if l1BlobBaseFee != nil {
+				receipt.L1BlobBaseFee = l1BlobBaseFee
+			}
 			L1GasUsedFn := types.NewL1CostFuncArsiaGasUsed(config, statedb)
 			receipt.L1GasUsed = L1GasUsedFn(tx.RollupCostData(), blockTime)
 			// calculate l1 fee
@@ -242,7 +247,9 @@ func MakeReceipt(evm *vm.EVM, result *ExecutionResult, statedb *state.StateDB, b
 			gas := tx.RollupCostData().DataGas(evm.Context.Time, config)
 			receipt.L1GasUsed = new(big.Int).Add(new(big.Int).SetUint64(gas), overhead)
 			receipt.L1Fee = types.L1Cost(gas, l1BaseFee, overhead, scalar, tokenRatio)
-			receipt.FeeScalar = scaled
+			if scaled != nil {
+				receipt.FeeScalar = scaled
+			}
 		}
 	}
 

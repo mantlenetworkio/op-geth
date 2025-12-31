@@ -174,7 +174,6 @@ func NewL1CostFunc(config *params.ChainConfig, statedb StateGetter) L1CostFunc {
 		l1FeeScalars := statedb.GetState(L1BlockAddr, L1FeeScalarsSlot).Bytes()
 		l1BlobBaseFee := statedb.GetState(L1BlockAddr, L1BlobBaseFeeSlot).Big()
 		l1BaseFee := statedb.GetState(L1BlockAddr, L1BaseFeeSlot).Big()
-		tokenRatio := statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
 
 		// Edge case: the very first Ecotone block requires we use the Bedrock cost
 		// function. We detect this scenario by checking if the Ecotone parameters are
@@ -195,7 +194,7 @@ func NewL1CostFunc(config *params.ChainConfig, statedb StateGetter) L1CostFunc {
 			l1BlobBaseFee,
 			l1BaseFeeScalar,
 			l1BlobBaseFeeScalar,
-			tokenRatio,
+			statedb,
 		)
 	}
 
@@ -305,9 +304,10 @@ func NewL1CostFuncArsiaGasUsed(config *params.ChainConfig, statedb StateGetter) 
 	}
 }
 
-func NewL1CostFuncArsia(l1BaseFee, l1BlobBaseFee, baseFeeScalar, blobFeeScalar, tokenRatio *big.Int) l1CostFunc {
+func NewL1CostFuncArsia(l1BaseFee, l1BlobBaseFee, baseFeeScalar, blobFeeScalar *big.Int, statedb StateGetter) l1CostFunc {
 	fjordCostFunc := NewL1CostFuncFjord(l1BaseFee, l1BlobBaseFee, baseFeeScalar, blobFeeScalar)
 	return func(costData RollupCostData) (fee, gasUsed *big.Int) {
+		tokenRatio := statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
 		fee, gasUsed = fjordCostFunc(costData)
 		fee = new(big.Int).Mul(fee, tokenRatio)
 		return fee, gasUsed
