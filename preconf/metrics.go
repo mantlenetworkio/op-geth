@@ -17,7 +17,6 @@ var (
 	OpNodeL1CurrentGauge        = metrics.NewRegisteredGauge("preconf/opnode/l1/current", nil)
 	OpNodeL1HeadGauge           = metrics.NewRegisteredGauge("preconf/opnode/l1/head", nil)
 	OpNodeL2UnsafeGauge         = metrics.NewRegisteredGauge("preconf/opnode/l2/unsafe", nil)
-	OpNodeEngineSyncTargetGauge = metrics.NewRegisteredGauge("preconf/opnode/engine/sync_target", nil)
 	OpNodeSyncStatusGauge       = metrics.NewRegisteredGauge("preconf/opnode/sync/status", nil) // 1:OK, 0:Not OK
 
 	// L1 Deposit status metrics
@@ -50,7 +49,6 @@ func MetricsOpNodeSyncStatus(status *OptimismSyncStatus, optimismSyncStatusOK bo
 		OpNodeL1CurrentGauge.Update(int64(status.UnsafeL2.L1Origin.Number))
 		OpNodeL1HeadGauge.Update(int64(status.HeadL1.Number))
 		OpNodeL2UnsafeGauge.Update(int64(status.UnsafeL2.Number))
-		OpNodeEngineSyncTargetGauge.Update(int64(status.EngineSyncTarget.Number))
 	}
 	if optimismSyncStatusOK {
 		OpNodeSyncStatusGauge.Update(1)
