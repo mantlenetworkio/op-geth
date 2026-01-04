@@ -328,6 +328,10 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 	}
 
 	// mantle
+	if o.OverrideMantleArsia != nil {
+		cfg.MantleArsiaTime = o.OverrideMantleArsia
+	}
+
 	mantleUpgradeChainConfig := params.GetUpgradeConfigForMantle(cfg.ChainID)
 	if o.ApplyMantleUpgrades && mantleUpgradeChainConfig != nil {
 		cfg.BaseFeeTime = mantleUpgradeChainConfig.BaseFeeTime
@@ -363,9 +367,6 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 				EIP1559Denominator: 50,
 			}
 		}
-	}
-	if o.OverrideMantleArsia != nil {
-		cfg.MantleArsiaTime = o.OverrideMantleArsia
 	}
 
 	return cfg.CheckConfigForkOrder()

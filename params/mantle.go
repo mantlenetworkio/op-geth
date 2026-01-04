@@ -100,8 +100,12 @@ func GetUpgradeConfigForMantle(chainID *big.Int) *MantleUpgradeChainConfig {
 	case MantleSepoliaQA6ChainId.Int64():
 		return &MantleSepoliaQA6UpgradeConfig
 	case MantleLocalChainId.Int64():
+		// This makes localnet configuration harder to manage. You need to change the code and rebuild the binary
+		// to make it work. A more convenient way is to use deploy config(for genesia activation scenarios) or
+		// override flags(for upgrade scenarios) to specify the mantle upgrade timestamps.
 		return &MantleLocalUpgradeConfig
 	default:
+		// It would be better to return nil here, so that it doesn't affect much potential optimism original logic.
 		return &MantleDefaultUpgradeConfig
 	}
 }
