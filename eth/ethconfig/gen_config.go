@@ -66,12 +66,15 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		OverrideOptimismBedrock      *big.Int
 		OverrideOptimismRegolith     *uint64 `toml:",omitempty"`
 		OverrideOptimism             *bool
-		ApplyMantleUpgrades          bool `toml:",omitempty"`
+		ApplyMantleUpgrades          bool    `toml:",omitempty"`
+		OverrideMantleArsia          *uint64 `toml:",omitempty"`
 		RollupSequencerHTTP          string
 		RollupHistoricalRPC          string
 		RollupHistoricalRPCTimeout   time.Duration
 		RollupDisableTxPoolGossip    bool
 		RollupDisableTxPoolAdmission bool
+		InteropMessageRPC            string `toml:",omitempty"`
+		InteropMempoolFiltering      bool   `toml:",omitempty"`
 	}
 	var enc Config
 	enc.Genesis = c.Genesis
@@ -123,11 +126,14 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.OverrideOptimismRegolith = c.OverrideOptimismRegolith
 	enc.OverrideOptimism = c.OverrideOptimism
 	enc.ApplyMantleUpgrades = c.ApplyMantleUpgrades
+	enc.OverrideMantleArsia = c.OverrideMantleArsia
 	enc.RollupSequencerHTTP = c.RollupSequencerHTTP
 	enc.RollupHistoricalRPC = c.RollupHistoricalRPC
 	enc.RollupHistoricalRPCTimeout = c.RollupHistoricalRPCTimeout
 	enc.RollupDisableTxPoolGossip = c.RollupDisableTxPoolGossip
 	enc.RollupDisableTxPoolAdmission = c.RollupDisableTxPoolAdmission
+	enc.InteropMessageRPC = c.InteropMessageRPC
+	enc.InteropMempoolFiltering = c.InteropMempoolFiltering
 	return &enc, nil
 }
 
@@ -182,12 +188,15 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		OverrideOptimismBedrock      *big.Int
 		OverrideOptimismRegolith     *uint64 `toml:",omitempty"`
 		OverrideOptimism             *bool
-		ApplyMantleUpgrades          *bool `toml:",omitempty"`
+		ApplyMantleUpgrades          *bool   `toml:",omitempty"`
+		OverrideMantleArsia          *uint64 `toml:",omitempty"`
 		RollupSequencerHTTP          *string
 		RollupHistoricalRPC          *string
 		RollupHistoricalRPCTimeout   *time.Duration
 		RollupDisableTxPoolGossip    *bool
 		RollupDisableTxPoolAdmission *bool
+		InteropMessageRPC            *string `toml:",omitempty"`
+		InteropMempoolFiltering      *bool   `toml:",omitempty"`
 	}
 	var dec Config
 	if err := unmarshal(&dec); err != nil {
@@ -340,6 +349,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.ApplyMantleUpgrades != nil {
 		c.ApplyMantleUpgrades = *dec.ApplyMantleUpgrades
 	}
+	if dec.OverrideMantleArsia != nil {
+		c.OverrideMantleArsia = dec.OverrideMantleArsia
+	}
 	if dec.RollupSequencerHTTP != nil {
 		c.RollupSequencerHTTP = *dec.RollupSequencerHTTP
 	}
@@ -354,6 +366,12 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.RollupDisableTxPoolAdmission != nil {
 		c.RollupDisableTxPoolAdmission = *dec.RollupDisableTxPoolAdmission
+	}
+	if dec.InteropMessageRPC != nil {
+		c.InteropMessageRPC = *dec.InteropMessageRPC
+	}
+	if dec.InteropMempoolFiltering != nil {
+		c.InteropMempoolFiltering = *dec.InteropMempoolFiltering
 	}
 	return nil
 }

@@ -287,7 +287,10 @@ type ChainOverrides struct {
 	OverrideOptimismBedrock  *big.Int
 	OverrideOptimismRegolith *uint64
 	OverrideOptimism         *bool
-	ApplyMantleUpgrades      bool
+
+	// mantle
+	OverrideMantleArsia *uint64
+	ApplyMantleUpgrades bool
 }
 
 // apply applies the chain overrides on the supplied chain config.
@@ -360,6 +363,9 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 				EIP1559Denominator: 50,
 			}
 		}
+	}
+	if o.OverrideMantleArsia != nil {
+		cfg.MantleArsiaTime = o.OverrideMantleArsia
 	}
 
 	return cfg.CheckConfigForkOrder()

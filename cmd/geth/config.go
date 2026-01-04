@@ -252,6 +252,11 @@ func makeFullNode(ctx *cli.Context) *node.Node {
 		cfg.Eth.OverrideOptimism = &override
 	}
 
+	if ctx.IsSet(utils.OverrideMantleArsia.Name) {
+		v := ctx.Uint64(utils.OverrideMantleArsia.Name)
+		cfg.Eth.OverrideMantleArsia = &v
+	}
+
 	// Start metrics export if enabled
 	utils.SetupMetrics(&cfg.Metrics)
 

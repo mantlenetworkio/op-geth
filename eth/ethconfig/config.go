@@ -192,6 +192,8 @@ type Config struct {
 
 	// ApplyMantleUpgrades requests the node to update chain-configuration from the mantle config.
 	ApplyMantleUpgrades bool `toml:",omitempty"`
+	// OverrideMantle* is defiend to be prioritized over ApplyMantleUpgrades
+	OverrideMantleArsia *uint64 `toml:",omitempty"`
 
 	RollupSequencerHTTP          string
 	RollupHistoricalRPC          string

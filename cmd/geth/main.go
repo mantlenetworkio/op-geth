@@ -70,6 +70,7 @@ var (
 		utils.OverrideOptimismBedrock,
 		utils.OverrideOptimismRegolith,
 		utils.OverrideOptimism,
+		utils.OverrideMantleArsia,
 		utils.TxPoolFromPreconfsFlag,
 		utils.TxPoolToPreconfsFlag,
 		utils.TxPoolAllPreconfsFlag,
