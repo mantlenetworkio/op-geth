@@ -328,21 +328,23 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 	}
 
 	// mantle overrides start from here
-	if o.OverrideMantleArsia != nil {
-		cfg.MantleArsiaTime = o.OverrideMantleArsia
-	}
-
-	mantleUpgradeChainConfig := params.GetUpgradeConfigForMantle(cfg.ChainID)
-	if o.ApplyMantleUpgrades && mantleUpgradeChainConfig != nil {
-		cfg.BaseFeeTime = mantleUpgradeChainConfig.BaseFeeTime
-		cfg.BVMETHMintUpgradeTime = mantleUpgradeChainConfig.BVMETHMintUpgradeTime
-		cfg.MetaTxV2UpgradeTime = mantleUpgradeChainConfig.MetaTxV2UpgradeTime
-		cfg.MetaTxV3UpgradeTime = mantleUpgradeChainConfig.MetaTxV3UpgradeTime
-		cfg.ProxyOwnerUpgradeTime = mantleUpgradeChainConfig.ProxyOwnerUpgradeTime
-		cfg.MantleEverestTime = mantleUpgradeChainConfig.MantleEverestTime
-		cfg.MantleSkadiTime = mantleUpgradeChainConfig.MantleSkadiTime
-		cfg.MantleLimbTime = mantleUpgradeChainConfig.MantleLimbTime
-		cfg.MantleArsiaTime = mantleUpgradeChainConfig.MantleArsiaTime
+	if o.ApplyMantleUpgrades {
+		if o.OverrideMantleArsia != nil {
+			cfg.MantleArsiaTime = o.OverrideMantleArsia
+		}
+		// upgrade config defined in params has highest priority
+		mantleUpgradeChainConfig := params.GetUpgradeConfigForMantle(cfg.ChainID)
+		if mantleUpgradeChainConfig != nil {
+			cfg.BaseFeeTime = mantleUpgradeChainConfig.BaseFeeTime
+			cfg.BVMETHMintUpgradeTime = mantleUpgradeChainConfig.BVMETHMintUpgradeTime
+			cfg.MetaTxV2UpgradeTime = mantleUpgradeChainConfig.MetaTxV2UpgradeTime
+			cfg.MetaTxV3UpgradeTime = mantleUpgradeChainConfig.MetaTxV3UpgradeTime
+			cfg.ProxyOwnerUpgradeTime = mantleUpgradeChainConfig.ProxyOwnerUpgradeTime
+			cfg.MantleEverestTime = mantleUpgradeChainConfig.MantleEverestTime
+			cfg.MantleSkadiTime = mantleUpgradeChainConfig.MantleSkadiTime
+			cfg.MantleLimbTime = mantleUpgradeChainConfig.MantleLimbTime
+			cfg.MantleArsiaTime = mantleUpgradeChainConfig.MantleArsiaTime
+		}
 
 		// override optimism fork times (canyon/ecotone/fjord/granite/holocene/isthmus/jovian)
 		cfg.CanyonTime = mantleUpgradeChainConfig.MantleArsiaTime
@@ -361,13 +363,13 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 		cfg.PragueTime = mantleUpgradeChainConfig.MantleSkadiTime
 		// active standard EVM version (osaka)  in mantle limb time
 		cfg.OsakaTime = mantleUpgradeChainConfig.MantleLimbTime
-	}
 
-	// After all overrides are applied, set default 1559 params if mantle arsia time is set.
-	if cfg.MantleArsiaTime != nil {
-		cfg.Optimism = &params.OptimismConfig{
-			EIP1559Elasticity:  4,
-			EIP1559Denominator: 50,
+		// After all overrides are applied, set default 1559 params if mantle arsia time is set.
+		if cfg.MantleArsiaTime != nil {
+			cfg.Optimism = &params.OptimismConfig{
+				EIP1559Elasticity:  4,
+				EIP1559Denominator: 50,
+			}
 		}
 	}
 
