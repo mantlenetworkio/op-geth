@@ -402,6 +402,7 @@ func applyPreconfTransaction(evm *vm.EVM, gp *core.GasPool, statedb *state.State
 	if err != nil {
 		return nil, nil, err
 	}
+	tokenRatio := statedb.GetState(types.GasOracleAddr, types.TokenRatioSlot).Big()
 
 	// ApplyTransactionWithEVM
 	if hooks := evm.Config.Tracer; hooks != nil {
@@ -442,7 +443,7 @@ func applyPreconfTransaction(evm *vm.EVM, gp *core.GasPool, statedb *state.State
 		statedb.AccessEvents().Merge(evm.AccessEvents)
 	}
 
-	receipt = core.MakeReceipt(evm, result, statedb, blockNumber, blockHash, blockTime, tx, *usedGas, root, evm.ChainConfig(), nonce)
+	receipt = core.MakeReceipt(evm, result, statedb, blockNumber, blockHash, blockTime, tx, *usedGas, root, evm.ChainConfig(), nonce, tokenRatio)
 	return receipt, result.Revert(), nil
 }
 

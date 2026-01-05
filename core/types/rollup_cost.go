@@ -195,6 +195,7 @@ func NewL1CostFunc(config *params.ChainConfig, statedb StateGetter) L1CostFunc {
 			l1BaseFeeScalar,
 			l1BlobBaseFeeScalar,
 			statedb,
+			blockTime,
 		)
 	}
 
@@ -217,6 +218,11 @@ func NewL1CostFunc(config *params.ChainConfig, statedb StateGetter) L1CostFunc {
 }
 
 func NewL1CostFuncBeforeArsia(config *params.ChainConfig, statedb StateGetter, blockTime uint64) l1CostFunc {
+	// Cache tokenRatio when the closure is created (after deposit tx execution).
+	// This ensures that if a tx modifies tokenRatio, it still uses the old value,
+	// and subsequent txs use the new value.
+	cachedTokenRatio := statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
+
 	return func(rollupCostData RollupCostData) (fee, gasUsed *big.Int) {
 		if rollupCostData == (RollupCostData{}) {
 			return nil, nil // Do not charge if there is no rollup cost-data (e.g. RPC call or deposit)
@@ -228,14 +234,22 @@ func NewL1CostFuncBeforeArsia(config *params.ChainConfig, statedb StateGetter, b
 		l1BaseFee := statedb.GetState(L1BlockAddr, L1BaseFeeSlot).Big()
 		overhead := statedb.GetState(L1BlockAddr, OverheadSlot).Big()
 		scalar := statedb.GetState(L1BlockAddr, ScalarSlot).Big()
-		tokenRatio := statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
+		currentTokenRatio := statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
+
+		useTokenRatio := currentTokenRatio
+		// If tokenRatio changed, use the cached old value for this tx,
+		// then update the cache for subsequent txs.
+		if currentTokenRatio.Cmp(cachedTokenRatio) != 0 {
+			useTokenRatio = cachedTokenRatio
+			cachedTokenRatio = new(big.Int).Set(currentTokenRatio)
+		}
 
 		gasWithOverhead := new(big.Int).SetUint64(rollupDataGas)
 		gasWithOverhead.Add(gasWithOverhead, overhead)
 
 		l1Cost := new(big.Int).Mul(gasWithOverhead, l1BaseFee)
 		l1Cost.Mul(l1Cost, scalar)
-		l1Cost.Mul(l1Cost, tokenRatio)
+		l1Cost.Mul(l1Cost, useTokenRatio)
 		l1CostFee := new(big.Int).Div(l1Cost, Decimals)
 
 		return l1CostFee, gasWithOverhead
@@ -304,12 +318,27 @@ func NewL1CostFuncArsiaGasUsed(config *params.ChainConfig, statedb StateGetter) 
 	}
 }
 
-func NewL1CostFuncArsia(l1BaseFee, l1BlobBaseFee, baseFeeScalar, blobFeeScalar *big.Int, statedb StateGetter) l1CostFunc {
+func NewL1CostFuncArsia(l1BaseFee, l1BlobBaseFee, baseFeeScalar, blobFeeScalar *big.Int, statedb StateGetter, blockTime uint64) l1CostFunc {
 	fjordCostFunc := NewL1CostFuncFjord(l1BaseFee, l1BlobBaseFee, baseFeeScalar, blobFeeScalar)
+
+	// Cache tokenRatio when the closure is created (after deposit tx execution).
+	// This ensures that if a tx modifies tokenRatio, it still uses the old value,
+	// and subsequent txs use the new value.
+	cachedTokenRatio := statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
+
 	return func(costData RollupCostData) (fee, gasUsed *big.Int) {
-		tokenRatio := statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
+		currentTokenRatio := statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
+
+		useTokenRatio := currentTokenRatio
+		// If tokenRatio changed, it means this is the GasOracleAddr tx that modified it.
+		// Use the cached old value for this tx, then update the cache for subsequent txs.
+		if currentTokenRatio.Cmp(cachedTokenRatio) != 0 {
+			useTokenRatio = cachedTokenRatio
+			cachedTokenRatio = new(big.Int).Set(currentTokenRatio)
+		}
+
 		fee, gasUsed = fjordCostFunc(costData)
-		fee = new(big.Int).Mul(fee, tokenRatio)
+		fee = new(big.Int).Mul(fee, useTokenRatio)
 		return fee, gasUsed
 	}
 }

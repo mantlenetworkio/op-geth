@@ -38,22 +38,18 @@ var (
 )
 
 func TestArsiaL1CostFuncMinimumBounds(t *testing.T) {
-	costFunc := NewL1CostFuncArsia(
-		baseFee,
-		blobBaseFee,
-		baseFeeScalar,
-		blobBaseFeeScalar,
-		tokenRatio,
-	)
+	// Use Fjord cost function and multiply by tokenRatio (same as Arsia logic)
+	fjordCostFunc := NewL1CostFuncFjord(baseFee, blobBaseFee, baseFeeScalar, blobBaseFeeScalar)
 
 	// Minimum size transactions:
 	// -42.5856 + 0.8365*110 = 49.4294
 	// -42.5856 + 0.8365*150 = 82.8894
 	// -42.5856 + 0.8365*170 = 99.6194
 	for _, fastLzsize := range []uint64{100, 150, 170} {
-		c, g := costFunc(RollupCostData{
+		fee, g := fjordCostFunc(RollupCostData{
 			FastLzSize: fastLzsize,
 		})
+		c := new(big.Int).Mul(fee, tokenRatio)
 
 		require.Equal(t, minimumArsiaGas, g)
 		require.Equal(t, ArsiaFee, c)
@@ -64,9 +60,10 @@ func TestArsiaL1CostFuncMinimumBounds(t *testing.T) {
 	// -42.5856 + 0.8365*175 = 108.8019
 	// -42.5856 + 0.8365*200 = 124.7144
 	for _, fastLzsize := range []uint64{171, 175, 200} {
-		c, g := costFunc(RollupCostData{
+		fee, g := fjordCostFunc(RollupCostData{
 			FastLzSize: fastLzsize,
 		})
+		c := new(big.Int).Mul(fee, tokenRatio)
 
 		require.Greater(t, g.Uint64(), minimumArsiaGas.Uint64())
 		require.Greater(t, c.Uint64(), ArsiaFee.Uint64())
@@ -76,17 +73,19 @@ func TestArsiaL1CostFuncMinimumBounds(t *testing.T) {
 // TestArsiaL1CostSolidityParity tests that the cost function for the Arsia upgrade matches a Solidity
 // test to ensure the outputs are the same.
 func TestArsiaL1CostSolidityParity(t *testing.T) {
-	costFunc := NewL1CostFuncArsia(
+	// Use Fjord cost function and multiply by tokenRatio (same as Arsia logic)
+	fjordCostFunc := NewL1CostFuncFjord(
 		big.NewInt(2*1e6),
 		big.NewInt(3*1e6),
 		big.NewInt(20),
 		big.NewInt(15),
-		big.NewInt(1),
 	)
+	testTokenRatio := big.NewInt(1)
 
-	c0, g0 := costFunc(RollupCostData{
+	fee, g0 := fjordCostFunc(RollupCostData{
 		FastLzSize: 235,
 	})
+	c0 := new(big.Int).Mul(fee, testTokenRatio)
 
 	require.Equal(t, big.NewInt(2463), g0)
 	require.Equal(t, big.NewInt(105484), c0)
@@ -165,6 +164,51 @@ func TestNewL1CostFuncArsia(t *testing.T) {
 	require.NotNil(t, fee)
 	require.Equal(t, bedrockFee.Uint64(), fee.Uint64())
 
+}
+
+// TestTokenRatioChangesDuringTx tests that when a transaction modifies tokenRatio,
+// the L1 cost function uses the old value for that transaction and the new value for subsequent ones.
+func TestTokenRatioChangesDuringTx(t *testing.T) {
+	time := uint64(10)
+
+	config := &params.ChainConfig{
+		Optimism: params.OptimismTestConfig.Optimism,
+	}
+	statedb := &testStateGetter{
+		baseFee:           baseFee,
+		overhead:          overhead,
+		scalar:            scalar,
+		blobBaseFee:       blobBaseFee,
+		baseFeeScalar:     uint32(baseFeeScalar.Uint64()),
+		blobBaseFeeScalar: uint32(blobBaseFeeScalar.Uint64()),
+		tokenRatio:        big.NewInt(1000000), // Initial tokenRatio
+	}
+	config.MantleArsiaTime = &time
+
+	costFunc := NewL1CostFunc(config, statedb)
+	require.NotNil(t, costFunc)
+
+	// First call with initial tokenRatio (1000000)
+	fee1 := costFunc(emptyTx.RollupCostData(), time)
+	require.NotNil(t, fee1)
+
+	// Simulate a transaction modifying tokenRatio to 2000000
+	statedb.tokenRatio = big.NewInt(2000000)
+
+	// Second call - should detect change and use OLD tokenRatio (1000000)
+	fee2 := costFunc(emptyTx.RollupCostData(), time)
+	require.NotNil(t, fee2)
+	require.Equal(t, fee1.Uint64(), fee2.Uint64(), "Should use old tokenRatio when change is detected")
+
+	// Third call - should use NEW tokenRatio (2000000) since cache was updated
+	fee3 := costFunc(emptyTx.RollupCostData(), time)
+	require.NotNil(t, fee3)
+	require.Equal(t, fee1.Uint64()*2, fee3.Uint64(), "Should use new tokenRatio (2x the original)")
+
+	// Fourth call - no change, should still use 2000000
+	fee4 := costFunc(emptyTx.RollupCostData(), time)
+	require.NotNil(t, fee4)
+	require.Equal(t, fee3.Uint64(), fee4.Uint64(), "Should continue using current tokenRatio")
 }
 
 // TestNewL1CostFunc tests that the appropriate cost function is selected based on the
