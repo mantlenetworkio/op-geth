@@ -327,7 +327,7 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 		}
 	}
 
-	// mantle
+	// mantle overrides start from here
 	if o.OverrideMantleArsia != nil {
 		cfg.MantleArsiaTime = o.OverrideMantleArsia
 	}
@@ -352,6 +352,7 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 		cfg.HoloceneTime = mantleUpgradeChainConfig.MantleArsiaTime
 		cfg.IsthmusTime = mantleUpgradeChainConfig.MantleArsiaTime
 		cfg.JovianTime = mantleUpgradeChainConfig.MantleArsiaTime
+		// Interop is not supported by mantle.
 		// cfg.InteropTime = mantleUpgradeChainConfig.MantleArsiaTime
 
 		// active standard EVM version (shanghai/cancun/prague)  in mantle skadi time
@@ -360,12 +361,13 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 		cfg.PragueTime = mantleUpgradeChainConfig.MantleSkadiTime
 		// active standard EVM version (osaka)  in mantle limb time
 		cfg.OsakaTime = mantleUpgradeChainConfig.MantleLimbTime
+	}
 
-		if cfg.MantleArsiaTime != nil {
-			cfg.Optimism = &params.OptimismConfig{
-				EIP1559Elasticity:  4,
-				EIP1559Denominator: 50,
-			}
+	// After all overrides are applied, set default 1559 params if mantle arsia time is set.
+	if cfg.MantleArsiaTime != nil {
+		cfg.Optimism = &params.OptimismConfig{
+			EIP1559Elasticity:  4,
+			EIP1559Denominator: 50,
 		}
 	}
 
