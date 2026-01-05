@@ -93,6 +93,9 @@ type MantleUpgradeChainConfig struct {
 	MantleArsiaTime       *uint64 `json:"mantleArsiaTime"`       // MantleArsiaTime identifies the current block time is ensuring arsia upgrade
 }
 
+// GetUpgradeConfigForMantle returns a mantle upgrade config for the given chain ID with the highest priority.
+// Since op-node uses it also to update rollup config, we give it higher priority in order to keep timestamps consistency
+// between op-node and op-geth especially for mainnet and sepolia.
 func GetUpgradeConfigForMantle(chainID *big.Int) *MantleUpgradeChainConfig {
 	if chainID == nil {
 		return nil
@@ -112,8 +115,8 @@ func GetUpgradeConfigForMantle(chainID *big.Int) *MantleUpgradeChainConfig {
 		// So starting from arsia, this way for overriding localnet configuration is deprecated.
 		return nil
 	default:
-		// It would be better to return nil here rather than returning a default config,
-		// so that it doesn't affect configuration set through other means.
+		// Because the returned result has highest priority, it would be better to return nil here
+		// rather than returning a default config, so that it doesn't affect configuration set through other means.
 		return nil
 	}
 }

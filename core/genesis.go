@@ -364,8 +364,8 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 		// active standard EVM version (osaka)  in mantle limb time
 		cfg.OsakaTime = cfg.MantleLimbTime
 
-		// After all overrides are applied, set default 1559 params if mantle arsia time is set.
-		if cfg.MantleArsiaTime != nil {
+		// After all overrides are applied, set default 1559 params if it's not set.
+		if cfg.Optimism == nil {
 			cfg.Optimism = &params.OptimismConfig{
 				EIP1559Elasticity:  4,
 				EIP1559Denominator: 50,

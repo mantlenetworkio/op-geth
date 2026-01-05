@@ -190,11 +190,10 @@ type Config struct {
 	OverrideOptimismRegolith *uint64 `toml:",omitempty"`
 	OverrideOptimism         *bool
 
+	// OverrideMantle* will take into effect if and only if ApplyMantleUpgrades is true.
 	OverrideMantleArsia *uint64 `toml:",omitempty"`
 	// ApplyMantleUpgrades requests the node to update chain-configuration from the mantle config.
-	// MantleUpgrade defined in params/mantle.go is prioritized over OverrideMantle* due to a fact that
-	// Mantle op-node uses it also to update rollup config. So in order to keep timestamps consistency
-	// between op-node and op-geth especially for mainnet and sepolia, we need to give it higher priority.
+	// ApplyMantleUpgrades is acting as a toggle for enabling/disabling all mantle updates to the chain config.
 	ApplyMantleUpgrades bool `toml:",omitempty"`
 
 	RollupSequencerHTTP          string
