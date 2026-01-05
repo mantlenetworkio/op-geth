@@ -327,6 +327,9 @@ func (miner *Miner) prepareWork(genParams *generateParams, witness bool) (*envir
 	}
 
 	if cfg := miner.chainConfig; cfg.IsMantleArsia(header.Time) {
+		if genParams.minBaseFee == nil {
+			return nil, errors.New("missing minBaseFee")
+		}
 		if err := eip1559.ValidateHolocene1559Params(genParams.eip1559Params); err != nil {
 			return nil, err
 		}
@@ -373,7 +376,7 @@ func (miner *Miner) prepareWork(genParams *generateParams, witness bool) (*envir
 		core.ProcessParentBlockHash(header.ParentHash, env.evm)
 	}
 
-	if miner.chainConfig.IsMantleArsia(header.Time) {
+	if miner.chainConfig.IsMantleArsia(parent.Time) {
 		if len(genParams.txs) == 0 || !genParams.txs[0].IsDepositTx() {
 			return nil, errors.New("missing L1 attributes deposit transaction")
 		}

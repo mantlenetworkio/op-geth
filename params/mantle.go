@@ -49,6 +49,11 @@ var (
 		MantleLimbTime:        u64Ptr(1_762_412_400),
 		MantleArsiaTime:       nil,
 	}
+
+	// Starting from arsia, using of MantleLocalUpgradeConfig and MantleDefaultUpgradeConfig for configuring a
+	// chain's upgrade timestamps is deprecated. You could specify timestamps of wanted upgrades directly in
+	// deploy config json(packages/contracts-bedrock/deploy-config/mantle-devnet.json) or specify them through
+	// CLI override flags.
 	MantleLocalUpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               MantleLocalChainId,
 		BaseFeeTime:           u64Ptr(0),
@@ -88,6 +93,9 @@ type MantleUpgradeChainConfig struct {
 	MantleArsiaTime       *uint64 `json:"mantleArsiaTime"`       // MantleArsiaTime identifies the current block time is ensuring arsia upgrade
 }
 
+// GetUpgradeConfigForMantle returns a mantle upgrade config for the given chain ID with the highest priority.
+// Since op-node uses it also to update rollup config, we give it higher priority in order to keep timestamps consistency
+// between op-node and op-geth especially for mainnet and sepolia.
 func GetUpgradeConfigForMantle(chainID *big.Int) *MantleUpgradeChainConfig {
 	if chainID == nil {
 		return nil
@@ -100,9 +108,16 @@ func GetUpgradeConfigForMantle(chainID *big.Int) *MantleUpgradeChainConfig {
 	case MantleSepoliaQA6ChainId.Int64():
 		return &MantleSepoliaQA6UpgradeConfig
 	case MantleLocalChainId.Int64():
-		return &MantleLocalUpgradeConfig
+		// Returning a hardcoded config here makes localnet configuration harder to manage.
+		// You need to change the code and rebuild the binary to make it work.
+		// A more convenient way is to modify deploy config json (for genesis activation scenarios) or CLI
+		// override flags(for upgrade scenarios) to specify the mantle upgrade timestamps.
+		// So starting from arsia, this way for overriding localnet configuration is deprecated.
+		return nil
 	default:
-		return &MantleDefaultUpgradeConfig
+		// Because the returned result has highest priority, it would be better to return nil here
+		// rather than returning a default config, so that it doesn't affect configuration set through other means.
+		return nil
 	}
 }
 
