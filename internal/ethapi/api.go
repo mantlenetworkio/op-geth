@@ -1743,10 +1743,16 @@ func (api *TransactionAPI) GetTransactionReceipt(ctx context.Context, hash commo
 		// No such tx.
 		return nil, nil
 	}
-	receipt, err := api.b.GetCanonicalReceipt(tx, blockHash, blockNumber, index)
+
+	receipts, err := api.b.GetReceipts(ctx, blockHash)
 	if err != nil {
 		return nil, err
 	}
+	if uint64(len(receipts)) <= index {
+		return nil, nil
+	}
+	receipt := receipts[index]
+
 	// Derive the sender.
 	return MarshalReceipt(receipt, blockHash, blockNumber, api.signer, tx, int(index), api.b.ChainConfig()), nil
 }
