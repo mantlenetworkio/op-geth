@@ -329,10 +329,7 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 
 	// mantle overrides start from here
 	if o.ApplyMantleUpgrades {
-		if o.OverrideMantleArsia != nil {
-			cfg.MantleArsiaTime = o.OverrideMantleArsia
-		}
-		// upgrade config defined in params has highest priority
+		// fetch mantle mainnet/sepolia upgrade config
 		mantleUpgradeChainConfig := params.GetUpgradeConfigForMantle(cfg.ChainID)
 		if mantleUpgradeChainConfig != nil {
 			cfg.BaseFeeTime = mantleUpgradeChainConfig.BaseFeeTime
@@ -344,6 +341,10 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 			cfg.MantleSkadiTime = mantleUpgradeChainConfig.MantleSkadiTime
 			cfg.MantleLimbTime = mantleUpgradeChainConfig.MantleLimbTime
 			cfg.MantleArsiaTime = mantleUpgradeChainConfig.MantleArsiaTime
+		}
+
+		if o.OverrideMantleArsia != nil {
+			cfg.MantleArsiaTime = o.OverrideMantleArsia
 		}
 
 		// override optimism fork times (canyon/ecotone/fjord/granite/holocene/isthmus/jovian)
@@ -363,14 +364,6 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 		cfg.PragueTime = cfg.MantleSkadiTime
 		// active standard EVM version (osaka)  in mantle limb time
 		cfg.OsakaTime = cfg.MantleLimbTime
-
-		// After all overrides are applied, set default 1559 params if it's not set.
-		if cfg.Optimism == nil {
-			cfg.Optimism = &params.OptimismConfig{
-				EIP1559Elasticity:  4,
-				EIP1559Denominator: 50,
-			}
-		}
 	}
 
 	return cfg.CheckConfigForkOrder()
