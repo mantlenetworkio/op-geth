@@ -708,6 +708,9 @@ func (api *BlockChainAPI) GetBlockReceipts(ctx context.Context, blockNrOrHash rp
 	return result, nil
 }
 
+// GetBlockRange returns a range of blocks.
+//
+// DEPRECATED: This method will be removed in the next network upgrade.
 func (api *BlockChainAPI) GetBlockRange(ctx context.Context, startNumber rpc.BlockNumber, endNumber rpc.BlockNumber, fullTx bool) ([]map[string]interface{}, error) {
 	// Basic assertions about start and end block numbers.
 	if endNumber < startNumber {
