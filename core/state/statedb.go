@@ -156,6 +156,10 @@ type StateDB struct {
 	StorageLoaded  int          // Number of storage slots retrieved from the database during the state transition
 	StorageUpdated atomic.Int64 // Number of storage slots updated during the state transition
 	StorageDeleted atomic.Int64 // Number of storage slots deleted during the state transition
+
+	// singlethreaded avoids creation of additional threads when set to true for compatibility with cannon.
+	//add it for mantle test
+	singlethreaded bool
 }
 
 // New creates a new state from a given trie.
