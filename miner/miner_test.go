@@ -66,6 +66,30 @@ type testBlockChain struct {
 	chainHeadFeed *event.Feed
 }
 
+func (bc *testBlockChain) CurrentHeader() *types.Header {
+	return &types.Header{
+		Number:     big.NewInt(1),
+		Time:       1000,
+		Difficulty: big.NewInt(1),
+	}
+}
+
+func (bc *testBlockChain) GetHeaderByNumber(number uint64) *types.Header {
+	return &types.Header{
+		Number:     big.NewInt(int64(number)),
+		Time:       1000,
+		Difficulty: big.NewInt(int64(number)),
+	}
+}
+
+func (bc *testBlockChain) GetHeaderByHash(hash common.Hash) *types.Header {
+	return &types.Header{
+		ParentHash: hash,
+		Time:       1000,
+		Difficulty: big.NewInt(1),
+	}
+}
+
 func (bc *testBlockChain) Config() *params.ChainConfig {
 	return bc.config
 }

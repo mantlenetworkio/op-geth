@@ -75,6 +75,12 @@ func (args *BuildPayloadArgs) Id() engine.PayloadID {
 	if args.GasLimit != nil {
 		binary.Write(hasher, binary.BigEndian, *args.GasLimit)
 	}
+	if len(args.EIP1559Params) != 0 {
+		hasher.Write(args.EIP1559Params[:])
+	}
+	if args.MinBaseFee != nil {
+		binary.Write(hasher, binary.BigEndian, *args.MinBaseFee)
+	}
 	var out engine.PayloadID
 	copy(out[:], hasher.Sum(nil)[:8])
 	out[0] = byte(args.Version)
