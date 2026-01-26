@@ -929,8 +929,10 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 			}
 			// Operator Fee refunds are only applied if Isthmus is active and the transaction is *not* a deposit.
 			st.refundOperatorCost()
-			operatorFeeCost := st.evm.Context.OperatorCostFunc(st.gasUsed(), st.evm.Context.Time)
-			st.state.AddBalance(params.OptimismOperatorFeeRecipient, operatorFeeCost, tracing.BalanceIncreaseRewardTransactionFee)
+			if st.evm.Context.OperatorCostFunc != nil {
+				operatorFeeCost := st.evm.Context.OperatorCostFunc(st.gasUsed(), st.evm.Context.Time)
+				st.state.AddBalance(params.OptimismOperatorFeeRecipient, operatorFeeCost, tracing.BalanceIncreaseRewardTransactionFee)
+			}
 		}
 	}
 
