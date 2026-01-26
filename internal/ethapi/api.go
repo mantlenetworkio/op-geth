@@ -1049,7 +1049,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		}
 		return 0, err
 	}
-	if b.ChainConfig().IsMantleArsia(header.Time) {
+	if rules.IsMantleArsia {
 		return hexutil.Uint64(estimate), nil
 	}
 	return hexutil.Uint64(estimate * gasBuffer / 100), nil
