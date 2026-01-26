@@ -724,7 +724,7 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 			return nil, err
 		}
 	}
-	if !st.msg.IsDepositTx && !st.msg.IsSystemTx && !st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) {
+	if !st.msg.IsDepositTx && !st.msg.IsSystemTx && !rules.IsMantleArsia {
 		gas = gas * tokenRatio
 	}
 	if st.gasRemaining < gas {
@@ -736,7 +736,7 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 		if err != nil {
 			return nil, err
 		}
-		if !st.msg.IsDepositTx && !st.msg.IsSystemTx && !st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) {
+		if !st.msg.IsDepositTx && !st.msg.IsSystemTx && !rules.IsMantleArsia {
 			floorDataGas = floorDataGas * tokenRatio
 		}
 		if msg.GasLimit < floorDataGas {
@@ -749,7 +749,7 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 	st.gasRemaining -= gas
 
 	var l1Gas uint64
-	if !st.msg.IsDepositTx && !st.msg.IsSystemTx && !st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) {
+	if !st.msg.IsDepositTx && !st.msg.IsSystemTx && !rules.IsMantleArsia {
 		// for non-Arsia, l1 gas is calculated based on gas price and l1 cost for total tx gas
 		if st.msg.GasPrice.Cmp(common.Big0) > 0 && l1Cost != nil {
 			l1Gas = new(big.Int).Div(l1Cost, st.msg.GasPrice).Uint64()
@@ -842,7 +842,7 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 	peakGasUsed := st.gasUsed()
 
 	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
-		if st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) {
+		if rules.IsMantleArsia {
 			st.gasRemaining += st.calcRefundArsia()
 		} else {
 			peakGasUsed = st.initialGas - st.gasRemaining*tokenRatio
@@ -868,7 +868,7 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 	}
 
 	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
-		if st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) {
+		if rules.IsMantleArsia {
 			st.returnGasArsia()
 		} else {
 			st.returnGas(rules.IsMetaTxV3)
@@ -917,7 +917,7 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 			return nil, fmt.Errorf("base fee value exceeds uint256: %d", feeU256)
 		}
 		st.state.AddBalance(params.OptimismBaseFeeRecipient, feeU256, tracing.BalanceIncreaseRewardTransactionFee)
-		if st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) {
+		if rules.IsMantleArsia {
 			// L1 fee is accumulated in OptimismL1FeeRecipient only if Mantle Arsia is active.
 			// Before Arsia, L1 fee is included in gas used calculation and is sent to OptimismBaseFeeRecipient.
 			if l1Cost := st.evm.Context.L1CostFunc(st.msg.RollupCostData, st.evm.Context.Time); l1Cost != nil {
