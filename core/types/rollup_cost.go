@@ -474,15 +474,15 @@ func newOperatorCostFunc(operatorFeeScalar *big.Int, operatorFeeConstant *big.In
 	}
 }
 
-// DeriveL1GasInfo reads L1 gas related information to be included
+// DeriveL1GasInfoMantle reads L1 gas related information to be included before Arsia
 // on the receipt
-func DeriveL1GasInfo(state StateGetter) (*big.Int, *big.Int, *big.Int, *big.Float, *big.Int) {
+func DeriveL1GasInfoMantle(state StateGetter) (*big.Int, *big.Int, *big.Int, *big.Float, *big.Int) {
 	l1BaseFee, overhead, scalar, scaled := readL1BlockStorageSlots(L1BlockAddr, state)
 	tokenRatio := readGPOStorageSlots(GasOracleAddr, state)
 	return l1BaseFee, overhead, scalar, scaled, tokenRatio
 }
 
-func DeriveL1GasInfoArsia(state StateGetter) (*big.Int, *big.Int, *big.Int, *big.Int, *big.Int) {
+func DeriveL1GasInfo(state StateGetter) (*big.Int, *big.Int, *big.Int, *big.Int, *big.Int) {
 	l1FeeScalars := state.GetState(L1BlockAddr, L1FeeScalarsSlot).Bytes()
 	l1BlobBaseFee := state.GetState(L1BlockAddr, L1BlobBaseFeeSlot).Big()
 	l1BaseFeeScalar, l1BlobBaseFeeScalar := ExtractEcotoneFeeParams(l1FeeScalars)

@@ -222,27 +222,3 @@ func (miner *Miner) getPending() *newPayloadResult {
 	miner.pending.update(header.Hash(), ret)
 	return ret
 }
-
-// SetMaxDASize sets the maximum data availability size currently allowed for inclusion. 0 means no maximum.
-func (miner *Miner) SetMaxDASize(maxTxSize, maxBlockSize *big.Int) {
-	convertZeroToNil := func(v *big.Int) *big.Int {
-		if v != nil && v.BitLen() == 0 {
-			return nil
-		}
-		return v
-	}
-	convertNilToZero := func(v *big.Int) int64 {
-		if v == nil {
-			return 0
-		}
-		return v.Int64()
-	}
-
-	miner.confMu.Lock()
-	miner.config.MaxDATxSize = convertZeroToNil(maxTxSize)
-	miner.config.MaxDABlockSize = convertZeroToNil(maxBlockSize)
-	miner.confMu.Unlock()
-
-	maxDATxSizeGauge.Update(convertNilToZero(maxTxSize))
-	maxDABlockSizeGauge.Update(convertNilToZero(maxBlockSize))
-}

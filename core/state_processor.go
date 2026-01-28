@@ -210,7 +210,7 @@ func MakeReceipt(evm *vm.EVM, result *ExecutionResult, statedb *state.StateDB, b
 	}
 
 	// used to record l1 fee
-	l1BaseFee, overhead, scalar, scaled, _ := types.DeriveL1GasInfo(statedb)
+	l1BaseFee, overhead, scalar, scaled, _ := types.DeriveL1GasInfoMantle(statedb)
 
 	// used to record calculating l1 fee for txs from Layer2
 	if !tx.IsDepositTx() {
@@ -221,7 +221,7 @@ func MakeReceipt(evm *vm.EVM, result *ExecutionResult, statedb *state.StateDB, b
 			receipt.L1GasPrice = l1BaseFee
 		}
 		if config.IsMantleArsia(blockTime) {
-			l1BaseFeeScalar, l1BlobBaseFeeScalar, l1BlobBaseFee, operatorFeeScalar, operatorFeeConstant := types.DeriveL1GasInfoArsia(statedb)
+			l1BaseFeeScalar, l1BlobBaseFeeScalar, l1BlobBaseFee, operatorFeeScalar, operatorFeeConstant := types.DeriveL1GasInfo(statedb)
 			if l1BlobBaseFee != nil {
 				receipt.L1BlobBaseFee = l1BlobBaseFee
 			}

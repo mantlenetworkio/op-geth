@@ -89,7 +89,7 @@ func TestRecording(t *testing.T) {
 	srvRec := newTestRecorder(t, logger)
 	server.SetRecorder(srvRec)
 	clRec := newTestRecorder(t, logger)
-	client := DialInProc(server, WithRecorder(clRec))
+	client := DialInProc(server)
 	defer client.Close()
 
 	var resp echoResult

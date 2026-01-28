@@ -920,7 +920,8 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 		if rules.IsMantleArsia {
 			// L1 fee is accumulated in OptimismL1FeeRecipient only if Mantle Arsia is active.
 			// Before Arsia, L1 fee is included in gas used calculation and is sent to OptimismBaseFeeRecipient.
-			if l1Cost := st.evm.Context.L1CostFunc(st.msg.RollupCostData, st.evm.Context.Time); l1Cost != nil {
+			// Reuse l1Cost from preCheck to avoid redundant calculation
+			if l1Cost != nil {
 				amtU256, overflow := uint256.FromBig(l1Cost)
 				if overflow {
 					return nil, fmt.Errorf("optimism l1 cost overflows U256: %d", l1Cost)
