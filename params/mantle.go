@@ -6,9 +6,10 @@ import (
 
 // Mantle chain config
 var (
-	MantleMainnetChainId = big.NewInt(5000)
-	MantleSepoliaChainId = big.NewInt(5003)
-	MantleLocalChainId   = big.NewInt(1337)
+	MantleMainnetChainId        = big.NewInt(5000)
+	MantleSepoliaChainId        = big.NewInt(5003)
+	MantleSepoliaStagingChainId = big.NewInt(1115511107)
+	MantleLocalChainId          = big.NewInt(1337)
 )
 
 var (
@@ -35,6 +36,18 @@ var (
 		MantleSkadiTime:       u64Ptr(1_752_649_200),
 		MantleLimbTime:        u64Ptr(1_764_745_200),
 		MantleArsiaTime:       u64Ptr(1_774_422_000),
+	}
+	MantleSepoliaStagingUpgradeConfig = MantleUpgradeChainConfig{
+		ChainID:               MantleSepoliaStagingChainId,
+		BaseFeeTime:           u64Ptr(0),
+		BVMETHMintUpgradeTime: u64Ptr(0),
+		MetaTxV2UpgradeTime:   u64Ptr(0),
+		MetaTxV3UpgradeTime:   u64Ptr(0),
+		ProxyOwnerUpgradeTime: nil,
+		MantleEverestTime:     u64Ptr(0),
+		MantleSkadiTime:       u64Ptr(0),
+		MantleLimbTime:        u64Ptr(0),
+		MantleArsiaTime:       u64Ptr(1769673600),
 	}
 
 	// Starting from arsia, hardcoding upgrade timestamps of qa/dev/local networks are deprecated.
@@ -89,6 +102,8 @@ func GetUpgradeConfigForMantle(chainID *big.Int) *MantleUpgradeChainConfig {
 		return &MantleMainnetUpgradeConfig
 	case MantleSepoliaChainId.Int64():
 		return &MantleSepoliaUpgradeConfig
+	case MantleSepoliaStagingChainId.Int64():
+		return &MantleSepoliaStagingUpgradeConfig
 	default:
 		return nil
 	}
