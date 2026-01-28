@@ -22,14 +22,14 @@ func TestCalcRefund(t *testing.T) {
 	// gasUsed = st.initialGas - st.gasRemaining = 10000000000 - 500000 = 9999500000
 	// maxRefund = gasUsed/5 = 2000000/5 = 1999900000
 	// st.state.GetRefund() = 1000000 < maxRefund, so return 1000000
-	if refund := st.calcRefund(4000, false); refund != 1000000 {
+	if refund := st.calcRefundMantle(4000, false); refund != 1000000 {
 		t.Errorf("before skadi calc refund is: %d, expectd: %v", refund, 1000000)
 	}
 
 	// gasUsed = st.initialGas/tokeRatio - st.gasRemaining = 10000000000/4000 - 500000 = 2000000
 	// maxRefund = gasUsed/5 = 2000000/5 = 400000
 	// st.state.GetRefund() = 1000000 > maxRefund, so return 400000
-	if refund := st.calcRefund(4000, true); refund != 400000 {
+	if refund := st.calcRefundMantle(4000, true); refund != 400000 {
 		t.Errorf("after skadi calc refund is: %d, expectd: %v", refund, 400000)
 	}
 }
