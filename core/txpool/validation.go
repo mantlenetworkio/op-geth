@@ -287,8 +287,7 @@ func ValidateTransactionWithState(tx *types.Transaction, head *types.Header, sig
 		rules      = opts.Config.Rules(head.Number, head.Difficulty.Sign() == 0, head.Time)
 		tokenRatio = opts.State.GetState(types.GasOracleAddr, types.TokenRatioSlot).Big().Uint64()
 	)
-	isMantleArsia := opts.Config.IsMantleArsia(head.Time)
-	if isMantleArsia {
+	if rules.IsMantleArsia {
 		cost256, overflow := TotalTxCost(tx, opts.RollupCostFn)
 		if overflow {
 			return fmt.Errorf("%w: total tx cost overflow", core.ErrInsufficientFunds)
@@ -312,7 +311,7 @@ func ValidateTransactionWithState(tx *types.Transaction, head *types.Header, sig
 	}
 	var gasRemaining *big.Int
 	gasMultiplier := uint64(1)
-	if !isMantleArsia {
+	if !rules.IsMantleArsia {
 		gasMultiplier = tokenRatio
 	}
 
@@ -336,7 +335,7 @@ func ValidateTransactionWithState(tx *types.Transaction, head *types.Header, sig
 			gasRemaining = big.NewInt(int64(tx.Gas() - requiredFloorGas))
 		}
 	}
-	if !isMantleArsia && opts.L1CostFn != nil {
+	if !rules.IsMantleArsia && opts.L1CostFn != nil {
 		if l1Cost := opts.L1CostFn(tx.RollupCostData(), tx.IsDepositTx(), tx.To()); l1Cost != nil {
 			txCost := new(big.Int).Mul(tx.GasPrice(), gasRemaining)
 			if txCost.Cmp(l1Cost) < 0 {

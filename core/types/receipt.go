@@ -146,16 +146,18 @@ type storedReceiptRLP struct {
 	DepositNonce *uint64 `rlp:"optional"`
 
 	// used to record calculating l1 fee for txs from Layer2
-	L1GasUsed            *big.Int `rlp:"optional"`
-	L1GasPrice           *big.Int `rlp:"optional"`
-	L1Fee                *big.Int `rlp:"optional"`
+	L1GasUsed  *big.Int `rlp:"optional"`
+	L1GasPrice *big.Int `rlp:"optional"`
+	L1Fee      *big.Int `rlp:"optional"`
+
+	FeeScalar  string   `rlp:"optional"`
+	TokenRatio *big.Int `rlp:"optional"`
+
 	L1BlobBaseFee        *big.Int `rlp:"optional"`
 	L1BaseFeeScalar      *uint64  `rlp:"optional"`
 	L1BlobBaseFeeScalar  *uint64  `rlp:"optional"`
 	OperatorFeeScalar    *uint64  `rlp:"optional"`
 	OperatorFeeConstant  *uint64  `rlp:"optional"`
-	FeeScalar            string   `rlp:"optional"`
-	TokenRatio           *big.Int `rlp:"optional"`
 	DAFootprintGasScalar *uint64  `rlp:"optional"`
 }
 

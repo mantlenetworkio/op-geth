@@ -650,12 +650,6 @@ web3._extend({
 			params: 1,
 			inputFormatter: [web3._extend.utils.fromDecimal]
 		}),
-		new web3._extend.Method({
-			name: 'setMaxDASize',
-			call: 'miner_setMaxDASize',
-			params: 2,
-			inputFormatter: [web3._extend.utils.fromDecimal, web3._extend.utils.fromDecimal]
-		}),
 	],
 	properties: []
 });

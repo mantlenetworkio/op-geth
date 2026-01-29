@@ -724,7 +724,7 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 			return nil, err
 		}
 	}
-	if !st.msg.IsDepositTx && !st.msg.IsSystemTx && !st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) {
+	if !st.msg.IsDepositTx && !st.msg.IsSystemTx && !rules.IsMantleArsia {
 		gas = gas * tokenRatio
 	}
 	if st.gasRemaining < gas {
@@ -736,7 +736,7 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 		if err != nil {
 			return nil, err
 		}
-		if !st.msg.IsDepositTx && !st.msg.IsSystemTx && !st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) {
+		if !st.msg.IsDepositTx && !st.msg.IsSystemTx && !rules.IsMantleArsia {
 			floorDataGas = floorDataGas * tokenRatio
 		}
 		if msg.GasLimit < floorDataGas {
@@ -749,7 +749,7 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 	st.gasRemaining -= gas
 
 	var l1Gas uint64
-	if !st.msg.IsDepositTx && !st.msg.IsSystemTx && !st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) {
+	if !st.msg.IsDepositTx && !st.msg.IsSystemTx && !rules.IsMantleArsia {
 		// for non-Arsia, l1 gas is calculated based on gas price and l1 cost for total tx gas
 		if st.msg.GasPrice.Cmp(common.Big0) > 0 && l1Cost != nil {
 			l1Gas = new(big.Int).Div(l1Cost, st.msg.GasPrice).Uint64()
@@ -842,12 +842,12 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 	peakGasUsed := st.gasUsed()
 
 	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
-		if st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) {
-			st.gasRemaining += st.calcRefundArsia()
+		if rules.IsMantleArsia {
+			st.gasRemaining += st.calcRefund()
 		} else {
 			peakGasUsed = st.initialGas - st.gasRemaining*tokenRatio
 			// Compute refund counter, capped to a refund quotient.
-			st.gasRemaining += st.calcRefund(tokenRatio, rules.IsMantleSkadi)
+			st.gasRemaining += st.calcRefundMantle(tokenRatio, rules.IsMantleSkadi)
 			st.gasRemaining = st.gasRemaining * tokenRatio
 		}
 
@@ -868,10 +868,10 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 	}
 
 	if !st.msg.IsDepositTx && !st.msg.IsSystemTx {
-		if st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) {
-			st.returnGasArsia()
+		if rules.IsMantleArsia {
+			st.returnGas()
 		} else {
-			st.returnGas(rules.IsMetaTxV3)
+			st.returnGasMantle(rules.IsMetaTxV3)
 		}
 	}
 
@@ -917,10 +917,11 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 			return nil, fmt.Errorf("base fee value exceeds uint256: %d", feeU256)
 		}
 		st.state.AddBalance(params.OptimismBaseFeeRecipient, feeU256, tracing.BalanceIncreaseRewardTransactionFee)
-		if st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) {
+		if rules.IsMantleArsia {
 			// L1 fee is accumulated in OptimismL1FeeRecipient only if Mantle Arsia is active.
 			// Before Arsia, L1 fee is included in gas used calculation and is sent to OptimismBaseFeeRecipient.
-			if l1Cost := st.evm.Context.L1CostFunc(st.msg.RollupCostData, st.evm.Context.Time); l1Cost != nil {
+			// Reuse l1Cost from preCheck to avoid redundant calculation
+			if l1Cost != nil {
 				amtU256, overflow := uint256.FromBig(l1Cost)
 				if overflow {
 					return nil, fmt.Errorf("optimism l1 cost overflows U256: %d", l1Cost)
@@ -929,8 +930,10 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 			}
 			// Operator Fee refunds are only applied if Isthmus is active and the transaction is *not* a deposit.
 			st.refundOperatorCost()
-			operatorFeeCost := st.evm.Context.OperatorCostFunc(st.gasUsed(), st.evm.Context.Time)
-			st.state.AddBalance(params.OptimismOperatorFeeRecipient, operatorFeeCost, tracing.BalanceIncreaseRewardTransactionFee)
+			if st.evm.Context.OperatorCostFunc != nil {
+				operatorFeeCost := st.evm.Context.OperatorCostFunc(st.gasUsed(), st.evm.Context.Time)
+				st.state.AddBalance(params.OptimismOperatorFeeRecipient, operatorFeeCost, tracing.BalanceIncreaseRewardTransactionFee)
+			}
 		}
 	}
 
@@ -1000,7 +1003,7 @@ func (st *stateTransition) applyAuthorization(auth *types.SetCodeAuthorization) 
 	return nil
 }
 
-func (st *stateTransition) calcRefundArsia() uint64 {
+func (st *stateTransition) calcRefund() uint64 {
 	var refund uint64
 	if !st.evm.ChainConfig().IsLondon(st.evm.Context.BlockNumber) {
 		// Before EIP-3529: refunds were capped to gasUsed / 2
@@ -1018,8 +1021,8 @@ func (st *stateTransition) calcRefundArsia() uint64 {
 	return refund
 }
 
-// calcRefund computes refund counter, capped to a refund quotient.
-func (st *stateTransition) calcRefund(tokenRatio uint64, isMantleSkadi bool) uint64 {
+// calcRefundMantle computes refund counter, capped to a refund quotient.
+func (st *stateTransition) calcRefundMantle(tokenRatio uint64, isMantleSkadi bool) uint64 {
 	var refund uint64
 	gasUsed := st.gasUsed()
 	if isMantleSkadi {
@@ -1054,7 +1057,7 @@ func (st *stateTransition) refundOperatorCost() {
 	st.state.AddBalance(st.msg.From, new(uint256.Int).Sub(operatorCostGasLimit, operatorCostGasUsed), tracing.BalanceIncreaseGasReturn)
 }
 
-func (st *stateTransition) returnGasArsia() {
+func (st *stateTransition) returnGas() {
 	remaining := uint256.NewInt(st.gasRemaining)
 	remaining.Mul(remaining, uint256.MustFromBig(st.msg.GasPrice))
 	st.state.AddBalance(st.msg.From, remaining, tracing.BalanceIncreaseGasReturn)
@@ -1068,9 +1071,9 @@ func (st *stateTransition) returnGasArsia() {
 	st.gp.AddGas(st.gasRemaining)
 }
 
-// returnGas returns ETH for remaining gas,
+// returnGasMantle returns ETH for remaining gas,
 // exchanged at the original rate.
-func (st *stateTransition) returnGas(metaTxV3 bool) {
+func (st *stateTransition) returnGasMantle(metaTxV3 bool) {
 	if st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode || st.msg.RunMode == EthcallMode {
 		if st.evm.Config.Tracer != nil && st.evm.Config.Tracer.OnGasChange != nil && st.gasRemaining > 0 {
 			st.evm.Config.Tracer.OnGasChange(st.gasRemaining, 0, tracing.GasChangeTxLeftOverReturned)

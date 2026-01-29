@@ -359,7 +359,7 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 			return engine.STATUS_INVALID, engine.InvalidPayloadAttributes.With(errors.New("gasLimit parameter is required"))
 		}
 		var eip1559Params []byte
-		if api.eth.BlockChain().Config().IsOptimismHolocene(payloadAttributes.Timestamp) {
+		if api.eth.BlockChain().Config().IsMantleArsia(payloadAttributes.Timestamp) {
 			// Validation performed above in checkOptimismPayloadAttributes
 			eip1559Params = bytes.Clone(payloadAttributes.EIP1559Params)
 		}

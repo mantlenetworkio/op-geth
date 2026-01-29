@@ -22,112 +22,84 @@ func TestIsSyncStatusOk(t *testing.T) {
 		{
 			name: "Normal Growth",
 			currentStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 10},
-				HeadL1:           preconf.L1BlockRef{Number: 15},
-				UnsafeL2:         preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
-				EngineSyncTarget: preconf.L2BlockRef{Number: 25},
+				CurrentL1: preconf.L1BlockRef{Number: 10},
+				HeadL1:    preconf.L1BlockRef{Number: 15},
+				UnsafeL2:  preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
 			},
 			newStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 11},
-				HeadL1:           preconf.L1BlockRef{Number: 16},
-				UnsafeL2:         preconf.L2BlockRef{Number: 21, L1Origin: preconf.BlockID{Number: 11}},
-				EngineSyncTarget: preconf.L2BlockRef{Number: 26},
+				CurrentL1: preconf.L1BlockRef{Number: 11},
+				HeadL1:    preconf.L1BlockRef{Number: 16},
+				UnsafeL2:  preconf.L2BlockRef{Number: 21, L1Origin: preconf.BlockID{Number: 11}},
 			},
 			want: true,
 		},
 		{
 			name: "Partial Growth",
 			currentStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 10},
-				HeadL1:           preconf.L1BlockRef{Number: 15},
-				UnsafeL2:         preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
-				EngineSyncTarget: preconf.L2BlockRef{Number: 25},
+				CurrentL1: preconf.L1BlockRef{Number: 10},
+				HeadL1:    preconf.L1BlockRef{Number: 15},
+				UnsafeL2:  preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
 			},
 			newStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 10},                                        // no change
-				HeadL1:           preconf.L1BlockRef{Number: 16},                                        // growth
-				UnsafeL2:         preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}}, // no change
-				EngineSyncTarget: preconf.L2BlockRef{Number: 25},                                        // no change
+				CurrentL1: preconf.L1BlockRef{Number: 10},                                        // no change
+				HeadL1:    preconf.L1BlockRef{Number: 16},                                        // growth
+				UnsafeL2:  preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}}, // no change
 			},
 			want: true,
 		},
 		{
 			name: "Reorg CurrentL1",
 			currentStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 10},
-				HeadL1:           preconf.L1BlockRef{Number: 15},
-				UnsafeL2:         preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
-				EngineSyncTarget: preconf.L2BlockRef{Number: 25},
+				CurrentL1: preconf.L1BlockRef{Number: 10},
+				HeadL1:    preconf.L1BlockRef{Number: 15},
+				UnsafeL2:  preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
 			},
 			newStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 9}, // decreased
-				HeadL1:           preconf.L1BlockRef{Number: 16},
-				UnsafeL2:         preconf.L2BlockRef{Number: 21, L1Origin: preconf.BlockID{Number: 9}},
-				EngineSyncTarget: preconf.L2BlockRef{Number: 26},
+				CurrentL1: preconf.L1BlockRef{Number: 9}, // decreased
+				HeadL1:    preconf.L1BlockRef{Number: 16},
+				UnsafeL2:  preconf.L2BlockRef{Number: 21, L1Origin: preconf.BlockID{Number: 9}},
 			},
 			want: false,
 		},
 		{
 			name: "Reorg HeadL1",
 			currentStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 10},
-				HeadL1:           preconf.L1BlockRef{Number: 15},
-				UnsafeL2:         preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
-				EngineSyncTarget: preconf.L2BlockRef{Number: 25},
+				CurrentL1: preconf.L1BlockRef{Number: 10},
+				HeadL1:    preconf.L1BlockRef{Number: 15},
+				UnsafeL2:  preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
 			},
 			newStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 11},
-				HeadL1:           preconf.L1BlockRef{Number: 14}, // decreased
-				UnsafeL2:         preconf.L2BlockRef{Number: 21, L1Origin: preconf.BlockID{Number: 11}},
-				EngineSyncTarget: preconf.L2BlockRef{Number: 26},
+				CurrentL1: preconf.L1BlockRef{Number: 11},
+				HeadL1:    preconf.L1BlockRef{Number: 14}, // decreased
+				UnsafeL2:  preconf.L2BlockRef{Number: 21, L1Origin: preconf.BlockID{Number: 11}},
 			},
 			want: false,
 		},
 		{
 			name: "Reorg UnsafeL2",
 			currentStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 10},
-				HeadL1:           preconf.L1BlockRef{Number: 15},
-				UnsafeL2:         preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
-				EngineSyncTarget: preconf.L2BlockRef{Number: 25},
+				CurrentL1: preconf.L1BlockRef{Number: 10},
+				HeadL1:    preconf.L1BlockRef{Number: 15},
+				UnsafeL2:  preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
 			},
 			newStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 11},
-				HeadL1:           preconf.L1BlockRef{Number: 16},
-				UnsafeL2:         preconf.L2BlockRef{Number: 19, L1Origin: preconf.BlockID{Number: 11}}, // decreased
-				EngineSyncTarget: preconf.L2BlockRef{Number: 26},
-			},
-			want: false,
-		},
-		{
-			name: "Reorg EngineSyncTarget",
-			currentStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 10},
-				HeadL1:           preconf.L1BlockRef{Number: 15},
-				UnsafeL2:         preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
-				EngineSyncTarget: preconf.L2BlockRef{Number: 25},
-			},
-			newStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 11},
-				HeadL1:           preconf.L1BlockRef{Number: 16},
-				UnsafeL2:         preconf.L2BlockRef{Number: 21, L1Origin: preconf.BlockID{Number: 11}},
-				EngineSyncTarget: preconf.L2BlockRef{Number: 24}, // decreased
+				CurrentL1: preconf.L1BlockRef{Number: 11},
+				HeadL1:    preconf.L1BlockRef{Number: 16},
+				UnsafeL2:  preconf.L2BlockRef{Number: 19, L1Origin: preconf.BlockID{Number: 11}}, // decreased
 			},
 			want: false,
 		},
 		{
 			name: "No Change",
 			currentStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 10},
-				HeadL1:           preconf.L1BlockRef{Number: 15},
-				UnsafeL2:         preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
-				EngineSyncTarget: preconf.L2BlockRef{Number: 25},
+				CurrentL1: preconf.L1BlockRef{Number: 10},
+				HeadL1:    preconf.L1BlockRef{Number: 15},
+				UnsafeL2:  preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
 			},
 			newStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 10},
-				HeadL1:           preconf.L1BlockRef{Number: 15},
-				UnsafeL2:         preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
-				EngineSyncTarget: preconf.L2BlockRef{Number: 25},
+				CurrentL1: preconf.L1BlockRef{Number: 10},
+				HeadL1:    preconf.L1BlockRef{Number: 15},
+				UnsafeL2:  preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
 			},
 			want: true,
 		},
@@ -204,10 +176,9 @@ func TestUpdateOptimismSyncStatus(t *testing.T) {
 			name:          "Initial Status",
 			currentStatus: nil,
 			newStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 10},
-				HeadL1:           preconf.L1BlockRef{Number: 13},
-				UnsafeL2:         preconf.L2BlockRef{Number: 30, L1Origin: preconf.BlockID{Number: 10}},
-				EngineSyncTarget: preconf.L2BlockRef{Number: 30},
+				CurrentL1: preconf.L1BlockRef{Number: 10},
+				HeadL1:    preconf.L1BlockRef{Number: 13},
+				UnsafeL2:  preconf.L2BlockRef{Number: 30, L1Origin: preconf.BlockID{Number: 10}},
 			},
 			expectStatusUpdate:     true,
 			expectDepositTxsUpdate: true,
@@ -219,16 +190,14 @@ func TestUpdateOptimismSyncStatus(t *testing.T) {
 		{
 			name: "L1 Block Changed",
 			currentStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 10},
-				HeadL1:           preconf.L1BlockRef{Number: 13},
-				UnsafeL2:         preconf.L2BlockRef{Number: 30, L1Origin: preconf.BlockID{Number: 10}},
-				EngineSyncTarget: preconf.L2BlockRef{Number: 30},
+				CurrentL1: preconf.L1BlockRef{Number: 10},
+				HeadL1:    preconf.L1BlockRef{Number: 13},
+				UnsafeL2:  preconf.L2BlockRef{Number: 30, L1Origin: preconf.BlockID{Number: 10}},
 			},
 			newStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 11},
-				HeadL1:           preconf.L1BlockRef{Number: 14},
-				UnsafeL2:         preconf.L2BlockRef{Number: 30, L1Origin: preconf.BlockID{Number: 10}},
-				EngineSyncTarget: preconf.L2BlockRef{Number: 30},
+				CurrentL1: preconf.L1BlockRef{Number: 11},
+				HeadL1:    preconf.L1BlockRef{Number: 14},
+				UnsafeL2:  preconf.L2BlockRef{Number: 30, L1Origin: preconf.BlockID{Number: 10}},
 			},
 			expectStatusUpdate:     true,
 			expectDepositTxsUpdate: true,
@@ -240,16 +209,14 @@ func TestUpdateOptimismSyncStatus(t *testing.T) {
 		{
 			name: "No Change",
 			currentStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 10},
-				HeadL1:           preconf.L1BlockRef{Number: 15},
-				UnsafeL2:         preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
-				EngineSyncTarget: preconf.L2BlockRef{Number: 25},
+				CurrentL1: preconf.L1BlockRef{Number: 10},
+				HeadL1:    preconf.L1BlockRef{Number: 15},
+				UnsafeL2:  preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
 			},
 			newStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 10},
-				HeadL1:           preconf.L1BlockRef{Number: 15},
-				UnsafeL2:         preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
-				EngineSyncTarget: preconf.L2BlockRef{Number: 25},
+				CurrentL1: preconf.L1BlockRef{Number: 10},
+				HeadL1:    preconf.L1BlockRef{Number: 15},
+				UnsafeL2:  preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
 			},
 			expectStatusUpdate:     false,
 			expectDepositTxsUpdate: false,
@@ -261,16 +228,14 @@ func TestUpdateOptimismSyncStatus(t *testing.T) {
 		{
 			name: "No L1 Block Change",
 			currentStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 10},
-				HeadL1:           preconf.L1BlockRef{Number: 15},
-				UnsafeL2:         preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
-				EngineSyncTarget: preconf.L2BlockRef{Number: 25},
+				CurrentL1: preconf.L1BlockRef{Number: 10},
+				HeadL1:    preconf.L1BlockRef{Number: 15},
+				UnsafeL2:  preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
 			},
 			newStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 10},
-				HeadL1:           preconf.L1BlockRef{Number: 15},
-				UnsafeL2:         preconf.L2BlockRef{Number: 21, L1Origin: preconf.BlockID{Number: 10}},
-				EngineSyncTarget: preconf.L2BlockRef{Number: 25},
+				CurrentL1: preconf.L1BlockRef{Number: 10},
+				HeadL1:    preconf.L1BlockRef{Number: 15},
+				UnsafeL2:  preconf.L2BlockRef{Number: 21, L1Origin: preconf.BlockID{Number: 10}},
 			},
 			expectStatusUpdate:     true,
 			expectDepositTxsUpdate: false,
@@ -282,16 +247,14 @@ func TestUpdateOptimismSyncStatus(t *testing.T) {
 		{
 			name: "L1 Reorg",
 			currentStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 10},
-				HeadL1:           preconf.L1BlockRef{Number: 15},
-				UnsafeL2:         preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
-				EngineSyncTarget: preconf.L2BlockRef{Number: 25},
+				CurrentL1: preconf.L1BlockRef{Number: 10},
+				HeadL1:    preconf.L1BlockRef{Number: 15},
+				UnsafeL2:  preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
 			},
 			newStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 9}, // Decreased
-				HeadL1:           preconf.L1BlockRef{Number: 16},
-				UnsafeL2:         preconf.L2BlockRef{Number: 21, L1Origin: preconf.BlockID{Number: 9}},
-				EngineSyncTarget: preconf.L2BlockRef{Number: 26},
+				CurrentL1: preconf.L1BlockRef{Number: 9}, // Decreased
+				HeadL1:    preconf.L1BlockRef{Number: 16},
+				UnsafeL2:  preconf.L2BlockRef{Number: 21, L1Origin: preconf.BlockID{Number: 9}},
 			},
 			expectStatusUpdate:     false,
 			expectDepositTxsUpdate: false,
@@ -378,16 +341,14 @@ func TestUpdateOptimismSyncStatusDelay(t *testing.T) {
 		{
 			name: "L1 Delay",
 			currentStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 10},
-				HeadL1:           preconf.L1BlockRef{Number: 15},
-				UnsafeL2:         preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
-				EngineSyncTarget: preconf.L2BlockRef{Number: 25},
+				CurrentL1: preconf.L1BlockRef{Number: 10},
+				HeadL1:    preconf.L1BlockRef{Number: 15},
+				UnsafeL2:  preconf.L2BlockRef{Number: 20, L1Origin: preconf.BlockID{Number: 10}},
 			},
 			newStatus: &preconf.OptimismSyncStatus{
-				CurrentL1:        preconf.L1BlockRef{Number: 11},
-				HeadL1:           preconf.L1BlockRef{Number: 15},
-				UnsafeL2:         preconf.L2BlockRef{Number: 26, L1Origin: preconf.BlockID{Number: 11}},
-				EngineSyncTarget: preconf.L2BlockRef{Number: 25},
+				CurrentL1: preconf.L1BlockRef{Number: 11},
+				HeadL1:    preconf.L1BlockRef{Number: 15},
+				UnsafeL2:  preconf.L2BlockRef{Number: 26, L1Origin: preconf.BlockID{Number: 11}},
 			},
 			expectStatusUpdate:     true,
 			expectDepositTxsUpdate: false,

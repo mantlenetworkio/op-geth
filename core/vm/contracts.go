@@ -233,7 +233,10 @@ var PrecompiledContractsMantleLimb = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{0x1, 0x00}): &p256Verify{},
 }
 
+var PrecompiledContractsMantleArsia = PrecompiledContractsMantleLimb
+
 var (
+	PrecompiledAddressesMantleArsia   []common.Address
 	PrecompiledAddressesMantleLimb    []common.Address
 	PrecompiledAddressesMantleSkadi   []common.Address
 	PrecompiledAddressesMantleEverest []common.Address
@@ -277,10 +280,15 @@ func init() {
 	for k := range PrecompiledContractsMantleLimb {
 		PrecompiledAddressesMantleLimb = append(PrecompiledAddressesMantleLimb, k)
 	}
+	for k := range PrecompiledContractsMantleArsia {
+		PrecompiledAddressesMantleArsia = append(PrecompiledAddressesMantleArsia, k)
+	}
 }
 
 func activePrecompiledContracts(rules params.Rules) PrecompiledContracts {
 	switch {
+	case rules.IsMantleArsia:
+		return PrecompiledContractsMantleArsia
 	case rules.IsMantleLimb:
 		return PrecompiledContractsMantleLimb
 	case rules.IsMantleSkadi:
@@ -314,6 +322,8 @@ func ActivePrecompiledContracts(rules params.Rules) PrecompiledContracts {
 // ActivePrecompiles returns the precompile addresses enabled with the current configuration.
 func ActivePrecompiles(rules params.Rules) []common.Address {
 	switch {
+	case rules.IsMantleArsia:
+		return PrecompiledAddressesMantleArsia
 	case rules.IsMantleLimb:
 		return PrecompiledAddressesMantleLimb
 	case rules.IsMantleSkadi:

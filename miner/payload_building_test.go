@@ -22,11 +22,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/ethereum/go-ethereum/beacon/engine"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/clique"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/txpool"
@@ -62,6 +65,11 @@ var (
 		GasCeil:             params.GenesisGasLimit,
 		PreconfConfig:       &preconf.DefaultMinerConfig,
 	}
+)
+
+var (
+	zero               = uint64(0)
+	validEIP1559Params = eip1559.EncodeHolocene1559Params(250, 6)
 )
 
 func init() {
@@ -264,6 +272,13 @@ func TestPayloadId(t *testing.T) {
 				},
 			},
 		},
+		{
+			Parent:       common.Hash{2},
+			Timestamp:    2,
+			Random:       common.Hash{0x2},
+			FeeRecipient: common.Address{0x2},
+			MinBaseFee:   &zero,
+		},
 	} {
 		id := tt.Id().String()
 		if prev, exists := ids[id]; exists {
@@ -271,4 +286,21 @@ func TestPayloadId(t *testing.T) {
 		}
 		ids[id] = i
 	}
+}
+
+// OPStack addition
+func TestDeterministicPayloadId(t *testing.T) {
+	makeArgs := func() *BuildPayloadArgs {
+		val := uint64(5)
+		return &BuildPayloadArgs{
+			Parent:       common.Hash{2},
+			Timestamp:    2,
+			Random:       common.Hash{0x2},
+			FeeRecipient: common.Address{0x2},
+			MinBaseFee:   &val,
+		}
+	}
+	id1 := makeArgs().Id().String()
+	id2 := makeArgs().Id().String()
+	require.Equal(t, id1, id2)
 }

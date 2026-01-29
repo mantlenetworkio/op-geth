@@ -89,7 +89,7 @@ func TestEnvironmentCopy(t *testing.T) {
 	// Create consensus engine
 	engine := clique.New(chainConfig.Clique, chainDB)
 	// Create Ethereum backend
-	bc, err := core.NewBlockChain(chainDB, nil, genesis, nil, engine, vm.Config{}, nil)
+	bc, err := core.NewBlockChain(chainDB, genesis, engine, nil)
 	if err != nil {
 		t.Fatalf("can't create new chain %v", err)
 	}
