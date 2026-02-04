@@ -570,22 +570,6 @@ func (miner *Miner) processTransactionForCommit(
 			return result
 		}
 
-		// OP-Stack addition: sequencer throttling
-		if miner.config.MaxDABlockSize != nil {
-			result.daBytesAfter.Add(blockDABytes, daBytes)
-			if result.daBytesAfter.Cmp(miner.config.MaxDABlockSize) > 0 {
-				log.Debug("adding tx would exceed block DA size limit",
-					"hash", tx.Hash(), "txda", daBytes, "blockda", blockDABytes, "dalimit", miner.config.MaxDABlockSize)
-				result.shouldContinue = true
-				// If the number of remaining bytes is too few to hold even the minimum possible transaction size,
-				// then we can stop early.
-				daBytesRemaining := new(big.Int).Sub(miner.config.MaxDABlockSize, result.daBytesAfter)
-				if daBytesRemaining.Cmp(types.MinTransactionSize) < 0 {
-					result.shouldBreak = true
-				}
-				return result
-			}
-		}
 	}
 
 	// if inclusion of the transaction would put the block size over the
@@ -763,8 +747,7 @@ func (miner *Miner) fillTransactions(interrupt *atomic.Int32, env *environment) 
 
 	// Retrieve the pending transactions pre-filtered by the 1559/4844 dynamic fees
 	filter := txpool.PendingFilter{
-		MinTip:      uint256.MustFromBig(tip),
-		MaxDATxSize: miner.config.MaxDATxSize,
+		MinTip: uint256.MustFromBig(tip),
 	}
 	if env.header.BaseFee != nil {
 		filter.BaseFee = uint256.MustFromBig(env.header.BaseFee)

@@ -554,18 +554,6 @@ func (pool *LegacyPool) pendingWithFilter(filter txpool.PendingFilter) map[commo
 				}
 			}
 		}
-		// OP-Stack addition: exclude by max-da-size filter
-		if filter.MaxDATxSize != nil {
-			for i, tx := range txs {
-				estimate := tx.RollupCostData().EstimatedDASize()
-				if estimate.Cmp(filter.MaxDATxSize) > 0 {
-					log.Debug("filtering tx that exceeds max da tx size",
-						"hash", tx.Hash(), "txda", estimate, "dalimit", filter.MaxDATxSize)
-					txs = txs[:i]
-					break
-				}
-			}
-		}
 
 		if len(txs) > 0 {
 			lazies := make([]*txpool.LazyTransaction, len(txs))

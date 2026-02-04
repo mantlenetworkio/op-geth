@@ -85,9 +85,6 @@ type PendingFilter struct {
 	BlobTxs     bool
 	BlobVersion byte // Blob tx version to include. 0 means pre-Osaka, 1 means Osaka and later
 
-	// OP stack addition: Maximum l1 data size allowed for an included transaction (for throttling
-	// when batcher is backlogged). Ignored if nil.
-	MaxDATxSize *big.Int
 }
 
 // TxMetadata denotes the metadata of a transaction.

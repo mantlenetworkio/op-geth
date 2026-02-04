@@ -5,25 +5,20 @@ import (
 	"errors"
 	"fmt"
 	gomath "math"
+
+	"github.com/ethereum/go-ethereum/params"
 )
 
 const HoloceneExtraDataVersionByte = uint8(0x00)
 const MinBaseFeeExtraDataVersionByte = uint8(0x01)
 
-type ForkChecker interface {
-	IsHolocene(time uint64) bool
-	IsMinBaseFee(time uint64) bool
-}
-
 // ValidateOptimismExtraData validates the Optimism extra data.
 // It uses the config and parent time to determine how to do the validation.
-func ValidateOptimismExtraData(fc ForkChecker, time uint64, extraData []byte) error {
-	if fc.IsMinBaseFee(time) {
+func ValidateOptimismExtraData(config *params.ChainConfig, time uint64, extraData []byte) error {
+	if config.IsMantleArsia(time) {
 		return ValidateMinBaseFeeExtraData(extraData)
-	} else if fc.IsHolocene(time) {
-		return ValidateHoloceneExtraData(extraData)
-	} else if len(extraData) > 0 { // pre-Holocene
-		return errors.New("extraData must be empty before Holocene")
+	} else if len(extraData) > 0 { // pre-Arsia
+		return errors.New("extraData must be empty before Arsia")
 	}
 	return nil
 }
@@ -31,27 +26,22 @@ func ValidateOptimismExtraData(fc ForkChecker, time uint64, extraData []byte) er
 // DecodeOptimismExtraData decodes the Optimism extra data.
 // It uses the config and parent time to determine how to do the decoding.
 // The parent.extraData is expected to be valid (i.e. ValidateOptimismExtraData has been called previously)
-func DecodeOptimismExtraData(fc ForkChecker, time uint64, extraData []byte) (uint64, uint64, *uint64) {
-	if fc.IsMinBaseFee(time) {
+func DecodeOptimismExtraData(config *params.ChainConfig, time uint64, extraData []byte) (uint64, uint64, *uint64) {
+	if config.IsMantleArsia(time) {
 		denominator, elasticity, minBaseFee := DecodeMinBaseFeeExtraData(extraData)
 		return denominator, elasticity, minBaseFee
-	} else if fc.IsHolocene(time) {
-		denominator, elasticity := DecodeHoloceneExtraData(extraData)
-		return denominator, elasticity, nil
 	}
 	return 0, 0, nil
 }
 
 // EncodeOptimismExtraData encodes the Optimism extra data.
 // It uses the config and parent time to determine how to do the encoding.
-func EncodeOptimismExtraData(fc ForkChecker, time uint64, denominator, elasticity uint64, minBaseFee *uint64) []byte {
-	if fc.IsMinBaseFee(time) {
+func EncodeOptimismExtraData(config *params.ChainConfig, time uint64, denominator, elasticity uint64, minBaseFee *uint64) []byte {
+	if config.IsMantleArsia(time) {
 		if minBaseFee == nil {
 			panic("minBaseFee cannot be nil since the MinBaseFee feature is enabled")
 		}
 		return EncodeMinBaseFeeExtraData(denominator, elasticity, *minBaseFee)
-	} else if fc.IsHolocene(time) {
-		return EncodeHoloceneExtraData(denominator, elasticity)
 	} else {
 		return nil
 	}
