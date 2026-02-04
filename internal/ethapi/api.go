@@ -1109,10 +1109,10 @@ func (api *BlockChainAPI) EstimateTotalFee(ctx context.Context, args Transaction
 		return nil, err
 	}
 
-	// EstimateTotalFee is not supported for pre-Bedrock blocks as L1 data fee
-	// and operator fee are Bedrock+ concepts
-	if api.b.ChainConfig().IsOptimismPreBedrock(header.Number) {
-		return nil, errors.New("eth_estimateTotalFee is not supported for pre-Bedrock blocks")
+	// EstimateTotalFee is not supported for pre-Arsia blocks as L1 data fee
+	// and operator fee are Arsia+ concepts
+	if !api.b.ChainConfig().IsMantleArsia(uint64(header.Number.Int64())) {
+		return nil, errors.New("eth_estimateTotalFee is not supported for pre-Arsia blocks")
 	}
 
 	// 1. Estimate L2 gas
