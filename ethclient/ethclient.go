@@ -693,6 +693,37 @@ func (ec *Client) EstimateGasAtBlockHash(ctx context.Context, msg ethereum.CallM
 	return uint64(hex), nil
 }
 
+// EstimateTotalFee estimates the total transaction cost including L2 execution fee, L1 data fee, and operator fee.
+// It uses the remote RPC's default state (usually pending or latest) for estimation.
+func (ec *Client) EstimateTotalFee(ctx context.Context, msg ethereum.CallMsg) (*big.Int, error) {
+	var hex hexutil.Big
+	err := ec.c.CallContext(ctx, &hex, "eth_estimateTotalFee", toCallArg(msg))
+	if err != nil {
+		return nil, err
+	}
+	return (*big.Int)(&hex), nil
+}
+
+// EstimateTotalFeeAtBlockHash is like EstimateTotalFee but uses the block hash for state selection.
+func (ec *Client) EstimateTotalFeeAtBlockHash(ctx context.Context, msg ethereum.CallMsg, blockHash common.Hash) (*big.Int, error) {
+	var hex hexutil.Big
+	err := ec.c.CallContext(ctx, &hex, "eth_estimateTotalFee", toCallArg(msg), rpc.BlockNumberOrHashWithHash(blockHash, false))
+	if err != nil {
+		return nil, err
+	}
+	return (*big.Int)(&hex), nil
+}
+
+// EstimateTotalFeeAtBlock is like EstimateTotalFee but uses the block number for state selection.
+func (ec *Client) EstimateTotalFeeAtBlock(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) (*big.Int, error) {
+	var hex hexutil.Big
+	err := ec.c.CallContext(ctx, &hex, "eth_estimateTotalFee", toCallArg(msg), toBlockNumArg(blockNumber))
+	if err != nil {
+		return nil, err
+	}
+	return (*big.Int)(&hex), nil
+}
+
 // SendTransaction injects a signed transaction into the pending pool for execution.
 //
 // If the transaction was a contract creation use the TransactionReceipt method to get the
