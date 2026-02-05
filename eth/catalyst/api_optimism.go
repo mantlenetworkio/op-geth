@@ -13,10 +13,8 @@ import (
 // checkOptimismPayload performs Optimism-specific checks on the payload data (called during [(*ConsensusAPI).newPayload]).
 func checkOptimismPayload(params engine.ExecutableData, cfg *params.ChainConfig) error {
 	// ExtraData validation
-	if cfg.IsMantleArsia(params.Timestamp) {
-		if err := eip1559.ValidateOptimismExtraData(cfg, params.Timestamp, params.ExtraData); err != nil {
-			return err
-		}
+	if err := eip1559.ValidateOptimismExtraData(cfg, params.Timestamp, params.ExtraData); err != nil {
+		return err
 	}
 
 	if cfg.IsMantleSkadi(params.Timestamp) {
