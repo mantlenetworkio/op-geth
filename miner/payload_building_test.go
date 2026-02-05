@@ -29,7 +29,6 @@ import (
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/clique"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
-	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/txpool"
@@ -68,8 +67,7 @@ var (
 )
 
 var (
-	zero               = uint64(0)
-	validEIP1559Params = eip1559.EncodeHolocene1559Params(250, 6)
+	zero = uint64(0)
 )
 
 func init() {

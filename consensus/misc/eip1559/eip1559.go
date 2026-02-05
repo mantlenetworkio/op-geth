@@ -73,9 +73,7 @@ func CalcBaseFee(config *params.ChainConfig, parent *types.Header) *big.Int {
 	var minBaseFee *uint64
 	var baseFee *big.Int
 
-	if config.IsMantleArsia(parent.Time) {
-		denominator, elasticity, minBaseFee = DecodeOptimismExtraData(config, parent.Time, parent.Extra)
-	}
+	denominator, elasticity, minBaseFee = DecodeOptimismExtraData(config, parent.Time, parent.Extra)
 
 	parentGasTarget := parent.GasLimit / elasticity
 	parentGasMetered := parent.GasUsed

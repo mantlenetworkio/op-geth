@@ -61,18 +61,6 @@ func DecodeHolocene1559Params(params []byte) (uint64, uint64) {
 	return uint64(denominator), uint64(elasticity)
 }
 
-// DecodeHoloceneExtraData decodes the Holocene 1559 parameters from the encoded form defined here:
-// https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#eip-1559-parameters-in-block-header
-//
-// Returns 0,0 if the format is invalid, though ValidateHoloceneExtraData should be used instead of this function for
-// validity checking.
-func DecodeHoloceneExtraData(extra []byte) (uint64, uint64) {
-	if len(extra) != 9 {
-		return 0, 0
-	}
-	return DecodeHolocene1559Params(extra[1:])
-}
-
 // EncodeHolocene1559Params encodes the eip-1559 parameters into 'PayloadAttributes.EIP1559Params' format. Will panic if
 // either value is outside uint32 range.
 func EncodeHolocene1559Params(denom, elasticity uint64) []byte {
