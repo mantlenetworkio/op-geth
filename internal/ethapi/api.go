@@ -1088,6 +1088,139 @@ func (api *BlockChainAPI) EstimateGas(ctx context.Context, args TransactionArgs,
 	return DoEstimateGas(ctx, api.b, args, bNrOrHash, overrides, blockOverrides, api.b.RPCGasCap())
 }
 
+// EstimateTotalFee estimates the total transaction cost including L2 execution fee, L1 data fee, and operator fee.
+// This is useful for users to understand the complete cost before sending a transaction.
+//
+// Parameters:
+//   - args: Transaction arguments (same as eth_estimateGas)
+//   - blockNrOrHash: Block number or hash to estimate against (default: latest)
+//
+// Returns:
+//   - Total fee in wei (L2 execution fee + L1 data fee + operator fee)
+func (api *BlockChainAPI) EstimateTotalFee(ctx context.Context, args TransactionArgs, blockNrOrHash *rpc.BlockNumberOrHash) (*hexutil.Big, error) {
+	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	if blockNrOrHash != nil {
+		bNrOrHash = *blockNrOrHash
+	}
+
+	// Get the header for the target block
+	header, err := headerByNumberOrHash(ctx, api.b, bNrOrHash)
+	if err != nil {
+		return nil, err
+	}
+
+	// EstimateTotalFee is not supported for pre-Arsia blocks as L1 data fee
+	// and operator fee are Arsia+ concepts
+	if !api.b.ChainConfig().IsMantleArsia(uint64(header.Number.Int64())) {
+		return nil, errors.New("eth_estimateTotalFee is not supported for pre-Arsia blocks")
+	}
+
+	// 1. Estimate L2 gas
+	gasEstimate, err := DoEstimateGas(ctx, api.b, args, bNrOrHash, nil, nil, api.b.RPCGasCap())
+	if err != nil {
+		return nil, fmt.Errorf("failed to estimate gas: %w", err)
+	}
+
+	// Get state to calculate L1 cost and operator cost
+	state, header, err := api.b.StateAndHeaderByNumberOrHash(ctx, bNrOrHash)
+	if err != nil {
+		return nil, err
+	}
+
+	// Determine effective gas price
+	// For EIP-1559: effectiveGasPrice = min(maxFeePerGas, baseFee + maxPriorityFeePerGas)
+	var gasPrice *big.Int
+	if args.GasPrice != nil && args.GasPrice.ToInt().Sign() > 0 {
+		// Legacy transaction with explicit gas price
+		gasPrice = args.GasPrice.ToInt()
+	} else if args.MaxFeePerGas != nil && args.MaxFeePerGas.ToInt().Sign() > 0 {
+		// EIP-1559 transaction
+		maxFee := args.MaxFeePerGas.ToInt()
+		if header.BaseFee != nil {
+			// effectiveGasPrice = min(maxFeePerGas, baseFee + maxPriorityFeePerGas)
+			var tipCap *big.Int
+			if args.MaxPriorityFeePerGas != nil {
+				tipCap = args.MaxPriorityFeePerGas.ToInt()
+			} else {
+				tipCap = big.NewInt(0)
+			}
+			effectivePrice := new(big.Int).Add(header.BaseFee, tipCap)
+			if effectivePrice.Cmp(maxFee) > 0 {
+				gasPrice = maxFee
+			} else {
+				gasPrice = effectivePrice
+			}
+		} else {
+			gasPrice = maxFee
+		}
+	} else {
+		// No gas price specified, use suggested gas price
+		gasPriceForEstimate, err := api.b.SuggestGasTipCap(ctx)
+		if err != nil {
+			return nil, errors.New("failed to get suggest gas tip cap")
+		}
+		if header.BaseFee != nil {
+			gasPriceForEstimate = new(big.Int).Add(gasPriceForEstimate, header.BaseFee)
+		}
+		gasPrice = gasPriceForEstimate
+	}
+
+	// 2. Calculate L2 execution fee
+	l2GasFee := new(big.Int).Mul(new(big.Int).SetUint64(uint64(gasEstimate)), gasPrice)
+
+	// 3. Calculate L1 data fee
+	var l1DataFee *big.Int
+
+	// Build a transaction to calculate rollup cost data (including full RLP encoding)
+	if err := args.CallDefaults(api.b.RPCGasCap(), header.BaseFee, api.b.ChainConfig().ChainID); err != nil {
+		return nil, err
+	}
+
+	// Determine transaction type based on args for accurate RLP encoding size
+	txType := types.LegacyTxType
+	if args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil {
+		txType = types.DynamicFeeTxType
+	} else if args.AccessList != nil && len(*args.AccessList) > 0 {
+		txType = types.AccessListTxType
+	}
+	// Convert args to a transaction to properly calculate RollupCostData (using the full RLP encoded size)
+	tx := args.ToTransaction(txType)
+	rollupCostData := tx.RollupCostData()
+
+	// Get L1 cost function
+	l1CostFunc := types.NewL1CostFunc(api.b.ChainConfig(), state)
+	if l1CostFunc != nil {
+		l1DataFee = l1CostFunc(rollupCostData, header.Time)
+		if l1DataFee == nil {
+			// L1CostFunc returns nil for empty rollup cost data (e.g., eth_call or deposit tx)
+			// For actual transactions, this should not happen
+			l1DataFee = big.NewInt(0)
+		}
+	} else {
+		l1DataFee = big.NewInt(0)
+	}
+
+	// 4. Calculate operator fee
+	var operatorFee *big.Int
+	operatorCostFunc := types.NewOperatorCostFunc(api.b.ChainConfig(), state)
+	if operatorCostFunc != nil {
+		operatorFeeU256 := operatorCostFunc(uint64(gasEstimate), header.Time)
+		if operatorFeeU256 != nil {
+			operatorFee = operatorFeeU256.ToBig()
+		} else {
+			operatorFee = big.NewInt(0)
+		}
+	} else {
+		operatorFee = big.NewInt(0)
+	}
+
+	// 5. Calculate total fee (in wei): totalFee = l2GasFee + l1DataFee + operatorFee
+	totalFee := new(big.Int).Add(l2GasFee, l1DataFee)
+	totalFee.Add(totalFee, operatorFee)
+
+	return (*hexutil.Big)(totalFee), nil
+}
+
 // RPCMarshalHeader converts the given header to the RPC output .
 func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 	result := map[string]interface{}{
