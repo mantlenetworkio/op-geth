@@ -1,8 +1,10 @@
 package state
 
-// MakeSinglethreaded sets the StateDB to singlethreaded mode, disabling any
-// concurrent state operations. This is useful for testing and debugging.
-
+// MakeSinglethreaded is a no-op placeholder for cannon compatibility.
+// This function is called by op-program to disable concurrent state operations
+// when running in the cannon fault proof VM environment.
+// The actual singlethreaded mode implementation (workers.go) is not yet synced
+// from upstream op-geth, so this remains a stub for API compatibility.
 func (s *StateDB) MakeSinglethreaded() {
-	s.singlethreaded = true
+	// no-op
 }
