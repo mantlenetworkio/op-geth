@@ -250,9 +250,6 @@ type ValidationOptionsWithState struct {
 	// transaction's cost with the given nonce to check for overdrafts.
 	ExistingCost func(addr common.Address, nonce uint64) *big.Int
 
-	// L1CostFn is an optional extension, to validate L1 rollup costs of a tx
-	L1CostFn L1CostFunc
-
 	RollupCostFn RollupCostFunc
 }
 
@@ -287,13 +284,11 @@ func ValidateTransactionWithState(tx *types.Transaction, head *types.Header, sig
 		rules      = opts.Config.Rules(head.Number, head.Difficulty.Sign() == 0, head.Time)
 		tokenRatio = opts.State.GetState(types.GasOracleAddr, types.TokenRatioSlot).Big().Uint64()
 	)
-	if rules.IsMantleArsia {
-		cost256, overflow := TotalTxCost(tx, opts.RollupCostFn)
-		if overflow {
-			return fmt.Errorf("%w: total tx cost overflow", core.ErrInsufficientFunds)
-		}
-		cost = cost256.ToBig()
+	cost256, overflow := TotalTxCost(tx, opts.RollupCostFn)
+	if overflow {
+		return fmt.Errorf("%w: total tx cost overflow", core.ErrInsufficientFunds)
 	}
+	cost = cost256.ToBig()
 	if balance.Cmp(cost) < 0 {
 		return fmt.Errorf("%w: balance %v, tx cost %v, overshot %v", core.ErrInsufficientFunds, balance, cost, new(big.Int).Sub(cost, balance))
 	}
@@ -309,7 +304,6 @@ func ValidateTransactionWithState(tx *types.Transaction, head *types.Header, sig
 	if err != nil {
 		return err
 	}
-	var gasRemaining *big.Int
 	gasMultiplier := uint64(1)
 	if !rules.IsMantleArsia {
 		gasMultiplier = tokenRatio
@@ -318,7 +312,6 @@ func ValidateTransactionWithState(tx *types.Transaction, head *types.Header, sig
 	if tx.Gas() < intrGas*gasMultiplier {
 		return fmt.Errorf("%w: gas %v, minimum needed %v", core.ErrIntrinsicGas, tx.Gas(), intrGas*gasMultiplier)
 	}
-	gasRemaining = big.NewInt(int64(tx.Gas() - intrGas*gasMultiplier))
 
 	// Ensure the transaction can cover floor data gas.
 	if opts.Config.IsPrague(head.Number, head.Time) {
@@ -330,20 +323,7 @@ func ValidateTransactionWithState(tx *types.Transaction, head *types.Header, sig
 		if tx.Gas() < requiredFloorGas {
 			return fmt.Errorf("%w: gas %v, minimum needed %v", core.ErrFloorDataGas, tx.Gas(), requiredFloorGas)
 		}
-
-		if floorDataGas > intrGas {
-			gasRemaining = big.NewInt(int64(tx.Gas() - requiredFloorGas))
-		}
 	}
-	if !rules.IsMantleArsia && opts.L1CostFn != nil {
-		if l1Cost := opts.L1CostFn(tx.RollupCostData(), tx.IsDepositTx(), tx.To()); l1Cost != nil {
-			txCost := new(big.Int).Mul(tx.GasPrice(), gasRemaining)
-			if txCost.Cmp(l1Cost) < 0 {
-				return core.ErrInsufficientGasForL1Cost
-			}
-		}
-	}
-	// Using gas remaining to check L1 cost
 
 	// Ensure the transactor has enough funds to cover for replacements or nonce
 	// expansions without overdrafts

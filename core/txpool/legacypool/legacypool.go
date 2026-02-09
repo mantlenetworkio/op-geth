@@ -265,8 +265,6 @@ type LegacyPool struct {
 
 	changesSinceReorg int // A counter for how many drops we've performed in-between reorg.
 
-	l1CostFn txpool.L1CostFunc // To apply L1 costs as rollup, optional field, may be nil.
-
 	rollupCostFn txpool.RollupCostFunc // Additional rollup cost function, optional field, may be nil.
 
 	// Preconf variables
@@ -615,15 +613,9 @@ func (pool *LegacyPool) validateTx(tx *types.Transaction) error {
 			if list := pool.pending[addr]; list != nil {
 				if tx := list.txs.Get(nonce); tx != nil {
 					cost := tx.Cost()
-					if pool.chainconfig.IsMantleArsia(pool.currentHead.Load().Time) {
-						if l1Cost := pool.rollupCostFn(tx); l1Cost != nil {
-							cost = cost.Add(cost, l1Cost.ToBig())
-						}
-					} else {
-						if pool.l1CostFn != nil {
-							if l1Cost := pool.l1CostFn(tx.RollupCostData(), tx.IsDepositTx(), tx.To()); l1Cost != nil { // add rollup cost
-								cost = cost.Add(cost, l1Cost)
-							}
+					if pool.rollupCostFn != nil {
+						if rollupCost := pool.rollupCostFn(tx); rollupCost != nil {
+							cost = cost.Add(cost, rollupCost.ToBig())
 						}
 					}
 					return cost
@@ -632,7 +624,6 @@ func (pool *LegacyPool) validateTx(tx *types.Transaction) error {
 			return nil
 		},
 		RollupCostFn: pool.rollupCostFn,
-		L1CostFn:     pool.l1CostFn,
 	}
 	if err := txpool.ValidateTransactionWithState(tx, pool.currentHead.Load(), pool.signer, opts); err != nil {
 		return err
