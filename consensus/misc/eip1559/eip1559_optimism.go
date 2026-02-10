@@ -6,16 +6,18 @@ import (
 	"fmt"
 	gomath "math"
 
-	"github.com/ethereum/go-ethereum/params"
 )
+type ForkChecker interface {
+	IsMantleArsia(time uint64) bool
+}
 
 const HoloceneExtraDataVersionByte = uint8(0x00)
 const MinBaseFeeExtraDataVersionByte = uint8(0x01)
 
 // ValidateOptimismExtraData validates the Optimism extra data.
 // It uses the config and parent time to determine how to do the validation.
-func ValidateOptimismExtraData(config *params.ChainConfig, time uint64, extraData []byte) error {
-	if config.IsMantleArsia(time) {
+func ValidateOptimismExtraData(forkChecker ForkChecker, time uint64, extraData []byte) error {
+	if forkChecker.IsMantleArsia(time) {
 		return ValidateMinBaseFeeExtraData(extraData)
 	} else if len(extraData) > 0 { // pre-Arsia
 		return errors.New("extraData must be empty before Arsia")
@@ -26,8 +28,8 @@ func ValidateOptimismExtraData(config *params.ChainConfig, time uint64, extraDat
 // DecodeOptimismExtraData decodes the Optimism extra data.
 // It uses the config and parent time to determine how to do the decoding.
 // The parent.extraData is expected to be valid (i.e. ValidateOptimismExtraData has been called previously)
-func DecodeOptimismExtraData(config *params.ChainConfig, time uint64, extraData []byte) (uint64, uint64, *uint64) {
-	if config.IsMantleArsia(time) {
+func DecodeOptimismExtraData(forkChecker ForkChecker, time uint64, extraData []byte) (uint64, uint64, *uint64) {
+	if forkChecker.IsMantleArsia(time) {
 		denominator, elasticity, minBaseFee := DecodeMinBaseFeeExtraData(extraData)
 		return denominator, elasticity, minBaseFee
 	}
@@ -36,8 +38,8 @@ func DecodeOptimismExtraData(config *params.ChainConfig, time uint64, extraData 
 
 // EncodeOptimismExtraData encodes the Optimism extra data.
 // It uses the config and parent time to determine how to do the encoding.
-func EncodeOptimismExtraData(config *params.ChainConfig, time uint64, denominator, elasticity uint64, minBaseFee *uint64) []byte {
-	if config.IsMantleArsia(time) {
+func EncodeOptimismExtraData(forkChecker ForkChecker, time uint64, denominator, elasticity uint64, minBaseFee *uint64) []byte {
+	if forkChecker.IsMantleArsia(time) {
 		if minBaseFee == nil {
 			panic("minBaseFee cannot be nil since the MinBaseFee feature is enabled")
 		}
