@@ -1111,7 +1111,7 @@ func (api *BlockChainAPI) EstimateTotalFee(ctx context.Context, args Transaction
 
 	// EstimateTotalFee is not supported for pre-Arsia blocks as L1 data fee
 	// and operator fee are Arsia+ concepts
-	if !api.b.ChainConfig().IsMantleArsia(uint64(header.Number.Int64())) {
+	if !api.b.ChainConfig().IsMantleArsia(uint64(header.Time)) {
 		return nil, errors.New("eth_estimateTotalFee is not supported for pre-Arsia blocks")
 	}
 
