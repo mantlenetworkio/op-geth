@@ -1098,16 +1098,24 @@ func (api *BlockChainAPI) EstimateGas(ctx context.Context, args TransactionArgs,
 // Returns:
 //   - Total fee in wei (L2 execution fee + L1 data fee + operator fee)
 func (api *BlockChainAPI) EstimateTotalFee(ctx context.Context, args TransactionArgs, blockNrOrHash *rpc.BlockNumberOrHash) (*hexutil.Big, error) {
+	// Blob transactions are not supported — the total fee calculation does not include blob gas fee.
+	if args.BlobHashes != nil {
+		return nil, errors.New("eth_estimateTotalFee does not support blob transactions")
+	}
+
 	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 	if blockNrOrHash != nil {
 		bNrOrHash = *blockNrOrHash
 	}
 
-	// Get the header for the target block
-	header, err := headerByNumberOrHash(ctx, api.b, bNrOrHash)
+	// Resolve state and header in one call, then pin bNrOrHash to the concrete block number.
+	// This avoids a redundant header lookup and prevents cross-block inconsistency when
+	// using the "latest" alias and a new block arrives during processing.
+	state, header, err := api.b.StateAndHeaderByNumberOrHash(ctx, bNrOrHash)
 	if err != nil {
 		return nil, err
 	}
+	bNrOrHash = rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(header.Number.Int64()))
 
 	// EstimateTotalFee is not supported for pre-Arsia blocks as L1 data fee
 	// and operator fee are Arsia+ concepts
@@ -1115,16 +1123,11 @@ func (api *BlockChainAPI) EstimateTotalFee(ctx context.Context, args Transaction
 		return nil, errors.New("eth_estimateTotalFee is not supported for pre-Arsia blocks")
 	}
 
-	// 1. Estimate L2 gas
+	// 1. Estimate L2 gas (DoEstimateGas internally resolves state+header again, but
+	// bNrOrHash is now pinned to a concrete block number so it will be consistent)
 	gasEstimate, err := DoEstimateGas(ctx, api.b, args, bNrOrHash, nil, nil, api.b.RPCGasCap())
 	if err != nil {
 		return nil, fmt.Errorf("failed to estimate gas: %w", err)
-	}
-
-	// Get state to calculate L1 cost and operator cost
-	state, header, err := api.b.StateAndHeaderByNumberOrHash(ctx, bNrOrHash)
-	if err != nil {
-		return nil, err
 	}
 
 	// Determine effective gas price
@@ -1157,7 +1160,7 @@ func (api *BlockChainAPI) EstimateTotalFee(ctx context.Context, args Transaction
 		// No gas price specified, use suggested gas price
 		gasPriceForEstimate, err := api.b.SuggestGasTipCap(ctx)
 		if err != nil {
-			return nil, errors.New("failed to get suggest gas tip cap")
+			return nil, fmt.Errorf("failed to get suggest gas tip cap: %w", err)
 		}
 		if header.BaseFee != nil {
 			gasPriceForEstimate = new(big.Int).Add(gasPriceForEstimate, header.BaseFee)
@@ -1176,16 +1179,19 @@ func (api *BlockChainAPI) EstimateTotalFee(ctx context.Context, args Transaction
 		return nil, err
 	}
 
-	// Determine transaction type based on args for accurate RLP encoding size
-	txType := types.LegacyTxType
-	if args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil {
-		txType = types.DynamicFeeTxType
-	} else if args.AccessList != nil && len(*args.AccessList) > 0 {
-		txType = types.AccessListTxType
-	}
-	// Convert args to a transaction to properly calculate RollupCostData (using the full RLP encoded size)
-	tx := args.ToTransaction(txType)
+	// Convert args to a transaction to properly calculate RollupCostData (using the full RLP encoded size).
+	// ToTransaction auto-detects the tx type from args fields (MaxFeePerGas, BlobHashes, etc.),
+	// the defaultType parameter is only a fallback when no type-specific fields are present.
+	//
+	// ToTransaction builds an unsigned tx (V/R/S are nil/zero). A signed tx has additional bytes
+	// for the ECDSA signature and other encoding overhead. Add a constant of 80 to FastLzSize to
+	// compensate, consistent with CalculateRollupCostDataFromMessage which adds 80 to cover
+	// "sigs(V,R,S) and other data". Signature bytes are high-entropy so FastLZ compresses at ~1:1.
+	// Without this, the Fjord L1 cost formula (which uses FastLzSize) underestimates L1 data fee
+	// by ~6-12% for transactions with significant calldata.
+	tx := args.ToTransaction(types.LegacyTxType)
 	rollupCostData := tx.RollupCostData()
+	rollupCostData.FastLzSize += 80
 
 	// Get L1 cost function
 	l1CostFunc := types.NewL1CostFunc(api.b.ChainConfig(), state)

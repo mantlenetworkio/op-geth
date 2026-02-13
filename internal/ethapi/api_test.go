@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,6 +44,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/beacon"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/filtermaps"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -1058,6 +1060,460 @@ func TestEstimateGas(t *testing.T) {
 			t.Errorf("test %d, result mismatch, have\n%v\n, want\n%v\n", i, uint64(result), tc.want)
 		}
 	}
+}
+
+func TestEstimateTotalFee(t *testing.T) {
+	t.Parallel()
+
+	u64Ptr := func(v uint64) *uint64 { return &v }
+
+	var (
+		accs             = newAccounts(3)
+		arsiaTime        = uint64(50) // Block 5 (time=50) is first Arsia block
+		l1BaseFeeVal     = big.NewInt(1_000_000)
+		l1BlobBaseFeeVal = big.NewInt(100_000)
+		baseFeeScalarVal = uint32(1000)
+		blobFeeScalarVal = uint32(500)
+		opFeeScalarVal   = uint32(10)
+		opFeeConstantVal = uint64(1_000_000)
+		tokenRatioVal    = big.NewInt(1)
+	)
+
+	// Encode L1FeeScalarsSlot: baseFeeScalar at [16:20), blobBaseFeeScalar at [20:24)
+	l1FeeScalarsBytes := make([]byte, 32)
+	binary.BigEndian.PutUint32(l1FeeScalarsBytes[16:20], baseFeeScalarVal)
+	binary.BigEndian.PutUint32(l1FeeScalarsBytes[20:24], blobFeeScalarVal)
+
+	// Encode OperatorFeeParamsSlot: scalar at [20:24), constant at [24:32)
+	opFeeParamsBytes := make([]byte, 32)
+	binary.BigEndian.PutUint32(opFeeParamsBytes[20:24], opFeeScalarVal)
+	binary.BigEndian.PutUint64(opFeeParamsBytes[24:32], opFeeConstantVal)
+
+	// Build chain config: Optimism + all OP forks + Arsia
+	chainCfg := func() *params.ChainConfig {
+		conf := *params.OptimismTestConfig
+		conf.MantleArsiaTime = u64Ptr(arsiaTime)
+		return &conf
+	}()
+
+	genBlocks := 10
+	signer := types.HomesteadSigner{}
+
+	// Arsia-compatible deposit tx with L1 attributes data (required for MantleArsia blocks).
+	// CalcDAFootprint expects first tx in Arsia blocks to be a deposit with Arsia L1 attributes.
+	arsiaL1AttrData := make([]byte, types.JovianL1AttributesLen) // 178 bytes
+	copy(arsiaL1AttrData[0:4], types.MantleArsiaL1AttributesSelector)
+	binary.BigEndian.PutUint16(arsiaL1AttrData[types.JovianL1AttributesLen-2:], 100) // DA gas scalar
+	dummyAddr := common.Address{0xff}
+	arsiaDepositTx := types.NewTx(&types.DepositTx{
+		Value: big.NewInt(0),
+		Gas:   params.TxGas * 2,
+		To:    &dummyAddr,
+		Data:  arsiaL1AttrData,
+	})
+
+	// Arsia blocks require ExtraData with EIP-1559 params (denominator, elasticity, minBaseFee)
+	// so that CalcBaseFee can decode them. Use Canyon denominator=250, elasticity=50, minBaseFee=0.
+	arsiaExtraData := eip1559.EncodeMinBaseFeeExtraData(250, 50, 0)
+
+	// blockGenWithDeposit builds a generator that prepends a deposit tx and sets
+	// ExtraData for Arsia blocks (needed for CalcDAFootprint + CalcBaseFee).
+	blockGenWithDeposit := func(key *ecdsa.PrivateKey, to *common.Address) func(int, *core.BlockGen) {
+		return func(i int, b *core.BlockGen) {
+			blockTime := uint64((i + 1) * 10) // genesis time=0, each block +10s
+			if blockTime >= arsiaTime {
+				b.AddTx(arsiaDepositTx)
+				b.SetExtra(arsiaExtraData)
+			}
+			tx, _ := types.SignTx(types.NewTx(&types.LegacyTx{
+				Nonce: uint64(i), To: to,
+				Value: big.NewInt(1000), Gas: params.TxGas, GasPrice: b.BaseFee(),
+			}), signer, key)
+			b.AddTx(tx)
+			b.SetPoS()
+		}
+	}
+
+	genesis := &core.Genesis{
+		Config: chainCfg,
+		Alloc: types.GenesisAlloc{
+			accs[0].addr: {Balance: big.NewInt(params.Ether)},
+			accs[1].addr: {Balance: big.NewInt(params.Ether)},
+			// L1Block predeploy with L1 fee + operator fee parameters
+			types.L1BlockAddr: {
+				Balance: big.NewInt(0),
+				Storage: map[common.Hash]common.Hash{
+					types.L1BaseFeeSlot:        common.BigToHash(l1BaseFeeVal),
+					types.L1BlobBaseFeeSlot:    common.BigToHash(l1BlobBaseFeeVal),
+					types.L1FeeScalarsSlot:     common.BytesToHash(l1FeeScalarsBytes),
+					types.OperatorFeeParamsSlot: common.BytesToHash(opFeeParamsBytes),
+				},
+			},
+			// GasOracle predeploy with token ratio
+			types.GasOracleAddr: {
+				Balance: big.NewInt(0),
+				Storage: map[common.Hash]common.Hash{
+					types.TokenRatioSlot: common.BigToHash(tokenRatioVal),
+				},
+			},
+		},
+	}
+
+	backend := newTestBackend(t, genBlocks, genesis, beacon.New(ethash.NewFaker()),
+		blockGenWithDeposit(accs[0].key, &accs[1].addr))
+
+	api := NewBlockChainAPI(backend)
+
+	// Get latest header for baseFee reference
+	latestHeader, err := backend.HeaderByNumber(context.Background(), rpc.LatestBlockNumber)
+	require.NoError(t, err)
+	baseFee := latestHeader.BaseFee
+	t.Logf("latest block: number=%d time=%d baseFee=%s", latestHeader.Number, latestHeader.Time, baseFee)
+
+	// Helper: effective gas price for EIP-1559
+	effectiveGP := func(maxFee, maxTip *big.Int) *big.Int {
+		effective := new(big.Int).Add(baseFee, maxTip)
+		if effective.Cmp(maxFee) > 0 {
+			return new(big.Int).Set(maxFee)
+		}
+		return effective
+	}
+
+	// Helper: expected operator fee = gas * scalar * 100 + constant
+	calcOperatorFee := func(gasEst hexutil.Uint64) *big.Int {
+		fee := new(big.Int).SetUint64(uint64(gasEst))
+		fee.Mul(fee, new(big.Int).SetUint64(uint64(opFeeScalarVal)))
+		fee.Mul(fee, big.NewInt(100))
+		fee.Add(fee, new(big.Int).SetUint64(opFeeConstantVal))
+		return fee
+	}
+
+	// Helper: Fjord L1 data fee from FastLzSize
+	calcL1DataFee := func(fastLzSize uint64) *big.Int {
+		// l1FeeScaled = baseFeeScalar * l1BaseFee * 16 + blobFeeScalar * l1BlobBaseFee
+		l1FeeScaled := new(big.Int).Mul(new(big.Int).SetUint64(uint64(baseFeeScalarVal)), l1BaseFeeVal)
+		l1FeeScaled.Mul(l1FeeScaled, big.NewInt(16))
+		blobPart := new(big.Int).Mul(new(big.Int).SetUint64(uint64(blobFeeScalarVal)), l1BlobBaseFeeVal)
+		l1FeeScaled.Add(l1FeeScaled, blobPart)
+
+		// estimatedSize = max(MinTransactionSizeScaled, intercept + coef*fastLzSize)
+		estimatedSize := new(big.Int).Mul(big.NewInt(836_500), new(big.Int).SetUint64(fastLzSize))
+		estimatedSize.Add(estimatedSize, big.NewInt(-42_585_600))
+		minSize := new(big.Int).Mul(big.NewInt(100), big.NewInt(1_000_000))
+		if estimatedSize.Cmp(minSize) < 0 {
+			estimatedSize.Set(minSize)
+		}
+
+		l1Cost := new(big.Int).Mul(estimatedSize, l1FeeScaled)
+		l1Cost.Div(l1Cost, big.NewInt(1_000_000_000_000))
+		l1Cost.Mul(l1Cost, tokenRatioVal) // apply token ratio
+		return l1Cost
+	}
+
+	// ----------------------------------------------------------------
+	// 1. Pre-Arsia block → "not supported" error
+	// ----------------------------------------------------------------
+	t.Run("PreArsiaBlock", func(t *testing.T) {
+		// Block 1 has time 10 < arsiaTime(50)
+		preArsiaBlock := rpc.BlockNumber(1)
+		bNrOrHash := rpc.BlockNumberOrHash{BlockNumber: &preArsiaBlock}
+		_, err := api.EstimateTotalFee(context.Background(), TransactionArgs{
+			From:  &accs[0].addr,
+			To:    &accs[1].addr,
+			Value: (*hexutil.Big)(big.NewInt(1000)),
+		}, &bNrOrHash)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "not supported for pre-Arsia blocks")
+	})
+
+	// ----------------------------------------------------------------
+	// 2. Blob transaction → rejected
+	// ----------------------------------------------------------------
+	t.Run("BlobTxRejected", func(t *testing.T) {
+		blobHash := common.HexToHash("0x01")
+		_, err := api.EstimateTotalFee(context.Background(), TransactionArgs{
+			From:       &accs[0].addr,
+			To:         &accs[1].addr,
+			Value:      (*hexutil.Big)(big.NewInt(1000)),
+			BlobHashes: []common.Hash{blobHash},
+		}, nil)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "does not support blob transactions")
+	})
+
+	// ----------------------------------------------------------------
+	// 3. Legacy transaction with explicit gasPrice
+	// ----------------------------------------------------------------
+	t.Run("LegacyGasPrice", func(t *testing.T) {
+		explicitPrice := new(big.Int).Mul(baseFee, big.NewInt(2))
+		args := TransactionArgs{
+			From:     &accs[0].addr,
+			To:       &accs[1].addr,
+			Value:    (*hexutil.Big)(big.NewInt(1000)),
+			GasPrice: (*hexutil.Big)(explicitPrice),
+		}
+
+		totalFee, err := api.EstimateTotalFee(context.Background(), args, nil)
+		require.NoError(t, err)
+
+		gasEst, err := api.EstimateGas(context.Background(), args, nil, nil, nil)
+		require.NoError(t, err)
+
+		l2Fee := new(big.Int).Mul(new(big.Int).SetUint64(uint64(gasEst)), explicitPrice)
+		opFee := calcOperatorFee(gasEst)
+		minExpected := new(big.Int).Add(l2Fee, opFee)
+
+		// totalFee >= l2Fee + operatorFee (L1 data fee >= 0)
+		require.True(t, totalFee.ToInt().Cmp(minExpected) >= 0,
+			"totalFee (%s) < l2Fee+opFee (%s)", totalFee.ToInt(), minExpected)
+
+		// L1 data fee should be positive
+		derivedL1Fee := new(big.Int).Sub(totalFee.ToInt(), minExpected)
+		require.True(t, derivedL1Fee.Sign() > 0, "L1 data fee should be positive, got %s", derivedL1Fee)
+		t.Logf("gasEst=%d l2Fee=%s l1Fee=%s opFee=%s total=%s", gasEst, l2Fee, derivedL1Fee, opFee, totalFee.ToInt())
+	})
+
+	// ----------------------------------------------------------------
+	// 4. EIP-1559 with full params: effectiveGasPrice = min(maxFee, baseFee+tip)
+	// ----------------------------------------------------------------
+	t.Run("EIP1559Full", func(t *testing.T) {
+		maxFee := new(big.Int).Mul(baseFee, big.NewInt(3))
+		maxTip := new(big.Int).Div(baseFee, big.NewInt(10))
+		expectedPrice := effectiveGP(maxFee, maxTip) // baseFee + tip < maxFee
+
+		args := TransactionArgs{
+			From:                 &accs[0].addr,
+			To:                   &accs[1].addr,
+			Value:                (*hexutil.Big)(big.NewInt(1000)),
+			MaxFeePerGas:         (*hexutil.Big)(maxFee),
+			MaxPriorityFeePerGas: (*hexutil.Big)(maxTip),
+		}
+
+		totalFee, err := api.EstimateTotalFee(context.Background(), args, nil)
+		require.NoError(t, err)
+
+		gasEst, err := api.EstimateGas(context.Background(), args, nil, nil, nil)
+		require.NoError(t, err)
+
+		l2Fee := new(big.Int).Mul(new(big.Int).SetUint64(uint64(gasEst)), expectedPrice)
+		opFee := calcOperatorFee(gasEst)
+		minExpected := new(big.Int).Add(l2Fee, opFee)
+		require.True(t, totalFee.ToInt().Cmp(minExpected) >= 0,
+			"totalFee (%s) < l2Fee+opFee (%s)", totalFee.ToInt(), minExpected)
+
+		// Verify effectiveGasPrice = baseFee + tip (not maxFee)
+		l2FeeMaxFee := new(big.Int).Mul(new(big.Int).SetUint64(uint64(gasEst)), maxFee)
+		require.True(t, totalFee.ToInt().Cmp(new(big.Int).Add(l2FeeMaxFee, opFee)) < 0,
+			"totalFee should use effectiveGasPrice (baseFee+tip), not maxFeePerGas")
+		t.Logf("effectiveGP=%s gasEst=%d total=%s", expectedPrice, gasEst, totalFee.ToInt())
+	})
+
+	// ----------------------------------------------------------------
+	// 5. EIP-1559 with only maxFeePerGas → tip defaults to 0, effectiveGasPrice = baseFee
+	// ----------------------------------------------------------------
+	t.Run("EIP1559MaxFeeOnly", func(t *testing.T) {
+		maxFee := new(big.Int).Mul(baseFee, big.NewInt(3))
+		expectedPrice := new(big.Int).Set(baseFee) // tip=0 → effectiveGP = baseFee
+
+		args := TransactionArgs{
+			From:         &accs[0].addr,
+			To:           &accs[1].addr,
+			Value:        (*hexutil.Big)(big.NewInt(1000)),
+			MaxFeePerGas: (*hexutil.Big)(maxFee),
+		}
+
+		totalFee, err := api.EstimateTotalFee(context.Background(), args, nil)
+		require.NoError(t, err)
+
+		gasEst, err := api.EstimateGas(context.Background(), args, nil, nil, nil)
+		require.NoError(t, err)
+
+		l2Fee := new(big.Int).Mul(new(big.Int).SetUint64(uint64(gasEst)), expectedPrice)
+		opFee := calcOperatorFee(gasEst)
+		minExpected := new(big.Int).Add(l2Fee, opFee)
+		require.True(t, totalFee.ToInt().Cmp(minExpected) >= 0,
+			"totalFee (%s) < l2Fee+opFee (%s)", totalFee.ToInt(), minExpected)
+		t.Logf("effectiveGP=%s (=baseFee) gasEst=%d total=%s", expectedPrice, gasEst, totalFee.ToInt())
+	})
+
+	// ----------------------------------------------------------------
+	// 6. No fee params → SuggestGasTipCap(=0) + baseFee
+	// ----------------------------------------------------------------
+	t.Run("NoFeeParams", func(t *testing.T) {
+		args := TransactionArgs{
+			From:  &accs[0].addr,
+			To:    &accs[1].addr,
+			Value: (*hexutil.Big)(big.NewInt(1000)),
+		}
+
+		totalFee, err := api.EstimateTotalFee(context.Background(), args, nil)
+		require.NoError(t, err)
+
+		gasEst, err := api.EstimateGas(context.Background(), args, nil, nil, nil)
+		require.NoError(t, err)
+
+		// SuggestGasTipCap returns 0, so effectiveGasPrice = baseFee
+		l2Fee := new(big.Int).Mul(new(big.Int).SetUint64(uint64(gasEst)), baseFee)
+		opFee := calcOperatorFee(gasEst)
+		minExpected := new(big.Int).Add(l2Fee, opFee)
+		require.True(t, totalFee.ToInt().Cmp(minExpected) >= 0,
+			"totalFee (%s) < l2Fee+opFee (%s)", totalFee.ToInt(), minExpected)
+	})
+
+	// ----------------------------------------------------------------
+	// 7. L1 data fee — verify FastLzSize+80 signature compensation
+	// ----------------------------------------------------------------
+	t.Run("L1DataFeeCompensation", func(t *testing.T) {
+		// Use large non-compressible calldata to exceed MinTransactionSize floor
+		calldata := make([]byte, 500)
+		for i := range calldata {
+			calldata[i] = byte(i % 256)
+		}
+		cd := hexutil.Bytes(calldata)
+
+		args := TransactionArgs{
+			From:  &accs[0].addr,
+			To:    &accs[1].addr,
+			Value: (*hexutil.Big)(big.NewInt(0)),
+			Data:  &cd,
+		}
+
+		totalFee, err := api.EstimateTotalFee(context.Background(), args, nil)
+		require.NoError(t, err)
+
+		gasEst, err := api.EstimateGas(context.Background(), args, nil, nil, nil)
+		require.NoError(t, err)
+
+		// Replicate internal computation: CallDefaults → ToTransaction → RollupCostData
+		argsCopy := TransactionArgs{
+			From:  &accs[0].addr,
+			To:    &accs[1].addr,
+			Value: (*hexutil.Big)(big.NewInt(0)),
+			Data:  &cd,
+		}
+		require.NoError(t, argsCopy.CallDefaults(backend.RPCGasCap(), baseFee, chainCfg.ChainID))
+		tx := argsCopy.ToTransaction(types.LegacyTxType)
+		costData := tx.RollupCostData()
+		costData.FastLzSize += 80 // signature compensation
+
+		expectedL1Fee := calcL1DataFee(costData.FastLzSize)
+
+		l2Fee := new(big.Int).Mul(new(big.Int).SetUint64(uint64(gasEst)), baseFee)
+		opFee := calcOperatorFee(gasEst)
+		expectedTotal := new(big.Int).Add(l2Fee, expectedL1Fee)
+		expectedTotal.Add(expectedTotal, opFee)
+
+		require.Equal(t, expectedTotal.String(), totalFee.ToInt().String(),
+			"totalFee mismatch: l2=%s l1=%s op=%s", l2Fee, expectedL1Fee, opFee)
+		require.True(t, expectedL1Fee.Sign() > 0, "L1 data fee should be positive for large calldata")
+		t.Logf("fastLzSize=%d l1Fee=%s total=%s", costData.FastLzSize, expectedL1Fee, totalFee.ToInt())
+	})
+
+	// ----------------------------------------------------------------
+	// 8. Operator fee non-zero — correctly accumulated
+	// ----------------------------------------------------------------
+	t.Run("OperatorFeeNonZero", func(t *testing.T) {
+		args := TransactionArgs{
+			From:  &accs[0].addr,
+			To:    &accs[1].addr,
+			Value: (*hexutil.Big)(big.NewInt(1000)),
+		}
+
+		totalFee, err := api.EstimateTotalFee(context.Background(), args, nil)
+		require.NoError(t, err)
+
+		gasEst, err := api.EstimateGas(context.Background(), args, nil, nil, nil)
+		require.NoError(t, err)
+
+		opFee := calcOperatorFee(gasEst)
+		require.True(t, opFee.Sign() > 0, "operator fee should be positive")
+
+		l2Fee := new(big.Int).Mul(new(big.Int).SetUint64(uint64(gasEst)), baseFee)
+		require.True(t, totalFee.ToInt().Cmp(l2Fee) > 0, "totalFee should exceed pure l2Fee")
+		t.Logf("gasEst=%d opFee=%s total=%s", gasEst, opFee, totalFee.ToInt())
+	})
+
+	// ----------------------------------------------------------------
+	// 9. Operator fee zero — zero when params empty
+	// ----------------------------------------------------------------
+	t.Run("OperatorFeeZero", func(t *testing.T) {
+		genesisNoOp := &core.Genesis{
+			Config: chainCfg,
+			Alloc: types.GenesisAlloc{
+				accs[0].addr: {Balance: big.NewInt(params.Ether)},
+				accs[1].addr: {Balance: big.NewInt(params.Ether)},
+				types.L1BlockAddr: {
+					Balance: big.NewInt(0),
+					Storage: map[common.Hash]common.Hash{
+						types.L1BaseFeeSlot:     common.BigToHash(l1BaseFeeVal),
+						types.L1BlobBaseFeeSlot: common.BigToHash(l1BlobBaseFeeVal),
+						types.L1FeeScalarsSlot:  common.BytesToHash(l1FeeScalarsBytes),
+						// OperatorFeeParamsSlot intentionally omitted → zero
+					},
+				},
+				types.GasOracleAddr: {
+					Balance: big.NewInt(0),
+					Storage: map[common.Hash]common.Hash{
+						types.TokenRatioSlot: common.BigToHash(tokenRatioVal),
+					},
+				},
+			},
+		}
+		backendNoOp := newTestBackend(t, genBlocks, genesisNoOp, beacon.New(ethash.NewFaker()),
+			blockGenWithDeposit(accs[0].key, &accs[1].addr))
+		apiNoOp := NewBlockChainAPI(backendNoOp)
+
+		noOpHeader, err := backendNoOp.HeaderByNumber(context.Background(), rpc.LatestBlockNumber)
+		require.NoError(t, err)
+
+		args := TransactionArgs{
+			From:  &accs[0].addr,
+			To:    &accs[1].addr,
+			Value: (*hexutil.Big)(big.NewInt(1000)),
+		}
+		totalFee, err := apiNoOp.EstimateTotalFee(context.Background(), args, nil)
+		require.NoError(t, err)
+
+		gasEst, err := apiNoOp.EstimateGas(context.Background(), args, nil, nil, nil)
+		require.NoError(t, err)
+
+		// Compute expected L1 data fee independently
+		argsCopy := TransactionArgs{
+			From:  &accs[0].addr,
+			To:    &accs[1].addr,
+			Value: (*hexutil.Big)(big.NewInt(1000)),
+		}
+		require.NoError(t, argsCopy.CallDefaults(backendNoOp.RPCGasCap(), noOpHeader.BaseFee, chainCfg.ChainID))
+		tx := argsCopy.ToTransaction(types.LegacyTxType)
+		costData := tx.RollupCostData()
+		costData.FastLzSize += 80
+		expectedL1Fee := calcL1DataFee(costData.FastLzSize)
+
+		l2Fee := new(big.Int).Mul(new(big.Int).SetUint64(uint64(gasEst)), noOpHeader.BaseFee)
+		expectedTotal := new(big.Int).Add(l2Fee, expectedL1Fee)
+		// No operator fee component
+		require.Equal(t, expectedTotal.String(), totalFee.ToInt().String(),
+			"with zero operator params, totalFee should be l2Fee+l1Fee only")
+		t.Logf("l2Fee=%s l1Fee=%s total=%s (no operator)", l2Fee, expectedL1Fee, totalFee.ToInt())
+	})
+
+	// ----------------------------------------------------------------
+	// 10. Contract creation (To = nil) → normal return
+	// ----------------------------------------------------------------
+	t.Run("ContractCreation", func(t *testing.T) {
+		initCode := hexutil.Bytes{0x60, 0x00, 0x60, 0x00, 0xf3} // PUSH1 0 PUSH1 0 RETURN
+		args := TransactionArgs{
+			From:  &accs[0].addr,
+			To:    nil,
+			Value: (*hexutil.Big)(big.NewInt(0)),
+			Data:  &initCode,
+		}
+
+		totalFee, err := api.EstimateTotalFee(context.Background(), args, nil)
+		require.NoError(t, err)
+		require.True(t, totalFee.ToInt().Sign() > 0, "totalFee for contract creation should be positive")
+		t.Logf("contract creation total=%s", totalFee.ToInt())
+	})
 }
 
 func TestCall(t *testing.T) {
@@ -3330,7 +3786,7 @@ func TestRPCGetBlockOrHeader(t *testing.T) {
 			Address:   common.Address{0x12, 0x34},
 			Amount:    10,
 		}
-		pending = types.NewBlock(&types.Header{Number: big.NewInt(11), Time: 42}, &types.Body{Transactions: types.Transactions{tx}, Withdrawals: types.Withdrawals{withdrawal}}, nil, blocktest.NewHasher(), params.TestChainConfig)
+		_ = types.NewBlock(&types.Header{Number: big.NewInt(11), Time: 42}, &types.Body{Transactions: types.Transactions{tx}, Withdrawals: types.Withdrawals{withdrawal}}, nil, blocktest.NewHasher(), params.TestChainConfig)
 	)
 	backend := newTestBackend(t, genBlocks, genesis, ethash.NewFaker(), func(i int, b *core.BlockGen) {
 		// Transfer from account[0] to account[1]
