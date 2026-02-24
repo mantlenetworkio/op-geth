@@ -278,6 +278,11 @@ var (
 		Usage:    "Manually specify optimism",
 		Category: flags.EthCategory,
 	}
+	OverrideMantleArsia = &cli.Uint64Flag{
+		Name:     "override.arsia",
+		Usage:    "Manually specify the MantleArsia fork timestamp, overriding the bundled setting",
+		Category: flags.EthCategory,
+	}
 	SyncModeFlag = &cli.StringFlag{
 		Name:     "syncmode",
 		Usage:    `Blockchain sync mode ("snap" or "full")`,

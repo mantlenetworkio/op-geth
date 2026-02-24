@@ -73,6 +73,11 @@ type Genesis struct {
 	BaseFee       *big.Int    `json:"baseFeePerGas"` // EIP-1559
 	ExcessBlobGas *uint64     `json:"excessBlobGas"` // EIP-4844
 	BlobGasUsed   *uint64     `json:"blobGasUsed"`   // EIP-4844
+
+	// StateHash represents the genesis state, to allow instantiation of a chain with missing initial state.
+	// Chains with history pruning, or extraordinarily large genesis allocation (e.g. after a regenesis event)
+	// may utilize this to get started, and then state-sync the latest state, while still verifying the header chain.
+	StateHash *common.Hash `json:"stateHash,omitempty"`
 }
 
 // copy copies the genesis.
@@ -282,7 +287,10 @@ type ChainOverrides struct {
 	OverrideOptimismBedrock  *big.Int
 	OverrideOptimismRegolith *uint64
 	OverrideOptimism         *bool
-	ApplyMantleUpgrades      bool
+
+	// mantle
+	OverrideMantleArsia *uint64
+	ApplyMantleUpgrades bool
 }
 
 // apply applies the chain overrides on the supplied chain config.
@@ -319,24 +327,43 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 		}
 	}
 
-	// mantle
-	mantleUpgradeChainConfig := params.GetUpgradeConfigForMantle(cfg.ChainID)
-	if o.ApplyMantleUpgrades && mantleUpgradeChainConfig != nil {
-		cfg.BaseFeeTime = mantleUpgradeChainConfig.BaseFeeTime
-		cfg.BVMETHMintUpgradeTime = mantleUpgradeChainConfig.BVMETHMintUpgradeTime
-		cfg.MetaTxV2UpgradeTime = mantleUpgradeChainConfig.MetaTxV2UpgradeTime
-		cfg.MetaTxV3UpgradeTime = mantleUpgradeChainConfig.MetaTxV3UpgradeTime
-		cfg.ProxyOwnerUpgradeTime = mantleUpgradeChainConfig.ProxyOwnerUpgradeTime
-		cfg.MantleEverestTime = mantleUpgradeChainConfig.MantleEverestTime
-		cfg.MantleSkadiTime = mantleUpgradeChainConfig.MantleSkadiTime
-		cfg.MantleLimbTime = mantleUpgradeChainConfig.MantleLimbTime
+	// mantle overrides start from here
+	if o.ApplyMantleUpgrades {
+		// fetch mantle mainnet/sepolia upgrade config
+		mantleUpgradeChainConfig := params.GetUpgradeConfigForMantle(cfg.ChainID)
+		if mantleUpgradeChainConfig != nil {
+			cfg.BaseFeeTime = mantleUpgradeChainConfig.BaseFeeTime
+			cfg.BVMETHMintUpgradeTime = mantleUpgradeChainConfig.BVMETHMintUpgradeTime
+			cfg.MetaTxV2UpgradeTime = mantleUpgradeChainConfig.MetaTxV2UpgradeTime
+			cfg.MetaTxV3UpgradeTime = mantleUpgradeChainConfig.MetaTxV3UpgradeTime
+			cfg.ProxyOwnerUpgradeTime = mantleUpgradeChainConfig.ProxyOwnerUpgradeTime
+			cfg.MantleEverestTime = mantleUpgradeChainConfig.MantleEverestTime
+			cfg.MantleSkadiTime = mantleUpgradeChainConfig.MantleSkadiTime
+			cfg.MantleLimbTime = mantleUpgradeChainConfig.MantleLimbTime
+			cfg.MantleArsiaTime = mantleUpgradeChainConfig.MantleArsiaTime
+		}
+
+		if o.OverrideMantleArsia != nil {
+			cfg.MantleArsiaTime = o.OverrideMantleArsia
+		}
+
+		// override optimism fork times (canyon/ecotone/fjord/granite/holocene/isthmus/jovian)
+		cfg.CanyonTime = cfg.MantleArsiaTime
+		cfg.EcotoneTime = cfg.MantleArsiaTime
+		cfg.FjordTime = cfg.MantleArsiaTime
+		cfg.GraniteTime = cfg.MantleArsiaTime
+		cfg.HoloceneTime = cfg.MantleArsiaTime
+		cfg.IsthmusTime = cfg.MantleArsiaTime
+		cfg.JovianTime = cfg.MantleArsiaTime
+		// Interop is not supported by mantle.
+		// cfg.InteropTime = cfg.MantleArsiaTime
 
 		// active standard EVM version (shanghai/cancun/prague)  in mantle skadi time
-		cfg.ShanghaiTime = mantleUpgradeChainConfig.MantleSkadiTime
-		cfg.CancunTime = mantleUpgradeChainConfig.MantleSkadiTime
-		cfg.PragueTime = mantleUpgradeChainConfig.MantleSkadiTime
+		cfg.ShanghaiTime = cfg.MantleSkadiTime
+		cfg.CancunTime = cfg.MantleSkadiTime
+		cfg.PragueTime = cfg.MantleSkadiTime
 		// active standard EVM version (osaka)  in mantle limb time
-		cfg.OsakaTime = mantleUpgradeChainConfig.MantleLimbTime
+		cfg.OsakaTime = cfg.MantleLimbTime
 	}
 
 	return cfg.CheckConfigForkOrder()
@@ -440,9 +467,15 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, triedb *triedb.Database, g
 		return nil, common.Hash{}, nil, err
 	}
 
+	var genesisTimestamp *uint64
+	if genesis != nil {
+		genesisTimestamp = &genesis.Timestamp
+	}
+
+	// OP-Stack diff: provide genesis timestamp (may be nil), to check bedrock-migration compat with config.
 	// TODO(rjl493456442) better to define the comparator of chain config
 	// and short circuit if the chain config is not changed.
-	compatErr := storedCfg.CheckCompatible(newCfg, head.Number.Uint64(), head.Time)
+	compatErr := storedCfg.CheckCompatible(newCfg, head.Number.Uint64(), head.Time, genesisTimestamp)
 	if compatErr != nil && ((head.Number.Uint64() != 0 && compatErr.RewindToBlock != 0) || (head.Time != 0 && compatErr.RewindToTime != 0)) {
 		return newCfg, ghash, compatErr, nil
 	}

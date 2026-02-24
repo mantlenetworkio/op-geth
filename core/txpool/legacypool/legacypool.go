@@ -265,7 +265,7 @@ type LegacyPool struct {
 
 	changesSinceReorg int // A counter for how many drops we've performed in-between reorg.
 
-	l1CostFn txpool.L1CostFunc // To apply L1 costs as rollup, optional field, may be nil.
+	rollupCostFn txpool.RollupCostFunc // Additional rollup cost function, optional field, may be nil.
 
 	// Preconf variables
 	preconfReadyCh       chan struct{}
@@ -347,6 +347,9 @@ func (pool *LegacyPool) Init(gasTip uint64, head *types.Header, reserver txpool.
 	pool.currentHead.Store(head)
 	pool.currentState = statedb
 	pool.pendingNonces = newNoncer(statedb)
+
+	// OP-Stack addition
+	pool.resetRollupCostFn(head.Time, statedb)
 
 	pool.wg.Add(1)
 	go pool.scheduleReorgLoop()
@@ -549,9 +552,11 @@ func (pool *LegacyPool) pendingWithFilter(filter txpool.PendingFilter) map[commo
 				}
 			}
 		}
+
 		if len(txs) > 0 {
 			lazies := make([]*txpool.LazyTransaction, len(txs))
 			for i := 0; i < len(txs); i++ {
+				daBytes := txs[i].RollupCostData().EstimatedDASize()
 				lazies[i] = &txpool.LazyTransaction{
 					Pool:      pool,
 					Hash:      txs[i].Hash(),
@@ -561,6 +566,7 @@ func (pool *LegacyPool) pendingWithFilter(filter txpool.PendingFilter) map[commo
 					GasTipCap: uint256.MustFromBig(txs[i].GasTipCap()),
 					Gas:       txs[i].Gas(),
 					BlobGas:   txs[i].BlobGas(),
+					DABytes:   daBytes,
 				}
 			}
 			pending[addr] = lazies
@@ -607,9 +613,9 @@ func (pool *LegacyPool) validateTx(tx *types.Transaction) error {
 			if list := pool.pending[addr]; list != nil {
 				if tx := list.txs.Get(nonce); tx != nil {
 					cost := tx.Cost()
-					if pool.l1CostFn != nil {
-						if l1Cost := pool.l1CostFn(tx.RollupCostData(), tx.IsDepositTx(), tx.To()); l1Cost != nil { // add rollup cost
-							cost = cost.Add(cost, l1Cost)
+					if pool.rollupCostFn != nil {
+						if rollupCost := pool.rollupCostFn(tx); rollupCost != nil {
+							cost = cost.Add(cost, rollupCost.ToBig())
 						}
 					}
 					return cost
@@ -617,7 +623,7 @@ func (pool *LegacyPool) validateTx(tx *types.Transaction) error {
 			}
 			return nil
 		},
-		L1CostFn: pool.l1CostFn,
+		RollupCostFn: pool.rollupCostFn,
 	}
 	if err := txpool.ValidateTransactionWithState(tx, pool.currentHead.Load(), pool.signer, opts); err != nil {
 		return err
@@ -1476,16 +1482,21 @@ func (pool *LegacyPool) reset(oldHead, newHead *types.Header) {
 	pool.currentState = statedb
 	pool.pendingNonces = newNoncer(statedb)
 
-	if costFn := types.NewL1CostFunc(pool.chainconfig, statedb); costFn != nil {
-		pool.l1CostFn = func(rollupCostData types.RollupCostData, isDepositTx bool, to *common.Address) *big.Int {
-			return costFn(newHead.Number.Uint64(), newHead.Time, rollupCostData, isDepositTx, to)
-		}
-	}
+	// OP-Stack addition
+	pool.resetRollupCostFn(newHead.Time, statedb)
 
 	// Inject any transactions discarded due to reorgs
 	log.Debug("Reinjecting stale transactions", "count", len(reinject))
 	core.SenderCacher().Recover(pool.signer, reinject)
 	pool.addTxsLocked(reinject)
+}
+
+func (pool *LegacyPool) resetRollupCostFn(ts uint64, statedb *state.StateDB) {
+	if costFn := types.NewTotalRollupCostFunc(pool.chainconfig, statedb); costFn != nil {
+		pool.rollupCostFn = func(tx types.RollupTransaction) *uint256.Int {
+			return costFn(tx, ts)
+		}
+	}
 }
 
 // promoteExecutables moves transactions that have become processable from the

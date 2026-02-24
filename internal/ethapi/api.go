@@ -708,6 +708,9 @@ func (api *BlockChainAPI) GetBlockReceipts(ctx context.Context, blockNrOrHash rp
 	return result, nil
 }
 
+// GetBlockRange returns a range of blocks.
+//
+// DEPRECATED: This method will be removed in the next network upgrade.
 func (api *BlockChainAPI) GetBlockRange(ctx context.Context, startNumber rpc.BlockNumber, endNumber rpc.BlockNumber, fullTx bool) ([]map[string]interface{}, error) {
 	// Basic assertions about start and end block numbers.
 	if endNumber < startNumber {
@@ -835,7 +838,7 @@ func doCall(ctx context.Context, b Backend, args TransactionArgs, state *state.S
 	} else {
 		gp.AddGas(globalGasCap)
 	}
-	return applyMessage(ctx, b, args, state, header, timeout, gp, &blockCtx, &vm.Config{NoBaseFee: true}, precompiles,runMode)
+	return applyMessage(ctx, b, args, state, header, timeout, gp, &blockCtx, &vm.Config{NoBaseFee: true}, precompiles, runMode)
 }
 
 func applyMessage(ctx context.Context, b Backend, args TransactionArgs, state *state.StateDB, header *types.Header, timeout time.Duration, gp *core.GasPool, blockContext *vm.BlockContext, vmConfig *vm.Config, precompiles vm.PrecompiledContracts, runMode core.RunMode) (*core.ExecutionResult, error) {
@@ -1046,6 +1049,9 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		}
 		return 0, err
 	}
+	if rules.IsMantleArsia {
+		return hexutil.Uint64(estimate), nil
+	}
 	return hexutil.Uint64(estimate * gasBuffer / 100), nil
 }
 
@@ -1080,6 +1086,145 @@ func (api *BlockChainAPI) EstimateGas(ctx context.Context, args TransactionArgs,
 	}
 
 	return DoEstimateGas(ctx, api.b, args, bNrOrHash, overrides, blockOverrides, api.b.RPCGasCap())
+}
+
+// EstimateTotalFee estimates the total transaction cost including L2 execution fee, L1 data fee, and operator fee.
+// This is useful for users to understand the complete cost before sending a transaction.
+//
+// Parameters:
+//   - args: Transaction arguments (same as eth_estimateGas)
+//   - blockNrOrHash: Block number or hash to estimate against (default: latest)
+//
+// Returns:
+//   - Total fee in wei (L2 execution fee + L1 data fee + operator fee)
+func (api *BlockChainAPI) EstimateTotalFee(ctx context.Context, args TransactionArgs, blockNrOrHash *rpc.BlockNumberOrHash) (*hexutil.Big, error) {
+	// Blob transactions are not supported — the total fee calculation does not include blob gas fee.
+	if args.BlobHashes != nil {
+		return nil, errors.New("eth_estimateTotalFee does not support blob transactions")
+	}
+
+	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	if blockNrOrHash != nil {
+		bNrOrHash = *blockNrOrHash
+	}
+
+	// Resolve state and header in one call, then pin bNrOrHash to the concrete block number.
+	// This avoids a redundant header lookup and prevents cross-block inconsistency when
+	// using the "latest" alias and a new block arrives during processing.
+	state, header, err := api.b.StateAndHeaderByNumberOrHash(ctx, bNrOrHash)
+	if err != nil {
+		return nil, err
+	}
+	bNrOrHash = rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(header.Number.Int64()))
+
+	// EstimateTotalFee is not supported for pre-Arsia blocks as L1 data fee
+	// and operator fee are Arsia+ concepts
+	if !api.b.ChainConfig().IsMantleArsia(uint64(header.Time)) {
+		return nil, errors.New("eth_estimateTotalFee is not supported for pre-Arsia blocks")
+	}
+
+	// 1. Estimate L2 gas (DoEstimateGas internally resolves state+header again, but
+	// bNrOrHash is now pinned to a concrete block number so it will be consistent)
+	gasEstimate, err := DoEstimateGas(ctx, api.b, args, bNrOrHash, nil, nil, api.b.RPCGasCap())
+	if err != nil {
+		return nil, fmt.Errorf("failed to estimate gas: %w", err)
+	}
+
+	// Determine effective gas price
+	// For EIP-1559: effectiveGasPrice = min(maxFeePerGas, baseFee + maxPriorityFeePerGas)
+	var gasPrice *big.Int
+	if args.GasPrice != nil && args.GasPrice.ToInt().Sign() > 0 {
+		// Legacy transaction with explicit gas price
+		gasPrice = args.GasPrice.ToInt()
+	} else if args.MaxFeePerGas != nil && args.MaxFeePerGas.ToInt().Sign() > 0 {
+		// EIP-1559 transaction
+		maxFee := args.MaxFeePerGas.ToInt()
+		if header.BaseFee != nil {
+			// effectiveGasPrice = min(maxFeePerGas, baseFee + maxPriorityFeePerGas)
+			var tipCap *big.Int
+			if args.MaxPriorityFeePerGas != nil {
+				tipCap = args.MaxPriorityFeePerGas.ToInt()
+			} else {
+				tipCap = big.NewInt(0)
+			}
+			effectivePrice := new(big.Int).Add(header.BaseFee, tipCap)
+			if effectivePrice.Cmp(maxFee) > 0 {
+				gasPrice = maxFee
+			} else {
+				gasPrice = effectivePrice
+			}
+		} else {
+			gasPrice = maxFee
+		}
+	} else {
+		// No gas price specified, use suggested gas price
+		gasPriceForEstimate, err := api.b.SuggestGasTipCap(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get suggest gas tip cap: %w", err)
+		}
+		if header.BaseFee != nil {
+			gasPriceForEstimate = new(big.Int).Add(gasPriceForEstimate, header.BaseFee)
+		}
+		gasPrice = gasPriceForEstimate
+	}
+
+	// 2. Calculate L2 execution fee
+	l2GasFee := new(big.Int).Mul(new(big.Int).SetUint64(uint64(gasEstimate)), gasPrice)
+
+	// 3. Calculate L1 data fee
+	var l1DataFee *big.Int
+
+	// Build a transaction to calculate rollup cost data (including full RLP encoding)
+	if err := args.CallDefaults(api.b.RPCGasCap(), header.BaseFee, api.b.ChainConfig().ChainID); err != nil {
+		return nil, err
+	}
+
+	// Convert args to a transaction to properly calculate RollupCostData (using the full RLP encoded size).
+	// ToTransaction auto-detects the tx type from args fields (MaxFeePerGas, BlobHashes, etc.),
+	// the defaultType parameter is only a fallback when no type-specific fields are present.
+	//
+	// ToTransaction builds an unsigned tx (V/R/S are nil/zero). A signed tx has additional bytes
+	// for the ECDSA signature and other encoding overhead. Add a constant of 80 to FastLzSize to
+	// compensate, consistent with CalculateRollupCostDataFromMessage which adds 80 to cover
+	// "sigs(V,R,S) and other data". Signature bytes are high-entropy so FastLZ compresses at ~1:1.
+	// Without this, the Fjord L1 cost formula (which uses FastLzSize) underestimates L1 data fee
+	// by ~6-12% for transactions with significant calldata.
+	tx := args.ToTransaction(types.LegacyTxType)
+	rollupCostData := tx.RollupCostData()
+	rollupCostData.FastLzSize += 80
+
+	// Get L1 cost function
+	l1CostFunc := types.NewL1CostFunc(api.b.ChainConfig(), state)
+	if l1CostFunc != nil {
+		l1DataFee = l1CostFunc(rollupCostData, header.Time)
+		if l1DataFee == nil {
+			// L1CostFunc returns nil for empty rollup cost data (e.g., eth_call or deposit tx)
+			// For actual transactions, this should not happen
+			l1DataFee = big.NewInt(0)
+		}
+	} else {
+		l1DataFee = big.NewInt(0)
+	}
+
+	// 4. Calculate operator fee
+	var operatorFee *big.Int
+	operatorCostFunc := types.NewOperatorCostFunc(api.b.ChainConfig(), state)
+	if operatorCostFunc != nil {
+		operatorFeeU256 := operatorCostFunc(uint64(gasEstimate), header.Time)
+		if operatorFeeU256 != nil {
+			operatorFee = operatorFeeU256.ToBig()
+		} else {
+			operatorFee = big.NewInt(0)
+		}
+	} else {
+		operatorFee = big.NewInt(0)
+	}
+
+	// 5. Calculate total fee (in wei): totalFee = l2GasFee + l1DataFee + operatorFee
+	totalFee := new(big.Int).Add(l2GasFee, l1DataFee)
+	totalFee.Add(totalFee, operatorFee)
+
+	return (*hexutil.Big)(totalFee), nil
 }
 
 // RPCMarshalHeader converts the given header to the RPC output .
@@ -1743,10 +1888,16 @@ func (api *TransactionAPI) GetTransactionReceipt(ctx context.Context, hash commo
 		// No such tx.
 		return nil, nil
 	}
-	receipt, err := api.b.GetCanonicalReceipt(tx, blockHash, blockNumber, index)
+
+	receipts, err := api.b.GetReceipts(ctx, blockHash)
 	if err != nil {
 		return nil, err
 	}
+	if uint64(len(receipts)) <= index {
+		return nil, nil
+	}
+	receipt := receipts[index]
+
 	// Derive the sender.
 	return MarshalReceipt(receipt, blockHash, blockNumber, api.signer, tx, int(index), api.b.ChainConfig()), nil
 }
@@ -1775,9 +1926,33 @@ func MarshalReceipt(receipt *types.Receipt, blockHash common.Hash, blockNumber u
 		fields["l1GasPrice"] = (*hexutil.Big)(receipt.L1GasPrice)
 		fields["l1GasUsed"] = (*hexutil.Big)(receipt.L1GasUsed)
 		fields["l1Fee"] = (*hexutil.Big)(receipt.L1Fee)
-		fields["l1FeeScalar"] = receipt.FeeScalar.String()
+		if receipt.FeeScalar != nil && receipt.FeeScalar.Cmp(big.NewFloat(0)) != 0 {
+			fields["l1FeeScalar"] = receipt.FeeScalar.String()
+		}
 		if receipt.TokenRatio != nil {
 			fields["tokenRatio"] = (*hexutil.Big)(receipt.TokenRatio)
+		}
+		if receipt.L1BlobBaseFee != nil {
+			fields["l1BlobBaseFee"] = (*hexutil.Big)(receipt.L1BlobBaseFee)
+		}
+		if receipt.L1BaseFeeScalar != nil {
+			fields["l1BaseFeeScalar"] = hexutil.Uint64(*receipt.L1BaseFeeScalar)
+		}
+		if receipt.L1BlobBaseFeeScalar != nil {
+			fields["l1BlobBaseFeeScalar"] = hexutil.Uint64(*receipt.L1BlobBaseFeeScalar)
+		}
+		// Fields added in Isthmus
+		if receipt.OperatorFeeScalar != nil {
+			fields["operatorFeeScalar"] = hexutil.Uint64(*receipt.OperatorFeeScalar)
+		}
+		if receipt.OperatorFeeConstant != nil {
+			fields["operatorFeeConstant"] = hexutil.Uint64(*receipt.OperatorFeeConstant)
+		}
+		// Fields added in Jovian
+		if receipt.DAFootprintGasScalar != nil {
+			fields["daFootprintGasScalar"] = hexutil.Uint64(*receipt.DAFootprintGasScalar)
+			// Jovian repurposes blobGasUsed for DA footprint gas used
+			fields["blobGasUsed"] = hexutil.Uint64(receipt.BlobGasUsed)
 		}
 	}
 	if chainConfig.Optimism != nil && tx.IsDepositTx() && receipt.DepositNonce != nil {

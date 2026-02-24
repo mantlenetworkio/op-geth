@@ -55,6 +55,8 @@ type Server struct {
 	batchResponseLimit int
 	httpBodyLimit      int
 	wsReadLimit        int64
+
+	recorder Recorder
 }
 
 // NewServer creates a new server instance with no registered handlers.
@@ -71,6 +73,10 @@ func NewServer() *Server {
 	rpcService := &RPCService{server}
 	server.RegisterName(MetadataApi, rpcService)
 	return server
+}
+
+func (s *Server) SetRecorder(recorder Recorder) {
+	s.recorder = recorder
 }
 
 // SetBatchLimits sets limits applied to batch requests. There are two limits: 'itemLimit'

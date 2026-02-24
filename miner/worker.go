@@ -56,6 +56,9 @@ type environment struct {
 	coinbase common.Address
 	evm      *vm.EVM
 
+	// OP-Stack addition: DA footprint block limit
+	daFootprintGasScalar uint16
+
 	header   *types.Header
 	txs      []*types.Transaction
 	receipts []*types.Receipt
@@ -149,9 +152,11 @@ type generateParams struct {
 	beaconRoot  *common.Hash      // The beacon root (cancun field).
 	noTxs       bool              // Flag whether an empty block without any transaction is expected
 
-	txs      []*types.Transaction // Optimism addition: txs forced into the block via engine API
-	gasLimit *uint64              // Optimism addition: override gas limit of the block to build
-	baseFee  *big.Int             // Optimism addition: override base fee of the block to build
+	eip1559Params []byte               // Optional EIP-1559 parameters
+	txs           []*types.Transaction // Optimism addition: txs forced into the block via engine API
+	gasLimit      *uint64              // Optimism addition: override gas limit of the block to build
+	baseFee       *big.Int             // Optimism addition: override base fee of the block to build
+	minBaseFee    *uint64              // Optional minimum base fee
 }
 
 // generateWork generates a sealing block based on the given parameters.
@@ -301,27 +306,45 @@ func (miner *Miner) prepareWork(genParams *generateParams, witness bool) (*envir
 	}
 	// Set baseFee and GasLimit if we are on an EIP-1559 chain
 	if miner.chainConfig.IsLondon(header.Number) {
-		header.BaseFee = eip1559.CalcBaseFee(miner.chainConfig, parent)
-		if miner.chainConfig.IsMantleBaseFee(header.Time) {
+		if miner.chainConfig.IsMantleBaseFee(header.Time) && genParams.baseFee != nil && !miner.chainConfig.IsMantleArsia(header.Time) {
 			header.BaseFee = genParams.baseFee
-		}
-		if genParams.baseFee == nil {
+			log.Debug("header base fee from catalyst generation parameters", "baseFee", header.BaseFee.String())
+		} else {
 			header.BaseFee = eip1559.CalcBaseFee(miner.chainConfig, parent)
 			log.Debug("header base fee from eip1559 calculator", "baseFee", header.BaseFee.String())
-		} else {
-			log.Debug("header base fee from catalyst generation parameters", "baseFee", header.BaseFee.String())
 		}
 		if !miner.chainConfig.IsLondon(parent.Number) {
 			parentGasLimit := parent.GasLimit * miner.chainConfig.ElasticityMultiplier()
 			header.GasLimit = core.CalcGasLimit(parentGasLimit, miner.config.GasCeil)
 		}
 	}
+
 	if genParams.gasLimit != nil { // override gas limit if specified
 		header.GasLimit = *genParams.gasLimit
 	} else if miner.chain.Config().Optimism != nil && miner.config.GasCeil != 0 {
 		// configure the gas limit of pending blocks with the miner gas limit config when using optimism
 		header.GasLimit = miner.config.GasCeil
 	}
+
+	if cfg := miner.chainConfig; cfg.IsMantleArsia(header.Time) {
+		if genParams.minBaseFee == nil {
+			return nil, errors.New("missing minBaseFee")
+		}
+		if err := eip1559.ValidateHolocene1559Params(genParams.eip1559Params); err != nil {
+			return nil, err
+		}
+		// If this is a holocene block and the params are 0, we must convert them to their previous
+		// constants in the header.
+		d, e := eip1559.DecodeHolocene1559Params(genParams.eip1559Params)
+		if d == 0 {
+			d = miner.chainConfig.BaseFeeChangeDenominator()
+			e = miner.chainConfig.ElasticityMultiplier()
+		}
+		header.Extra = eip1559.EncodeOptimismExtraData(cfg, header.Time, d, e, genParams.minBaseFee)
+	} else if genParams.eip1559Params != nil {
+		return nil, errors.New("got eip1559 params, expected none")
+	}
+
 	// Run the consensus preparation with the default or customized consensus engine.
 	// Note that the `header.Time` may be changed.
 	if err := miner.engine.Prepare(miner.chain, header); err != nil {
@@ -352,6 +375,17 @@ func (miner *Miner) prepareWork(genParams *generateParams, witness bool) (*envir
 	if miner.chainConfig.IsPrague(header.Number, header.Time) {
 		core.ProcessParentBlockHash(header.ParentHash, env.evm)
 	}
+
+	if miner.chainConfig.IsMantleArsia(parent.Time) {
+		if len(genParams.txs) == 0 || !genParams.txs[0].IsDepositTx() {
+			return nil, errors.New("missing L1 attributes deposit transaction")
+		}
+		env.daFootprintGasScalar, err = types.ExtractDAFootprintGasScalar(genParams.txs[0].Data())
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return env, nil
 }
 
@@ -429,7 +463,16 @@ func (miner *Miner) commitBlobTransaction(env *environment, tx *types.Transactio
 	env.sidecars = append(env.sidecars, sc)
 	env.blobs += len(sc.Blobs)
 	env.size += txNoBlob.Size()
-	*env.header.BlobGasUsed += receipt.BlobGasUsed
+
+	// OP-Stack addition: In Jovian, use DA footprint instead of EIP-4844 blob gas
+	if miner.chainConfig.IsMantleArsia(env.header.Time) && !tx.IsDepositTx() {
+		rcd := tx.RollupCostData()
+		daFootprint := rcd.EstimatedDASize().Uint64() * uint64(env.daFootprintGasScalar)
+		*env.header.BlobGasUsed += daFootprint
+	} else {
+		*env.header.BlobGasUsed += receipt.BlobGasUsed
+	}
+
 	env.tcount++
 	return nil
 }
@@ -448,6 +491,131 @@ func (miner *Miner) applyTransaction(env *environment, tx *types.Transaction) (*
 	return receipt, err
 }
 
+// commitTxResult represents the result of processing a transaction for commit
+type commitTxResult struct {
+	shouldContinue bool     // whether to continue to next transaction
+	shouldBreak    bool     // whether to break out of the loop
+	txDAFootprint  uint64   // DA footprint for the transaction (for Jovian)
+	daBytesAfter   *big.Int // DA bytes after this transaction (for throttling)
+}
+
+// processTransactionForCommit processes a single transaction for validation and commit checks.
+// This is the common logic shared by commitTransactions and commitFIFOTransactions.
+func (miner *Miner) processTransactionForCommit(
+	env *environment,
+	tx *types.Transaction,
+	ltx *txpool.LazyTransaction, // nil for FIFO transactions (already resolved)
+	isMantleArsia bool,
+	isCancun bool,
+	daFootprintLeft uint64,
+	blockDABytes *big.Int,
+) commitTxResult {
+	result := commitTxResult{
+		shouldContinue: false,
+		shouldBreak:    false,
+		daBytesAfter:   new(big.Int).Set(blockDABytes),
+	}
+
+	var txGas uint64
+	if ltx != nil {
+		txGas = ltx.Gas
+	} else {
+		txGas = tx.Gas()
+	}
+	// If we don't have enough space for the next transaction, skip the account.
+	if env.gasPool.Gas() < txGas {
+		log.Trace("Not enough gas left for transaction", "hash", tx.Hash(), "left", env.gasPool.Gas(), "needed", txGas)
+		result.shouldContinue = true
+		return result
+	}
+
+	// Most of the blob gas logic here is agnostic as to if the chain supports
+	// blobs or not, however the max check panics when called on a chain without
+	// a defined schedule, so we need to verify it's safe to call.
+	if isCancun && tx.Type() == types.BlobTxType {
+		sc := tx.BlobTxSidecar()
+		if sc != nil {
+			left := eip4844.MaxBlobsPerBlock(miner.chainConfig, env.header.Time) - env.blobs
+			var blobGasNeeded int
+			if ltx != nil {
+				blobGasNeeded = int(ltx.BlobGas / params.BlobTxBlobGasPerBlob)
+			} else {
+				blobGasNeeded = int(tx.BlobGas() / params.BlobTxBlobGasPerBlob)
+			}
+			if left < blobGasNeeded {
+				log.Trace("Not enough blob space left for transaction", "hash", tx.Hash(), "left", left, "needed", blobGasNeeded)
+				result.shouldContinue = true
+				return result
+			}
+		}
+	}
+
+	// OP-Stack addition: Jovian DA footprint limit
+	// Note that commitTransaction is only called after deposit transactions have already been committed,
+	// so we don't need to resolve the transaction here and exclude deposits.
+	if isMantleArsia && !tx.IsDepositTx() {
+		var daBytes *big.Int
+		if ltx != nil && ltx.DABytes != nil {
+			daBytes = ltx.DABytes
+		} else {
+			// For FIFO transactions, calculate from transaction since ltx is nil
+			rcd := tx.RollupCostData()
+			daBytes = rcd.EstimatedDASize()
+		}
+
+		result.txDAFootprint = daBytes.Uint64() * uint64(env.daFootprintGasScalar)
+		if daFootprintLeft < result.txDAFootprint {
+			log.Debug("Not enough DA space left for transaction", "hash", tx.Hash(), "left", daFootprintLeft, "needed", result.txDAFootprint)
+			result.shouldContinue = true
+			return result
+		}
+
+	}
+
+	// if inclusion of the transaction would put the block size over the
+	// maximum we allow, don't add any more txs to the payload.
+	if !env.txFitsSize(tx) {
+		result.shouldBreak = true
+		return result
+	}
+
+	// Check whether the tx is replay protected. If we're not in the EIP155 hf
+	// phase, start ignoring the sender until we do.
+	if tx.Protected() && !miner.chainConfig.IsEIP155(env.header.Number) {
+		log.Trace("Ignoring replay protected transaction", "hash", tx.Hash(), "eip155", miner.chainConfig.EIP155Block)
+		result.shouldContinue = true
+		return result
+	}
+
+	return result
+}
+
+// commitSingleTransaction commits a single transaction and handles DA footprint accumulation.
+// Error may be ignored here. The error has already been checked
+// during transaction acceptance in the transaction pool.
+func (miner *Miner) commitSingleTransaction(
+	env *environment,
+	tx *types.Transaction,
+	result commitTxResult,
+	isMantleArsia bool,
+) error {
+	// Start executing the transaction
+	env.state.SetTxContext(tx.Hash(), env.tcount)
+
+	err := miner.commitTransaction(env, tx)
+	if err != nil {
+		return err
+	}
+
+	// In Jovian, accumulate DA footprint for non-deposit, non-blob transactions.
+	// Note: blob transactions handle DA footprint in commitBlobTransaction, so we only handle non-blob here.
+	if isMantleArsia && !tx.IsDepositTx() && tx.Type() != types.BlobTxType {
+		*env.header.BlobGasUsed += result.txDAFootprint
+	}
+
+	return nil
+}
+
 func (miner *Miner) commitTransactions(env *environment, plainTxs, blobTxs *transactionsByPriceAndNonce, interrupt *atomic.Int32) error {
 	var (
 		isCancun = miner.chainConfig.IsCancun(env.header.Number, env.header.Time)
@@ -456,6 +624,12 @@ func (miner *Miner) commitTransactions(env *environment, plainTxs, blobTxs *tran
 	if env.gasPool == nil {
 		env.gasPool = new(core.GasPool).AddGas(gasLimit)
 	}
+
+	// OP-Stack additions: throttling and DA footprint limit
+	blockDABytes := new(big.Int)
+	isMantleArsia := miner.chainConfig.IsMantleArsia(env.header.Time)
+	minTransactionDAFootprint := types.MinTransactionSize.Uint64() * uint64(env.daFootprintGasScalar)
+
 	for {
 		// Check interruption signal and abort building if it's fired.
 		if interrupt != nil {
@@ -468,6 +642,17 @@ func (miner *Miner) commitTransactions(env *environment, plainTxs, blobTxs *tran
 			log.Trace("Not enough gas for further transactions", "have", env.gasPool, "want", params.TxGas)
 			break
 		}
+
+		var daFootprintLeft uint64
+		if isMantleArsia {
+			daFootprintLeft = gasLimit - *env.header.BlobGasUsed
+			// If we don't have enough DA space for any further transactions then we're done.
+			if daFootprintLeft < minTransactionDAFootprint {
+				log.Debug("Not enough DA space for further transactions", "have", daFootprintLeft, "want", minTransactionDAFootprint)
+				break
+			}
+		}
+
 		// If we don't have enough blob space for any further blob transactions,
 		// skip that list altogether
 		if !blobTxs.Empty() && env.blobs >= eip4844.MaxBlobsPerBlock(miner.chainConfig, env.header.Time) {
@@ -498,24 +683,6 @@ func (miner *Miner) commitTransactions(env *environment, plainTxs, blobTxs *tran
 		if ltx == nil {
 			break
 		}
-		// If we don't have enough space for the next transaction, skip the account.
-		if env.gasPool.Gas() < ltx.Gas {
-			log.Trace("Not enough gas left for transaction", "hash", ltx.Hash, "left", env.gasPool.Gas(), "needed", ltx.Gas)
-			txs.Pop()
-			continue
-		}
-
-		// Most of the blob gas logic here is agnostic as to if the chain supports
-		// blobs or not, however the max check panics when called on a chain without
-		// a defined schedule, so we need to verify it's safe to call.
-		if isCancun {
-			left := eip4844.MaxBlobsPerBlock(miner.chainConfig, env.header.Time) - env.blobs
-			if left < int(ltx.BlobGas/params.BlobTxBlobGasPerBlob) {
-				log.Trace("Not enough blob space left for transaction", "hash", ltx.Hash, "left", left, "needed", ltx.BlobGas/params.BlobTxBlobGasPerBlob)
-				txs.Pop()
-				continue
-			}
-		}
 
 		// Transaction seems to fit, pull it up from the pool
 		tx := ltx.Resolve()
@@ -525,26 +692,24 @@ func (miner *Miner) commitTransactions(env *environment, plainTxs, blobTxs *tran
 			continue
 		}
 
-		// if inclusion of the transaction would put the block size over the
-		// maximum we allow, don't add any more txs to the payload.
-		if !env.txFitsSize(tx) {
+		// Process transaction using common validation logic
+		result := miner.processTransactionForCommit(env, tx, ltx, isMantleArsia, isCancun, daFootprintLeft, blockDABytes)
+		if result.shouldBreak {
+			// If we should break but also should continue (skip this tx), pop it first
+			if result.shouldContinue {
+				txs.Pop()
+			}
 			break
 		}
-		// Error may be ignored here. The error has already been checked
-		// during transaction acceptance in the transaction pool.
-		from, _ := types.Sender(env.signer, tx)
-
-		// Check whether the tx is replay protected. If we're not in the EIP155 hf
-		// phase, start ignoring the sender until we do.
-		if tx.Protected() && !miner.chainConfig.IsEIP155(env.header.Number) {
-			log.Trace("Ignoring replay protected transaction", "hash", ltx.Hash, "eip155", miner.chainConfig.EIP155Block)
+		if result.shouldContinue {
 			txs.Pop()
 			continue
 		}
-		// Start executing the transaction
-		env.state.SetTxContext(tx.Hash(), env.tcount)
 
-		err := miner.commitTransaction(env, tx)
+		// Error may be ignored here. The error has already been checked
+		// during transaction acceptance in the transaction pool.
+		from, _ := types.Sender(env.signer, tx)
+		err := miner.commitSingleTransaction(env, tx, result, isMantleArsia)
 		switch {
 		case errors.Is(err, core.ErrNonceTooLow):
 			// New head notification data race between the transaction pool and miner, shift
@@ -553,6 +718,7 @@ func (miner *Miner) commitTransactions(env *environment, plainTxs, blobTxs *tran
 
 		case errors.Is(err, nil):
 			// Everything ok, collect the logs and shift in the next transaction from the same account
+			blockDABytes = result.daBytesAfter
 			txs.Shift()
 
 		default:
@@ -663,6 +829,11 @@ func (miner *Miner) commitFIFOTransactions(env *environment, txs []*types.Transa
 		env.gasPool = new(core.GasPool).AddGas(gasLimit)
 	}
 
+	isMantleArsia := miner.chainConfig.IsMantleArsia(env.header.Time)
+	isCancun := miner.chainConfig.IsCancun(env.header.Number, env.header.Time)
+	blockDABytes := new(big.Int)
+	minTransactionDAFootprint := types.MinTransactionSize.Uint64() * uint64(env.daFootprintGasScalar)
+
 	// gasLimitReached indicates whether we broke the loop due to gas limit
 	gasLimitReached := false
 	// breakIndex tracks the index where we broke due to gas limit
@@ -684,34 +855,48 @@ FIFO:
 			break
 		}
 
+		// Calculate DA footprint remaining space
+		var daFootprintLeft uint64
+		if isMantleArsia {
+			daFootprintLeft = gasLimit - *env.header.BlobGasUsed
+			if daFootprintLeft < minTransactionDAFootprint {
+				log.Debug("Not enough DA space for further transactions", "have", daFootprintLeft, "want", minTransactionDAFootprint)
+				gasLimitReached = true
+				breakIndex = i
+				break
+			}
+		}
+
 		// Error may be ignored here. The error has already been checked
 		// during transaction acceptance is the transaction pool.
-		from, _ := types.Sender(env.signer, tx)
-
-		// Check whether the tx is replay protected. If we're not in the EIP155 hf
-		// phase, start ignoring the sender until we do.
-		if tx.Protected() && !miner.chainConfig.IsEIP155(env.header.Number) {
-			log.Trace("Ignoring reply protected transaction", "hash", tx.Hash(), "eip155", miner.chainConfig.EIP155Block)
+		// Process transaction using common validation logic (ltx is nil for FIFO as tx is already resolved)
+		result := miner.processTransactionForCommit(env, tx, nil, isMantleArsia, isCancun, daFootprintLeft, blockDABytes)
+		if result.shouldBreak {
+			gasLimitReached = true
+			breakIndex = i
+			break FIFO
+		}
+		if result.shouldContinue {
 			continue
 		}
-		// Start executing the transaction
-		env.state.SetTxContext(tx.Hash(), env.tcount)
 
-		err := miner.commitTransaction(env, tx)
+		// Start executing the transaction
+		err := miner.commitSingleTransaction(env, tx, result, isMantleArsia)
 		switch {
 		case errors.Is(err, core.ErrGasLimitReached):
 			// Pop the current out-of-gas transaction without shifting in the next from the account
-			log.Trace("Gas limit exceeded for current block", "sender", from, "index", i, "tx", tx.Hash().Hex())
+			log.Trace("Gas limit exceeded for current block", "index", i, "tx", tx.Hash().Hex())
 			gasLimitReached = true
 			breakIndex = i
 			break FIFO
 
 		case errors.Is(err, core.ErrNonceTooLow):
 			// New head notification data race between the transaction pool and miner
-			log.Trace("Skipping transaction with low nonce", "hash", tx.Hash(), "sender", from, "nonce", tx.Nonce())
+			log.Trace("Skipping transaction with low nonce", "hash", tx.Hash())
 
 		case errors.Is(err, nil):
 			// Everything ok
+			blockDABytes = result.daBytesAfter
 
 		default:
 			// Transaction is regarded as invalid, drop all consecutive transactions from

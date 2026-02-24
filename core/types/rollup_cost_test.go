@@ -1,12 +1,276 @@
 package types
 
 import (
+	"encoding/binary"
+	"math/big"
 	"math/rand"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/params"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/params"
 )
+
+var (
+	baseFee  = big.NewInt(1000 * 1e6)
+	overhead = big.NewInt(50)
+	scalar   = big.NewInt(7 * 1e6)
+
+	blobBaseFee         = big.NewInt(10 * 1e6)
+	baseFeeScalar       = big.NewInt(2)
+	blobBaseFeeScalar   = big.NewInt(3)
+	operatorFeeScalar   = big.NewInt(1439103868)
+	operatorFeeConstant = big.NewInt(1256417826609331460)
+	tokenRatio          = big.NewInt(1000000)
+
+	// below are the expected cost func outcomes for the above parameter settings on the emptyTx
+	// which is defined in transaction_test.go
+	ArsiaFee   = big.NewInt(3203000000000)
+	bedrockFee = uint256.NewInt(11326000000000000000)
+
+	arisaOperatorFee = uint256.NewInt(1256650673615173860)
+	// the emptyTx is out of bounds for the linear regression so it uses the minimum size
+
+	bedrockGas      = big.NewInt(1618)
+	minimumArsiaGas = big.NewInt(1600) // fastlz size of minimum txn, 100_000_000 * 16 / 1e6
+)
+
+func TestArsiaL1CostFuncMinimumBounds(t *testing.T) {
+	// Use Fjord cost function and multiply by tokenRatio (same as Arsia logic)
+	fjordCostFunc := NewL1CostFuncFjord(baseFee, blobBaseFee, baseFeeScalar, blobBaseFeeScalar)
+
+	// Minimum size transactions:
+	// -42.5856 + 0.8365*110 = 49.4294
+	// -42.5856 + 0.8365*150 = 82.8894
+	// -42.5856 + 0.8365*170 = 99.6194
+	for _, fastLzsize := range []uint64{100, 150, 170} {
+		fee, g := fjordCostFunc(RollupCostData{
+			FastLzSize: fastLzsize,
+		})
+		c := new(big.Int).Mul(fee, tokenRatio)
+
+		require.Equal(t, minimumArsiaGas, g)
+		require.Equal(t, ArsiaFee, c)
+	}
+
+	// Larger size transactions:
+	// -42.5856 + 0.8365*171 = 100.4559
+	// -42.5856 + 0.8365*175 = 108.8019
+	// -42.5856 + 0.8365*200 = 124.7144
+	for _, fastLzsize := range []uint64{171, 175, 200} {
+		fee, g := fjordCostFunc(RollupCostData{
+			FastLzSize: fastLzsize,
+		})
+		c := new(big.Int).Mul(fee, tokenRatio)
+
+		require.Greater(t, g.Uint64(), minimumArsiaGas.Uint64())
+		require.Greater(t, c.Uint64(), ArsiaFee.Uint64())
+	}
+}
+
+// TestArsiaL1CostSolidityParity tests that the cost function for the Arsia upgrade matches a Solidity
+// test to ensure the outputs are the same.
+func TestArsiaL1CostSolidityParity(t *testing.T) {
+	// Use Fjord cost function and multiply by tokenRatio (same as Arsia logic)
+	fjordCostFunc := NewL1CostFuncFjord(
+		big.NewInt(2*1e6),
+		big.NewInt(3*1e6),
+		big.NewInt(20),
+		big.NewInt(15),
+	)
+	testTokenRatio := big.NewInt(1)
+
+	fee, g0 := fjordCostFunc(RollupCostData{
+		FastLzSize: 235,
+	})
+	c0 := new(big.Int).Mul(fee, testTokenRatio)
+
+	require.Equal(t, big.NewInt(2463), g0)
+	require.Equal(t, big.NewInt(105484), c0)
+}
+
+type testStateGetter struct {
+	baseFee, blobBaseFee, overhead, scalar, tokenRatio *big.Int
+	baseFeeScalar, blobBaseFeeScalar                   uint32
+	operatorFeeScalar                                  uint32
+	operatorFeeConstant                                uint64
+}
+
+func (sg *testStateGetter) GetState(addr common.Address, slot common.Hash) common.Hash {
+	buf := common.Hash{}
+	switch slot {
+	case L1BaseFeeSlot:
+		sg.baseFee.FillBytes(buf[:])
+	case OverheadSlot:
+		sg.overhead.FillBytes(buf[:])
+	case ScalarSlot:
+		sg.scalar.FillBytes(buf[:])
+	case L1BlobBaseFeeSlot:
+		sg.blobBaseFee.FillBytes(buf[:])
+	case L1FeeScalarsSlot:
+		// fetch Ecotone fee scalars
+		offset := scalarSectionStart
+		binary.BigEndian.PutUint32(buf[offset:offset+4], sg.baseFeeScalar)
+		binary.BigEndian.PutUint32(buf[offset+4:offset+8], sg.blobBaseFeeScalar)
+	case OperatorFeeParamsSlot:
+		// fetch operator fee scalars
+		binary.BigEndian.PutUint32(buf[20:24], sg.operatorFeeScalar)
+		binary.BigEndian.PutUint64(buf[24:32], sg.operatorFeeConstant)
+	case TokenRatioSlot:
+		sg.tokenRatio.FillBytes(buf[:])
+	default:
+		panic("unknown slot")
+	}
+	return buf
+}
+
+func TestNewL1CostFuncArsia(t *testing.T) {
+	time := uint64(10)
+
+	config := &params.ChainConfig{
+		Optimism: params.OptimismTestConfig.Optimism,
+	}
+	statedb := &testStateGetter{
+		baseFee:           baseFee,
+		overhead:          overhead,
+		scalar:            scalar,
+		blobBaseFee:       blobBaseFee,
+		baseFeeScalar:     uint32(baseFeeScalar.Uint64()),
+		blobBaseFeeScalar: uint32(blobBaseFeeScalar.Uint64()),
+		tokenRatio:        tokenRatio,
+	}
+	config.MantleArsiaTime = &time
+
+	costFunc := NewL1CostFunc(config, statedb)
+	require.NotNil(t, costFunc)
+
+	// empty cost data should result in nil fee
+	fee := costFunc(RollupCostData{}, time)
+	require.Nil(t, fee)
+
+	fee = costFunc(emptyTx.RollupCostData(), time)
+	require.NotNil(t, fee)
+	require.Equal(t, ArsiaFee, fee)
+
+	// emptyTx fee w/ ecotone config, but simulate first ecotone block by blowing away the ecotone
+	// params. Should result in bedrock fee.
+	statedb.baseFeeScalar = 0
+	statedb.blobBaseFeeScalar = 0
+	statedb.blobBaseFee = new(big.Int)
+	costFunc = NewL1CostFunc(config, statedb)
+	fee = costFunc(emptyTx.RollupCostData(), time)
+	require.NotNil(t, fee)
+	require.Equal(t, bedrockFee.Uint64(), fee.Uint64())
+
+}
+
+// TestTokenRatioChangesDuringTx tests that when a transaction modifies tokenRatio,
+// the L1 cost function uses the old value for that transaction and the new value for subsequent ones.
+func TestTokenRatioChangesDuringTx(t *testing.T) {
+	time := uint64(10)
+
+	config := &params.ChainConfig{
+		Optimism: params.OptimismTestConfig.Optimism,
+	}
+	statedb := &testStateGetter{
+		baseFee:           baseFee,
+		overhead:          overhead,
+		scalar:            scalar,
+		blobBaseFee:       blobBaseFee,
+		baseFeeScalar:     uint32(baseFeeScalar.Uint64()),
+		blobBaseFeeScalar: uint32(blobBaseFeeScalar.Uint64()),
+		tokenRatio:        big.NewInt(1000000), // Initial tokenRatio
+	}
+	config.MantleArsiaTime = &time
+
+	costFunc := NewL1CostFunc(config, statedb)
+	require.NotNil(t, costFunc)
+
+	// First call with initial tokenRatio (1000000)
+	fee1 := costFunc(emptyTx.RollupCostData(), time)
+	require.NotNil(t, fee1)
+
+	// Simulate a transaction modifying tokenRatio to 2000000
+	statedb.tokenRatio = big.NewInt(2000000)
+
+	// Second call - should detect change and use OLD tokenRatio (1000000)
+	fee2 := costFunc(emptyTx.RollupCostData(), time)
+	require.NotNil(t, fee2)
+	require.Equal(t, fee1.Uint64(), fee2.Uint64(), "Should use old tokenRatio when change is detected")
+
+	// Third call - should use NEW tokenRatio (2000000) since cache was updated
+	fee3 := costFunc(emptyTx.RollupCostData(), time)
+	require.NotNil(t, fee3)
+	require.Equal(t, fee1.Uint64()*2, fee3.Uint64(), "Should use new tokenRatio (2x the original)")
+
+	// Fourth call - no change, should still use 2000000
+	fee4 := costFunc(emptyTx.RollupCostData(), time)
+	require.NotNil(t, fee4)
+	require.Equal(t, fee3.Uint64(), fee4.Uint64(), "Should continue using current tokenRatio")
+}
+
+// TestNewL1CostFunc tests that the appropriate cost function is selected based on the
+// configuration and statedb values.
+func TestNewOperatorCostFunc(t *testing.T) {
+	time := uint64(10)
+	config := &params.ChainConfig{
+		Optimism: params.OptimismTestConfig.Optimism,
+	}
+	statedb := &testStateGetter{
+		baseFee:             baseFee,
+		overhead:            overhead,
+		scalar:              scalar,
+		blobBaseFee:         blobBaseFee,
+		baseFeeScalar:       uint32(baseFeeScalar.Uint64()),
+		blobBaseFeeScalar:   uint32(blobBaseFeeScalar.Uint64()),
+		operatorFeeScalar:   uint32(operatorFeeScalar.Uint64()),
+		operatorFeeConstant: operatorFeeConstant.Uint64(),
+	}
+
+	config.MantleArsiaTime = &time
+	costFunc := NewOperatorCostFunc(config, statedb)
+	fee := costFunc(bedrockGas.Uint64(), time)
+	require.NotNil(t, fee)
+	require.Equal(t, arisaOperatorFee, fee)
+}
+
+// copy of emptyTx with non-zero gas
+var emptyTxWithGas = NewTransaction(
+	0,
+	common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"),
+	big.NewInt(0), bedrockGas.Uint64(), big.NewInt(0),
+	nil,
+)
+
+// TestTotalRollupCostFunc tests that the total rollup cost function correctly
+// combines the L1 cost and operator cost.
+func TestTotalRollupCostFunc(t *testing.T) {
+	later := uint64(10)
+	config := &params.ChainConfig{
+		Optimism:        params.OptimismTestConfig.Optimism,
+		MantleArsiaTime: &later,
+	}
+	statedb := &testStateGetter{
+		baseFee:             baseFee,
+		overhead:            overhead,
+		scalar:              scalar,
+		blobBaseFee:         blobBaseFee,
+		baseFeeScalar:       uint32(baseFeeScalar.Uint64()),
+		blobBaseFeeScalar:   uint32(blobBaseFeeScalar.Uint64()),
+		operatorFeeScalar:   uint32(operatorFeeScalar.Uint64()),
+		operatorFeeConstant: operatorFeeConstant.Uint64(),
+		tokenRatio:          tokenRatio,
+	}
+
+	costFunc := NewTotalRollupCostFunc(config, statedb)
+	expCost := uint256.MustFromBig(ArsiaFee)
+	cost := costFunc(emptyTxWithGas, later+1)
+	require.NotNil(t, cost)
+	expCost.Add(expCost, arisaOperatorFee)
+	require.Equal(t, expCost, cost, "Isthmus total rollup cost should contain L1 cost and operator cost")
+}
 
 func TestRollupCostData(t *testing.T) {
 	for i := 0; i < 100; i++ {

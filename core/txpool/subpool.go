@@ -41,6 +41,8 @@ type LazyTransaction struct {
 
 	Gas     uint64 // Amount of gas required by the transaction
 	BlobGas uint64 // Amount of blob gas required by the transaction
+
+	DABytes *big.Int // Amount of data availability bytes this transaction may require if this is a rollup
 }
 
 // Resolve retrieves the full transaction belonging to a lazy handle if it is still
@@ -82,6 +84,7 @@ type PendingFilter struct {
 	// when false, return only non-blob txs (peer-join announces, block space filling)
 	BlobTxs     bool
 	BlobVersion byte // Blob tx version to include. 0 means pre-Osaka, 1 means Osaka and later
+
 }
 
 // TxMetadata denotes the metadata of a transaction.

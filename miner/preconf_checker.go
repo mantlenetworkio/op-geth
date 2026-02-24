@@ -31,8 +31,8 @@ var (
 	ErrEnvTooOld                                                              = errors.New("env is too old")
 	ErrHeadL1BlockTooOld                                                      = errors.New("head l1 block is too old")
 	ErrCurrentL1NumberAndHeadL1NumberDistanceTooLarge                         = errors.New("current l1 number and head l1 number distance is too large")
-	ErrEnvBlockNumberLessThanEngineSyncTargetBlockNumberOrUnsafeL2BlockNumber = errors.New("env block number is less than engine sync target block number or unsafe l2 block number")
-	ErrEnvBlockNumberAndEngineSyncTargetBlockNumberDistanceTooLarge           = errors.New("env block number and engine sync target block number distance is too large")
+	ErrEnvBlockNumberLessThanUnsafeL2BlockNumber = errors.New("env block number is less than unsafe l2 block number")
+	ErrEnvBlockNumberAndUnsafeL2BlockNumberDistanceTooLarge = errors.New("env block number and unsafe l2 block number distance is too large")
 	ErrPreconfNotAvailable                                                    = errors.New("preconf is not available")
 )
 
@@ -176,12 +176,10 @@ func (c *preconfChecker) UpdateOptimismSyncStatus(newOptimismSyncStatus *preconf
 			"head_l1.number", c.optimismSyncStatus.HeadL1.Number,
 			"unsafe_l2.l1_origin.number", c.optimismSyncStatus.UnsafeL2.L1Origin.Number,
 			"unsafe_l2.number", c.optimismSyncStatus.UnsafeL2.Number,
-			"engine_sync_target.number", c.optimismSyncStatus.EngineSyncTarget.Number,
 			"new_current_l1.number", newOptimismSyncStatus.CurrentL1.Number,
 			"new_head_l1.number", newOptimismSyncStatus.HeadL1.Number,
 			"new_unsafe_l2.l1_origin.number", newOptimismSyncStatus.UnsafeL2.L1Origin.Number,
 			"new_unsafe_l2.number", newOptimismSyncStatus.UnsafeL2.Number,
-			"new_engine_sync_target.number", newOptimismSyncStatus.EngineSyncTarget.Number,
 		)
 
 		// check optimism sync status
@@ -222,13 +220,11 @@ func (c *preconfChecker) UpdateOptimismSyncStatus(newOptimismSyncStatus *preconf
 // head_l1.number normal growth
 // unsafe_l2.number normal growth
 // unsafe_l2.l1_origin.number normal growth
-// engine_sync_target.number normal growth
 func (c *preconfChecker) isSyncStatusOk(newStatus *preconf.OptimismSyncStatus) bool {
 	return newStatus.HeadL1.Number > 0 &&
 		c.optimismSyncStatus.HeadL1.Number <= newStatus.HeadL1.Number &&
 		c.optimismSyncStatus.UnsafeL2.Number <= newStatus.UnsafeL2.Number &&
-		c.optimismSyncStatus.UnsafeL2.L1Origin.Number <= newStatus.UnsafeL2.L1Origin.Number &&
-		c.optimismSyncStatus.EngineSyncTarget.Number <= newStatus.EngineSyncTarget.Number
+		c.optimismSyncStatus.UnsafeL2.L1Origin.Number <= newStatus.UnsafeL2.L1Origin.Number
 }
 
 // update depositTxs
@@ -299,6 +295,7 @@ func (c *preconfChecker) PrecheckStatus() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err := c.precheck(); err != nil {
+		log.Warn("precheck status failed", "err", err)
 		return fmt.Errorf("%w because of %w", ErrPreconfNotAvailable, err)
 	}
 	return nil
@@ -336,23 +333,23 @@ func (c *preconfChecker) precheck() error {
 		return ErrCurrentL1NumberAndHeadL1NumberDistanceTooLarge
 	}
 
-	// env block number should be greater than engine sync target block number and unsafe l2 block number
+	// env block number should be greater than unsafe l2 block number
 	envBlockNumber := c.env.header.Number.Uint64()
-	engineSyncTargetBlockNumber, unsafeL2BlockNumber := c.optimismSyncStatus.EngineSyncTarget.Number, c.optimismSyncStatus.UnsafeL2.Number
-	if envBlockNumber < engineSyncTargetBlockNumber || envBlockNumber < unsafeL2BlockNumber {
-		log.Warn("envBlockNumberLessThanEngineSyncTargetBlockNumberOrUnsafeL2BlockNumber", "envBlockNumber", envBlockNumber, "engineSyncTargetBlockNumber", engineSyncTargetBlockNumber, "unsafeL2BlockNumber", unsafeL2BlockNumber)
-		return ErrEnvBlockNumberLessThanEngineSyncTargetBlockNumberOrUnsafeL2BlockNumber
+	unsafeL2BlockNumber := c.optimismSyncStatus.UnsafeL2.Number
+	if envBlockNumber < unsafeL2BlockNumber {
+		log.Warn("envBlockNumberLessThanUnsafeL2BlockNumber", "envBlockNumber", envBlockNumber, "unsafeL2BlockNumber", unsafeL2BlockNumber)
+		return ErrEnvBlockNumberLessThanUnsafeL2BlockNumber
 	}
 
-	// The distance between envblock.number and (engine_sync_target.number or unsafe_l2.number) should not exceed 6.
+	// The distance between envblock.number and unsafe_l2.number should not exceed 6.
 	// Here's an explanation for why it's 6: a deposit transaction from L1 includes at least 1(l1.header.number-1 rather than l1.header.number-2) L1 block,
 	// which corresponds to 6 L2 blocks. Therefore, we can have up to 6 blocks in advance to ensure that preconfirmations are not affected by deposit transactions.
-	if envBlockNumber-engineSyncTargetBlockNumber > c.minerConfig.PreconfBufferBlock || envBlockNumber-unsafeL2BlockNumber > c.minerConfig.PreconfBufferBlock {
+	if envBlockNumber-unsafeL2BlockNumber > c.minerConfig.PreconfBufferBlock {
 		// When there are a large number of preconfirmation transactions in the queue, it may cause the future 6 blocks to be
 		// filled with preconfirmation transactions. At this point, stop new preconfirmation transactions from entering,
 		// because there may be unblocked deposit transactions in future blocks, which cannot be predicted at this time.
-		log.Warn("envBlockNumberAndEngineSyncTargetBlockNumberDistanceTooLarge", "envBlockNumber", c.env.header.Number.Uint64(), "engineSyncTargetBlockNumber", c.optimismSyncStatus.EngineSyncTarget.Number, "unsafeL2BlockNumber", c.optimismSyncStatus.UnsafeL2.Number, "tolerance", c.minerConfig.EthToleranceBlock())
-		return ErrEnvBlockNumberAndEngineSyncTargetBlockNumberDistanceTooLarge
+		log.Warn("envBlockNumberAndUnsafeL2BlockNumberDistanceTooLarge", "envBlockNumber", c.env.header.Number.Uint64(), "unsafeL2BlockNumber", c.optimismSyncStatus.UnsafeL2.Number, "tolerance", c.minerConfig.EthToleranceBlock())
+		return ErrEnvBlockNumberAndUnsafeL2BlockNumberDistanceTooLarge
 	}
 
 	return nil
@@ -405,6 +402,7 @@ func applyPreconfTransaction(evm *vm.EVM, gp *core.GasPool, statedb *state.State
 	if err != nil {
 		return nil, nil, err
 	}
+	tokenRatio := statedb.GetState(types.GasOracleAddr, types.TokenRatioSlot).Big()
 
 	// ApplyTransactionWithEVM
 	if hooks := evm.Config.Tracer; hooks != nil {
@@ -445,7 +443,7 @@ func applyPreconfTransaction(evm *vm.EVM, gp *core.GasPool, statedb *state.State
 		statedb.AccessEvents().Merge(evm.AccessEvents)
 	}
 
-	receipt = core.MakeReceipt(evm, result, statedb, blockNumber, blockHash, blockTime, tx, *usedGas, root, evm.ChainConfig(), nonce)
+	receipt = core.MakeReceipt(evm, result, statedb, blockNumber, blockHash, blockTime, tx, *usedGas, root, evm.ChainConfig(), nonce, tokenRatio)
 	return receipt, result.Revert(), nil
 }
 

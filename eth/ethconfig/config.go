@@ -190,7 +190,10 @@ type Config struct {
 	OverrideOptimismRegolith *uint64 `toml:",omitempty"`
 	OverrideOptimism         *bool
 
+	// OverrideMantle* will take into effect if and only if ApplyMantleUpgrades is true.
+	OverrideMantleArsia *uint64 `toml:",omitempty"`
 	// ApplyMantleUpgrades requests the node to update chain-configuration from the mantle config.
+	// ApplyMantleUpgrades is acting as a toggle for enabling/disabling all mantle updates to the chain config.
 	ApplyMantleUpgrades bool `toml:",omitempty"`
 
 	RollupSequencerHTTP          string
@@ -198,6 +201,10 @@ type Config struct {
 	RollupHistoricalRPCTimeout   time.Duration
 	RollupDisableTxPoolGossip    bool
 	RollupDisableTxPoolAdmission bool
+
+	// Optimism features. Ignored by Mantle.
+	InteropMessageRPC       string `toml:",omitempty"`
+	InteropMempoolFiltering bool   `toml:",omitempty"`
 }
 
 // CreateConsensusEngine creates a consensus engine for the given chain config.
