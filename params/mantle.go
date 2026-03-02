@@ -35,7 +35,7 @@ var (
 		MantleEverestTime:     u64Ptr(1_737_010_800),
 		MantleSkadiTime:       u64Ptr(1_752_649_200),
 		MantleLimbTime:        u64Ptr(1_764_745_200),
-		MantleArsiaTime:       nil,
+		MantleArsiaTime:       u64Ptr(1_773_212_400),
 	}
 
 	// Starting from arsia, hardcoding upgrade timestamps of qa/dev/local networks are deprecated.
