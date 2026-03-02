@@ -6,10 +6,9 @@ import (
 
 // Mantle chain config
 var (
-	MantleMainnetChainId    = big.NewInt(5000)
-	MantleSepoliaChainId    = big.NewInt(5003)
-	MantleSepoliaQA6ChainId = big.NewInt(1115511106)
-	MantleLocalChainId      = big.NewInt(1337)
+	MantleMainnetChainId = big.NewInt(5000)
+	MantleSepoliaChainId = big.NewInt(5003)
+	MantleLocalChainId   = big.NewInt(1337)
 )
 
 var (
@@ -35,24 +34,12 @@ var (
 		MantleEverestTime:     u64Ptr(1_737_010_800),
 		MantleSkadiTime:       u64Ptr(1_752_649_200),
 		MantleLimbTime:        u64Ptr(1_764_745_200),
-		MantleArsiaTime:       nil,
+		MantleArsiaTime:       u64Ptr(1_773_212_400),
 	}
 
 	// Starting from arsia, hardcoding upgrade timestamps of qa/dev/local networks are deprecated.
 	// You should specify them either in deploy config json (will beactivated in genesis) or
 	// through CLI override flags (will be activated in future).
-	MantleSepoliaQA6UpgradeConfig = MantleUpgradeChainConfig{
-		ChainID:               MantleSepoliaQA6ChainId,
-		BaseFeeTime:           u64Ptr(0),
-		BVMETHMintUpgradeTime: u64Ptr(0),
-		MetaTxV2UpgradeTime:   u64Ptr(0),
-		MetaTxV3UpgradeTime:   u64Ptr(0),
-		ProxyOwnerUpgradeTime: nil,
-		MantleEverestTime:     u64Ptr(0),
-		MantleSkadiTime:       u64Ptr(1_749_798_000),
-		MantleLimbTime:        u64Ptr(1_762_412_400),
-		MantleArsiaTime:       nil,
-	}
 	MantleLocalUpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               MantleLocalChainId,
 		BaseFeeTime:           u64Ptr(0),
