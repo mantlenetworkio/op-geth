@@ -218,13 +218,7 @@ func NewL1CostFunc(config *params.ChainConfig, statedb StateGetter) L1CostFunc {
 }
 
 func NewL1CostFuncBeforeArsia(config *params.ChainConfig, statedb StateGetter, blockTime uint64) l1CostFunc {
-	// Cache tokenRatio when the closure is created (after deposit tx execution).
-	// This ensures that if a tx modifies tokenRatio, it still uses the old value,
-	// and subsequent txs use the new value.
-	cachedTokenRatio := statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
-	l1BaseFee := statedb.GetState(L1BlockAddr, L1BaseFeeSlot).Big()
-	overhead := statedb.GetState(L1BlockAddr, OverheadSlot).Big()
-	scalar := statedb.GetState(L1BlockAddr, ScalarSlot).Big()
+
 	return func(rollupCostData RollupCostData) (fee, gasUsed *big.Int) {
 		if rollupCostData == (RollupCostData{}) {
 			return nil, nil // Do not charge if there is no rollup cost-data (e.g. RPC call or deposit)
@@ -234,23 +228,17 @@ func NewL1CostFuncBeforeArsia(config *params.ChainConfig, statedb StateGetter, b
 			return common.Big0, common.Big0
 		}
 
-		currentTokenRatio := statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
-
-		// If tokenRatio changed, use the cached old value for this tx,
-		// then update the cache for subsequent txs.
-		if currentTokenRatio.Cmp(cachedTokenRatio) != 0 {
-			l1BaseFee = statedb.GetState(L1BlockAddr, L1BaseFeeSlot).Big()
-			overhead = statedb.GetState(L1BlockAddr, OverheadSlot).Big()
-			scalar = statedb.GetState(L1BlockAddr, ScalarSlot).Big()
-			cachedTokenRatio = new(big.Int).Set(currentTokenRatio)
-		}
+		l1BaseFee := statedb.GetState(L1BlockAddr, L1BaseFeeSlot).Big()
+		overhead := statedb.GetState(L1BlockAddr, OverheadSlot).Big()
+		scalar := statedb.GetState(L1BlockAddr, ScalarSlot).Big()
+		tokenRatio := statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
 
 		gasWithOverhead := new(big.Int).SetUint64(rollupDataGas)
 		gasWithOverhead.Add(gasWithOverhead, overhead)
 
 		l1Cost := new(big.Int).Mul(gasWithOverhead, l1BaseFee)
 		l1Cost.Mul(l1Cost, scalar)
-		l1Cost.Mul(l1Cost, currentTokenRatio)
+		l1Cost.Mul(l1Cost, tokenRatio)
 		l1CostFee := new(big.Int).Div(l1Cost, Decimals)
 
 		return l1CostFee, gasWithOverhead
