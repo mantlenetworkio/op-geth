@@ -983,11 +983,17 @@ func (api *BlockChainAPI) SimulateV1(ctx context.Context, opts simOpts, blockNrO
 // there are unexpected failures. The gas limit is capped by both `args.Gas` (if non-nil &
 // non-zero) and `gasCap` (if non-zero).
 func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *override.StateOverride, blockOverrides *override.BlockOverrides, gasCap uint64) (hexutil.Uint64, error) {
-	// Retrieve the base state and mutate it with any overrides
 	state, header, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
 	if state == nil || err != nil {
 		return 0, err
 	}
+	return doEstimateGasWithState(ctx, b, args, state, header, overrides, blockOverrides, gasCap)
+}
+
+// doEstimateGasWithState is the core gas estimation logic that operates on
+// pre-resolved state and header. This avoids redundant lookups when the caller
+// (e.g. EstimateTotalFee) has already resolved the block context.
+func doEstimateGasWithState(ctx context.Context, b Backend, args TransactionArgs, state *state.StateDB, header *types.Header, overrides *override.StateOverride, blockOverrides *override.BlockOverrides, gasCap uint64) (hexutil.Uint64, error) {
 	blockCtx := core.NewEVMBlockContext(header, NewChainContext(ctx, b), nil, b.ChainConfig(), state)
 	if blockOverrides != nil {
 		if err := blockOverrides.Apply(&blockCtx); err != nil {
@@ -1108,14 +1114,14 @@ func (api *BlockChainAPI) EstimateTotalFee(ctx context.Context, args Transaction
 		bNrOrHash = *blockNrOrHash
 	}
 
-	// Resolve state and header in one call, then pin bNrOrHash to the concrete block number.
-	// This avoids a redundant header lookup and prevents cross-block inconsistency when
-	// using the "latest" alias and a new block arrives during processing.
+	// Resolve state and header exactly once. Both the gas estimation and the
+	// L1/operator fee calculations below operate on this single snapshot,
+	// eliminating the redundant second lookup that DoEstimateGas would perform
+	// and guaranteeing cross-step consistency regardless of the selector type.
 	state, header, err := api.b.StateAndHeaderByNumberOrHash(ctx, bNrOrHash)
 	if err != nil {
 		return nil, err
 	}
-	bNrOrHash = rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(header.Number.Int64()))
 
 	// EstimateTotalFee is not supported for pre-Arsia blocks as L1 data fee
 	// and operator fee are Arsia+ concepts
@@ -1123,9 +1129,8 @@ func (api *BlockChainAPI) EstimateTotalFee(ctx context.Context, args Transaction
 		return nil, errors.New("eth_estimateTotalFee is not supported for pre-Arsia blocks")
 	}
 
-	// 1. Estimate L2 gas (DoEstimateGas internally resolves state+header again, but
-	// bNrOrHash is now pinned to a concrete block number so it will be consistent)
-	gasEstimate, err := DoEstimateGas(ctx, api.b, args, bNrOrHash, nil, nil, api.b.RPCGasCap())
+	// 1. Estimate L2 gas using the already-resolved state and header
+	gasEstimate, err := doEstimateGasWithState(ctx, api.b, args, state, header, nil, nil, api.b.RPCGasCap())
 	if err != nil {
 		return nil, fmt.Errorf("failed to estimate gas: %w", err)
 	}

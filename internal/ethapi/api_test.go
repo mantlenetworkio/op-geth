@@ -1498,7 +1498,34 @@ func TestEstimateTotalFee(t *testing.T) {
 	})
 
 	// ----------------------------------------------------------------
-	// 10. Contract creation (To = nil) → normal return
+	// 10. Block hash selector — preserved end-to-end (not converted to number)
+	// ----------------------------------------------------------------
+	t.Run("BlockHashSelector", func(t *testing.T) {
+		arsiaHeader, err := backend.HeaderByNumber(context.Background(), rpc.BlockNumber(genBlocks))
+		require.NoError(t, err)
+		require.True(t, chainCfg.IsMantleArsia(arsiaHeader.Time), "last block should be Arsia")
+
+		blockHash := arsiaHeader.Hash()
+		bNrOrHash := rpc.BlockNumberOrHashWithHash(blockHash, true)
+		args := TransactionArgs{
+			From:  &accs[0].addr,
+			To:    &accs[1].addr,
+			Value: (*hexutil.Big)(big.NewInt(1000)),
+		}
+
+		totalFee, err := api.EstimateTotalFee(context.Background(), args, &bNrOrHash)
+		require.NoError(t, err)
+		require.True(t, totalFee.ToInt().Sign() > 0, "totalFee with blockHash should be positive")
+
+		totalFeeByNum, err := api.EstimateTotalFee(context.Background(), args, nil)
+		require.NoError(t, err)
+		require.Equal(t, totalFee.ToInt().String(), totalFeeByNum.ToInt().String(),
+			"fee by hash vs latest should match for the same block")
+		t.Logf("blockHash=%s total=%s", blockHash.Hex(), totalFee.ToInt())
+	})
+
+	// ----------------------------------------------------------------
+	// 11. Contract creation (To = nil) → normal return
 	// ----------------------------------------------------------------
 	t.Run("ContractCreation", func(t *testing.T) {
 		initCode := hexutil.Bytes{0x60, 0x00, 0x60, 0x00, 0xf3} // PUSH1 0 PUSH1 0 RETURN
