@@ -1108,14 +1108,18 @@ func (api *BlockChainAPI) EstimateTotalFee(ctx context.Context, args Transaction
 		bNrOrHash = *blockNrOrHash
 	}
 
-	// Resolve state and header in one call, then pin bNrOrHash to the concrete block number.
-	// This avoids a redundant header lookup and prevents cross-block inconsistency when
-	// using the "latest" alias and a new block arrives during processing.
+	// Resolve state and header once for the fee calculations below (L1 data fee,
+	// operator fee, gas price). Pin non-hash selectors (e.g. "latest") to a concrete
+	// block number so DoEstimateGas resolves the same block even if a new block arrives.
+	// Hash selectors are preserved as-is to maintain hash-pinning and requireCanonical
+	// semantics end-to-end, consistent with how EstimateGas handles the same parameter.
 	state, header, err := api.b.StateAndHeaderByNumberOrHash(ctx, bNrOrHash)
 	if err != nil {
 		return nil, err
 	}
-	bNrOrHash = rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(header.Number.Int64()))
+	if _, isHash := bNrOrHash.Hash(); !isHash {
+		bNrOrHash = rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(header.Number.Int64()))
+	}
 
 	// EstimateTotalFee is not supported for pre-Arsia blocks as L1 data fee
 	// and operator fee are Arsia+ concepts
@@ -1123,8 +1127,7 @@ func (api *BlockChainAPI) EstimateTotalFee(ctx context.Context, args Transaction
 		return nil, errors.New("eth_estimateTotalFee is not supported for pre-Arsia blocks")
 	}
 
-	// 1. Estimate L2 gas (DoEstimateGas internally resolves state+header again, but
-	// bNrOrHash is now pinned to a concrete block number so it will be consistent)
+	// 1. Estimate L2 gas
 	gasEstimate, err := DoEstimateGas(ctx, api.b, args, bNrOrHash, nil, nil, api.b.RPCGasCap())
 	if err != nil {
 		return nil, fmt.Errorf("failed to estimate gas: %w", err)
