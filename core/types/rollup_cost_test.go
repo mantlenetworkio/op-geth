@@ -167,7 +167,7 @@ func TestNewL1CostFuncArsia(t *testing.T) {
 }
 
 // TestTokenRatioChangesDuringTx tests that when a transaction modifies tokenRatio,
-// the L1 cost function uses the old value for that transaction and the new value for subsequent ones.
+// the Arsia L1 cost function uses the new value immediately (no caching).
 func TestTokenRatioChangesDuringTx(t *testing.T) {
 	time := uint64(10)
 
@@ -181,34 +181,334 @@ func TestTokenRatioChangesDuringTx(t *testing.T) {
 		blobBaseFee:       blobBaseFee,
 		baseFeeScalar:     uint32(baseFeeScalar.Uint64()),
 		blobBaseFeeScalar: uint32(blobBaseFeeScalar.Uint64()),
-		tokenRatio:        big.NewInt(1000000), // Initial tokenRatio
+		tokenRatio:        big.NewInt(1000000),
 	}
 	config.MantleArsiaTime = &time
 
 	costFunc := NewL1CostFunc(config, statedb)
 	require.NotNil(t, costFunc)
 
-	// First call with initial tokenRatio (1000000)
 	fee1 := costFunc(emptyTx.RollupCostData(), time)
 	require.NotNil(t, fee1)
 
 	// Simulate a transaction modifying tokenRatio to 2000000
 	statedb.tokenRatio = big.NewInt(2000000)
 
-	// Second call - should detect change and use OLD tokenRatio (1000000)
+	// After state change, should use NEW tokenRatio immediately (no caching in Arsia)
 	fee2 := costFunc(emptyTx.RollupCostData(), time)
 	require.NotNil(t, fee2)
-	require.Equal(t, fee1.Uint64(), fee2.Uint64(), "Should use old tokenRatio when change is detected")
+	require.Equal(t, fee1.Uint64()*2, fee2.Uint64(), "Should use new tokenRatio immediately")
 
-	// Third call - should use NEW tokenRatio (2000000) since cache was updated
+	// Subsequent call - still uses 2000000
 	fee3 := costFunc(emptyTx.RollupCostData(), time)
 	require.NotNil(t, fee3)
-	require.Equal(t, fee1.Uint64()*2, fee3.Uint64(), "Should use new tokenRatio (2x the original)")
+	require.Equal(t, fee2.Uint64(), fee3.Uint64(), "Should continue using current tokenRatio")
 
-	// Fourth call - no change, should still use 2000000
+	// No change, should still use 2000000
 	fee4 := costFunc(emptyTx.RollupCostData(), time)
 	require.NotNil(t, fee4)
 	require.Equal(t, fee3.Uint64(), fee4.Uint64(), "Should continue using current tokenRatio")
+}
+
+// TestScenarioA_FeeParamsChange tests Scenario A: pure fee params change (no ratio change).
+// Block: Tx1(L1BlockInfo deposit updates fee params) → Tx2(regular tx)
+// Expected: Tx2 charge uses new fee params.
+func TestScenarioA_FeeParamsChange(t *testing.T) {
+	blockTime := uint64(10)
+	arsiaTime := uint64(10)
+	oldBaseFee := big.NewInt(1000 * 1e6)
+	newBaseFee := big.NewInt(2000 * 1e6)
+
+	t.Run("Arsia", func(t *testing.T) {
+		config := &params.ChainConfig{
+			Optimism:        params.OptimismTestConfig.Optimism,
+			MantleArsiaTime: &arsiaTime,
+		}
+		statedb := &testStateGetter{
+			baseFee:           oldBaseFee,
+			overhead:          overhead,
+			scalar:            scalar,
+			blobBaseFee:       blobBaseFee,
+			baseFeeScalar:     uint32(baseFeeScalar.Uint64()),
+			blobBaseFeeScalar: uint32(blobBaseFeeScalar.Uint64()),
+			tokenRatio:        tokenRatio,
+		}
+
+		costFunc := NewL1CostFunc(config, statedb)
+
+		// Tx1 (deposit): empty cost data → nil return, selectFunc not triggered
+		fee := costFunc(RollupCostData{}, blockTime)
+		require.Nil(t, fee)
+
+		// Simulate Tx1 execution: L1BlockInfo updates fee params
+		statedb.baseFee = newBaseFee
+
+		// Tx2 (regular): selectFunc triggered NOW, reads new fee params
+		feeTx2 := costFunc(emptyTx.RollupCostData(), blockTime)
+		require.NotNil(t, feeTx2)
+
+		// Verify Tx2 uses new fee params by comparing with a reference
+		refStatedb := &testStateGetter{
+			baseFee:           newBaseFee,
+			overhead:          overhead,
+			scalar:            scalar,
+			blobBaseFee:       blobBaseFee,
+			baseFeeScalar:     uint32(baseFeeScalar.Uint64()),
+			blobBaseFeeScalar: uint32(blobBaseFeeScalar.Uint64()),
+			tokenRatio:        tokenRatio,
+		}
+		refFunc := NewL1CostFunc(config, refStatedb)
+		feeRef := refFunc(emptyTx.RollupCostData(), blockTime)
+
+		require.Equal(t, feeRef, feeTx2, "Tx2 charge should use new fee params")
+	})
+
+	t.Run("BeforeArsia", func(t *testing.T) {
+		config := &params.ChainConfig{
+			Optimism: params.OptimismTestConfig.Optimism,
+		}
+		statedb := &testStateGetter{
+			baseFee:           oldBaseFee,
+			overhead:          overhead,
+			scalar:            scalar,
+			blobBaseFee:       blobBaseFee,
+			baseFeeScalar:     uint32(baseFeeScalar.Uint64()),
+			blobBaseFeeScalar: uint32(blobBaseFeeScalar.Uint64()),
+			tokenRatio:        tokenRatio,
+		}
+
+		costFunc := NewL1CostFunc(config, statedb)
+
+		// Tx1 (deposit): empty cost data → nil
+		fee := costFunc(RollupCostData{}, blockTime)
+		require.Nil(t, fee)
+
+		// Simulate Tx1 execution: update fee params
+		statedb.baseFee = newBaseFee
+
+		// Tx2 (regular): closure created with new fee params (cached at creation)
+		feeTx2 := costFunc(emptyTx.RollupCostData(), blockTime)
+		require.NotNil(t, feeTx2)
+
+		// Verify uses new fee params
+		refStatedb := &testStateGetter{
+			baseFee:           newBaseFee,
+			overhead:          overhead,
+			scalar:            scalar,
+			blobBaseFee:       blobBaseFee,
+			baseFeeScalar:     uint32(baseFeeScalar.Uint64()),
+			blobBaseFeeScalar: uint32(blobBaseFeeScalar.Uint64()),
+			tokenRatio:        tokenRatio,
+		}
+		refFunc := NewL1CostFunc(config, refStatedb)
+		feeRef := refFunc(emptyTx.RollupCostData(), blockTime)
+
+		require.Equal(t, feeRef, feeTx2, "Tx2 charge should use new fee params")
+	})
+}
+
+// TestScenarioB_TokenRatioChange tests Scenario B: pure token ratio change (no fee params change).
+// Block: Tx1(regular) → Tx2(SetTokenRatio) → Tx3(regular)
+// Expected: Tx2 charge uses old ratio, Tx3 charge uses new ratio.
+func TestScenarioB_TokenRatioChange(t *testing.T) {
+	blockTime := uint64(10)
+	arsiaTime := uint64(10)
+
+	t.Run("Arsia", func(t *testing.T) {
+		config := &params.ChainConfig{
+			Optimism:        params.OptimismTestConfig.Optimism,
+			MantleArsiaTime: &arsiaTime,
+		}
+		statedb := &testStateGetter{
+			baseFee:           baseFee,
+			overhead:          overhead,
+			scalar:            scalar,
+			blobBaseFee:       blobBaseFee,
+			baseFeeScalar:     uint32(baseFeeScalar.Uint64()),
+			blobBaseFeeScalar: uint32(blobBaseFeeScalar.Uint64()),
+			tokenRatio:        big.NewInt(1000000),
+		}
+
+		costFunc := NewL1CostFunc(config, statedb)
+
+		// Tx1 (regular): uses initial tokenRatio
+		feeTx1 := costFunc(emptyTx.RollupCostData(), blockTime)
+		require.NotNil(t, feeTx1)
+
+		// Tx2 preCheck (before SetTokenRatio execution): ratio not yet changed
+		feeTx2 := costFunc(emptyTx.RollupCostData(), blockTime)
+		require.Equal(t, feeTx1, feeTx2, "Tx2 charge should use old ratio (state not yet changed)")
+
+		// Simulate Tx2 execution: SetTokenRatio changes tokenRatio
+		statedb.tokenRatio = big.NewInt(2000000)
+
+		// Tx3 (regular): should use NEW tokenRatio
+		feeTx3 := costFunc(emptyTx.RollupCostData(), blockTime)
+		require.Equal(t, feeTx1.Uint64()*2, feeTx3.Uint64(), "Tx3 charge should use new ratio (2x)")
+	})
+
+	t.Run("BeforeArsia", func(t *testing.T) {
+		config := &params.ChainConfig{
+			Optimism: params.OptimismTestConfig.Optimism,
+		}
+		statedb := &testStateGetter{
+			baseFee:           baseFee,
+			overhead:          overhead,
+			scalar:            scalar,
+			blobBaseFee:       blobBaseFee,
+			baseFeeScalar:     uint32(baseFeeScalar.Uint64()),
+			blobBaseFeeScalar: uint32(blobBaseFeeScalar.Uint64()),
+			tokenRatio:        big.NewInt(1000000),
+		}
+
+		costFunc := NewL1CostFunc(config, statedb)
+
+		// Tx1 (regular): uses initial tokenRatio
+		feeTx1 := costFunc(emptyTx.RollupCostData(), blockTime)
+		require.NotNil(t, feeTx1)
+
+		// Tx2 preCheck (before SetTokenRatio execution): ratio not yet changed
+		feeTx2 := costFunc(emptyTx.RollupCostData(), blockTime)
+		require.Equal(t, feeTx1, feeTx2, "Tx2 charge should use old ratio")
+
+		// Simulate Tx2 execution: SetTokenRatio changes tokenRatio
+		statedb.tokenRatio = big.NewInt(2000000)
+
+		// Tx3 (regular): should use NEW tokenRatio
+		feeTx3 := costFunc(emptyTx.RollupCostData(), blockTime)
+		require.Equal(t, feeTx1.Uint64()*2, feeTx3.Uint64(), "Tx3 charge should use new ratio (2x)")
+	})
+}
+
+// TestScenarioC_FeeParamsAndTokenRatioChange tests Scenario C: fee params + token ratio change.
+// Block: Tx1(L1BlockInfo deposit) → Tx2(regular) → Tx3(SetTokenRatio) → Tx4(regular)
+// Expected: Tx2 charge = new fee + old ratio, Tx3 charge = new fee + old ratio,
+//
+//	Tx4 charge = new fee + new ratio.
+func TestScenarioC_FeeParamsAndTokenRatioChange(t *testing.T) {
+	blockTime := uint64(10)
+	arsiaTime := uint64(10)
+	oldBaseFee := big.NewInt(1000 * 1e6)
+	newBaseFee := big.NewInt(2000 * 1e6)
+
+	t.Run("Arsia", func(t *testing.T) {
+		config := &params.ChainConfig{
+			Optimism:        params.OptimismTestConfig.Optimism,
+			MantleArsiaTime: &arsiaTime,
+		}
+		statedb := &testStateGetter{
+			baseFee:           oldBaseFee,
+			overhead:          overhead,
+			scalar:            scalar,
+			blobBaseFee:       blobBaseFee,
+			baseFeeScalar:     uint32(baseFeeScalar.Uint64()),
+			blobBaseFeeScalar: uint32(blobBaseFeeScalar.Uint64()),
+			tokenRatio:        big.NewInt(1000000),
+		}
+
+		costFunc := NewL1CostFunc(config, statedb)
+
+		// Tx1 (deposit): empty cost data → nil, selectFunc not triggered
+		fee := costFunc(RollupCostData{}, blockTime)
+		require.Nil(t, fee)
+
+		// Simulate Tx1 execution: L1BlockInfo updates fee params
+		statedb.baseFee = newBaseFee
+
+		// Tx2 (regular): uses new fee params + old ratio
+		feeTx2 := costFunc(emptyTx.RollupCostData(), blockTime)
+		require.NotNil(t, feeTx2)
+
+		// Tx3 preCheck (before SetTokenRatio): uses new fee params + old ratio
+		feeTx3 := costFunc(emptyTx.RollupCostData(), blockTime)
+		require.Equal(t, feeTx2, feeTx3, "Tx3 charge should equal Tx2 (same fee params + same ratio)")
+
+		// Simulate Tx3 execution: SetTokenRatio changes tokenRatio
+		statedb.tokenRatio = big.NewInt(2000000)
+
+		// Tx4 (regular): uses new fee params + new ratio
+		feeTx4 := costFunc(emptyTx.RollupCostData(), blockTime)
+		require.Equal(t, feeTx2.Uint64()*2, feeTx4.Uint64(),
+			"Tx4 charge should use new fee params + new ratio (2x Tx2)")
+	})
+
+	t.Run("BeforeArsia", func(t *testing.T) {
+		config := &params.ChainConfig{
+			Optimism: params.OptimismTestConfig.Optimism,
+		}
+		statedb := &testStateGetter{
+			baseFee:           oldBaseFee,
+			overhead:          overhead,
+			scalar:            scalar,
+			blobBaseFee:       blobBaseFee,
+			baseFeeScalar:     uint32(baseFeeScalar.Uint64()),
+			blobBaseFeeScalar: uint32(blobBaseFeeScalar.Uint64()),
+			tokenRatio:        big.NewInt(1000000),
+		}
+
+		costFunc := NewL1CostFunc(config, statedb)
+
+		// Tx1 (deposit): empty cost data → nil
+		fee := costFunc(RollupCostData{}, blockTime)
+		require.Nil(t, fee)
+
+		// Simulate Tx1 execution: update fee params
+		statedb.baseFee = newBaseFee
+
+		// Tx2 (regular): closure created with new fee params + old ratio
+		feeTx2 := costFunc(emptyTx.RollupCostData(), blockTime)
+		require.NotNil(t, feeTx2)
+
+		// Tx3 preCheck (before SetTokenRatio): same fee params + old ratio
+		feeTx3 := costFunc(emptyTx.RollupCostData(), blockTime)
+		require.Equal(t, feeTx2, feeTx3, "Tx3 charge should equal Tx2")
+
+		// Simulate Tx3 execution: SetTokenRatio
+		statedb.tokenRatio = big.NewInt(2000000)
+
+		// Tx4 (regular): detects ratio change, refreshes fee params, uses new ratio
+		feeTx4 := costFunc(emptyTx.RollupCostData(), blockTime)
+		require.Equal(t, feeTx2.Uint64()*2, feeTx4.Uint64(),
+			"Tx4 charge should use new fee params + new ratio (2x Tx2)")
+	})
+}
+
+// TestBeforeArsia_FeeParamsCachedUntilRatioChange tests that in BeforeArsia mode,
+// fee params are cached at closure creation and only refreshed when tokenRatio changes.
+func TestBeforeArsia_FeeParamsCachedUntilRatioChange(t *testing.T) {
+	blockTime := uint64(10)
+	config := &params.ChainConfig{
+		Optimism: params.OptimismTestConfig.Optimism,
+	}
+	statedb := &testStateGetter{
+		baseFee:           big.NewInt(1000 * 1e6),
+		overhead:          overhead,
+		scalar:            scalar,
+		blobBaseFee:       blobBaseFee,
+		baseFeeScalar:     uint32(baseFeeScalar.Uint64()),
+		blobBaseFeeScalar: uint32(blobBaseFeeScalar.Uint64()),
+		tokenRatio:        big.NewInt(1000000),
+	}
+
+	costFunc := NewL1CostFuncBeforeArsia(config, statedb, blockTime)
+
+	fee1, _ := costFunc(emptyTx.RollupCostData())
+	require.NotNil(t, fee1)
+
+	// Change fee params but NOT tokenRatio
+	statedb.baseFee = big.NewInt(2000 * 1e6)
+
+	// Fee params are cached at creation → fee unchanged
+	fee2, _ := costFunc(emptyTx.RollupCostData())
+	require.Equal(t, fee1, fee2, "should use cached fee params when tokenRatio unchanged")
+
+	// Now change tokenRatio → triggers refresh of fee params
+	statedb.tokenRatio = big.NewInt(2000000)
+
+	fee3, _ := costFunc(emptyTx.RollupCostData())
+	// fee3 uses refreshed baseFee (2x) and new tokenRatio (2x) → 4x fee1
+	require.Equal(t, fee1.Uint64()*4, fee3.Uint64(),
+		"should use refreshed fee params (2x) and new tokenRatio (2x) = 4x original")
 }
 
 // TestNewL1CostFunc tests that the appropriate cost function is selected based on the
