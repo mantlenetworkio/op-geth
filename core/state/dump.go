@@ -49,14 +49,15 @@ type DumpCollector interface {
 
 // DumpAccount represents an account in the state.
 type DumpAccount struct {
-	Balance     string                 `json:"balance"`
-	Nonce       uint64                 `json:"nonce"`
-	Root        hexutil.Bytes          `json:"root"`
-	CodeHash    hexutil.Bytes          `json:"codeHash"`
-	Code        hexutil.Bytes          `json:"code,omitempty"`
-	Storage     map[common.Hash]string `json:"storage,omitempty"`
-	Address     *common.Address        `json:"address,omitempty"` // Address only present in iterative (line-by-line) mode
-	AddressHash hexutil.Bytes          `json:"key,omitempty"`     // If we don't have address, we can output the key
+	Balance       string                 `json:"balance"`
+	Nonce         uint64                 `json:"nonce"`
+	Root          hexutil.Bytes          `json:"root"`
+	CodeHash      hexutil.Bytes          `json:"codeHash"`
+	Code          hexutil.Bytes          `json:"code,omitempty"`
+	Storage       map[common.Hash]string `json:"storage,omitempty"`
+	StorageHashed map[common.Hash]string `json:"storage_hashed,omitempty"`
+	Address       *common.Address        `json:"address,omitempty"` // Address only present in iterative (line-by-line) mode
+	AddressHash   hexutil.Bytes          `json:"key,omitempty"`     // If we don't have address, we can output the key
 }
 
 // Dump represents the full dump in a collected format, as one large map.
@@ -91,14 +92,15 @@ type iterativeDump struct {
 // OnAccount implements DumpCollector interface
 func (d iterativeDump) OnAccount(addr *common.Address, account DumpAccount) {
 	dumpAccount := &DumpAccount{
-		Balance:     account.Balance,
-		Nonce:       account.Nonce,
-		Root:        account.Root,
-		CodeHash:    account.CodeHash,
-		Code:        account.Code,
-		Storage:     account.Storage,
-		AddressHash: account.AddressHash,
-		Address:     addr,
+		Balance:       account.Balance,
+		Nonce:         account.Nonce,
+		Root:          account.Root,
+		CodeHash:      account.CodeHash,
+		Code:          account.Code,
+		Storage:       account.Storage,
+		StorageHashed: account.StorageHashed,
+		AddressHash:   account.AddressHash,
+		Address:       addr,
 	}
 	d.Encode(dumpAccount)
 }
@@ -118,10 +120,13 @@ func (s *StateDB) DumpToCollector(c DumpCollector, conf *DumpConfig) (nextKey []
 		conf = new(DumpConfig)
 	}
 	var (
-		missingPreimages int
-		accounts         uint64
-		start            = time.Now()
-		logged           = time.Now()
+		missingPreimages          int
+		missingSlotPreimages      uint64
+		exportedHashedSlots       uint64
+		accountsWithHashedStorage uint64
+		accounts                  uint64
+		start                     = time.Now()
+		logged                    = time.Now()
 	)
 	log.Info("Trie dumping started", "root", s.trie.Hash())
 	c.OnRoot(s.trie.Hash())
@@ -176,6 +181,7 @@ func (s *StateDB) DumpToCollector(c DumpCollector, conf *DumpConfig) (nextKey []
 				continue
 			}
 			storageIt := trie.NewIterator(trieIt)
+			accountHashedStorage := false
 			for storageIt.Next() {
 				_, content, _, err := rlp.Split(storageIt.Value)
 				if err != nil {
@@ -185,6 +191,16 @@ func (s *StateDB) DumpToCollector(c DumpCollector, conf *DumpConfig) (nextKey []
 				key := s.trie.GetKey(storageIt.Key)
 				if key == nil {
 					log.Error("Failed to get key from iterator", "key", common.Bytes2Hex(storageIt.Key), "value", common.Bytes2Hex(storageIt.Value))
+					missingSlotPreimages++
+					if account.StorageHashed == nil {
+						account.StorageHashed = make(map[common.Hash]string)
+					}
+					account.StorageHashed[common.BytesToHash(storageIt.Key)] = common.Bytes2Hex(content)
+					exportedHashedSlots++
+					if !accountHashedStorage {
+						accountsWithHashedStorage++
+						accountHashedStorage = true
+					}
 					continue
 				}
 				account.Storage[common.BytesToHash(key)] = common.Bytes2Hex(content)
@@ -206,6 +222,14 @@ func (s *StateDB) DumpToCollector(c DumpCollector, conf *DumpConfig) (nextKey []
 	}
 	if missingPreimages > 0 {
 		log.Warn("Dump incomplete due to missing preimages", "missing", missingPreimages)
+	}
+	if missingSlotPreimages > 0 {
+		log.Warn(
+			"Dump exported hashed storage slots due to missing slot preimages",
+			"missing_slot_preimages", missingSlotPreimages,
+			"hashed_exported_slots", exportedHashedSlots,
+			"affected_accounts", accountsWithHashedStorage,
+		)
 	}
 	log.Info("Trie dumping complete", "accounts", accounts,
 		"elapsed", common.PrettyDuration(time.Since(start)))
