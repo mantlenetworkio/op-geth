@@ -76,9 +76,10 @@ func (env *environment) copy(chain core.ChainContext) *environment {
 		tcount:   env.tcount,
 		coinbase: env.coinbase,
 
-		header:   types.CopyHeader(env.header),
-		receipts: copyReceipts(env.receipts),
-		blobs:    env.blobs,
+		daFootprintGasScalar: env.daFootprintGasScalar,
+		header:               types.CopyHeader(env.header),
+		receipts:             copyReceipts(env.receipts),
+		blobs:                env.blobs,
 
 		witness: env.witness,
 	}

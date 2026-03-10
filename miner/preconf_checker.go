@@ -34,6 +34,7 @@ var (
 	ErrEnvBlockNumberLessThanUnsafeL2BlockNumber = errors.New("env block number is less than unsafe l2 block number")
 	ErrEnvBlockNumberAndUnsafeL2BlockNumberDistanceTooLarge = errors.New("env block number and unsafe l2 block number distance is too large")
 	ErrPreconfNotAvailable                                                    = errors.New("preconf is not available")
+	ErrNotEnoughDASpace                                                       = errors.New("not enough DA space for transaction")
 )
 
 const (
@@ -368,6 +369,10 @@ func (c *preconfChecker) applyTxWithResetEnv(env *environment, tx *types.Transac
 			preGasLimit, txGasLimit := c.env.gasPool.Gas(), tx.Gas()
 			c.env.header.Number = new(big.Int).Add(c.env.header.Number, common.Big1)
 			c.env.gasPool.SetGas(c.env.header.GasLimit)
+			// Reset DA footprint for the new block
+			if c.env.header.BlobGasUsed != nil {
+				*c.env.header.BlobGasUsed = 0
+			}
 			log.Trace("reset env for gas limit reached", "env.header.Number", c.env.header.Number, "env.gasPool(pre)", preGasLimit, "tx.gas", txGasLimit, "env.gasPool(now)", c.env.gasPool.Gas(), "tx", tx.Hash())
 			return c.applyTx(c.env, tx)
 		}
@@ -377,6 +382,23 @@ func (c *preconfChecker) applyTxWithResetEnv(env *environment, tx *types.Transac
 }
 
 func (c *preconfChecker) applyTx(env *environment, tx *types.Transaction) (*types.Receipt, []byte, error) {
+	// OP-Stack: DA footprint check for Jovian (must match commit path to avoid preconf rejection at seal time)
+	chainConfig := env.evm.ChainConfig()
+	if chainConfig.IsMantleArsia(env.header.Time) && !tx.IsDepositTx() && env.header.BlobGasUsed != nil {
+		gasLimit := env.header.GasLimit
+		daFootprintLeft := gasLimit - *env.header.BlobGasUsed
+		minTransactionDAFootprint := types.MinTransactionSize.Uint64() * uint64(env.daFootprintGasScalar)
+		if daFootprintLeft < minTransactionDAFootprint {
+			log.Debug("Preconf: not enough DA space for further transactions", "have", daFootprintLeft, "want", minTransactionDAFootprint)
+			return nil, nil, ErrNotEnoughDASpace
+		}
+		txDAFootprint := tx.RollupCostData().EstimatedDASize().Uint64() * uint64(env.daFootprintGasScalar)
+		if daFootprintLeft < txDAFootprint {
+			log.Debug("Preconf: not enough DA space for transaction", "hash", tx.Hash(), "left", daFootprintLeft, "needed", txDAFootprint)
+			return nil, nil, ErrNotEnoughDASpace
+		}
+	}
+
 	env.state.SetTxContext(tx.Hash(), env.tcount)
 	var (
 		snap = env.state.Snapshot()
@@ -391,6 +413,13 @@ func (c *preconfChecker) applyTx(env *environment, tx *types.Transaction) (*type
 	env.txs = append(env.txs, tx)
 	env.receipts = append(env.receipts, receipt)
 	env.tcount++
+
+	// OP-Stack: accumulate DA footprint for Jovian (must match commit path)
+	if chainConfig.IsMantleArsia(env.header.Time) && !tx.IsDepositTx() && env.header.BlobGasUsed != nil {
+		daFootprint := tx.RollupCostData().EstimatedDASize().Uint64() * uint64(env.daFootprintGasScalar)
+		*env.header.BlobGasUsed += daFootprint
+	}
+
 	return receipt, returnData, nil
 }
 
