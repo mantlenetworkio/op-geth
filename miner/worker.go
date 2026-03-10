@@ -395,11 +395,17 @@ func (miner *Miner) makeEnv(parent *types.Header, header *types.Header, coinbase
 	state, err := miner.chain.StateAt(parent.Root)
 	if err != nil && miner.chainConfig.Optimism != nil { // Allow the miner to reorg its own chain arbitrarily deep
 		if historicalBackend, ok := miner.backend.(BackendWithHistoricalState); ok {
-			var release tracers.StateReleaseFunc
 			parentBlock := miner.backend.BlockChain().GetBlockByHash(parent.Hash())
-			state, release, err = historicalBackend.StateAtBlock(context.Background(), parentBlock, ^uint64(0), nil, false, false)
-			state = state.Copy()
-			release()
+			if parentBlock != nil {
+				var release tracers.StateReleaseFunc
+				state, release, err = historicalBackend.StateAtBlock(context.Background(), parentBlock, ^uint64(0), nil, false, false)
+				if err == nil && state != nil {
+					state = state.Copy()
+				}
+				if release != nil {
+					release()
+				}
+			}
 		}
 	}
 	if err != nil {
