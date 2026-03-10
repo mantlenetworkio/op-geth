@@ -35,6 +35,7 @@ type DumpConfig struct {
 	SkipCode          bool
 	SkipStorage       bool
 	OnlyWithAddresses bool
+	OnlyIncompletes   bool
 	Start             []byte
 	Max               uint64
 }
@@ -154,12 +155,16 @@ func (s *StateDB) DumpToCollector(c DumpCollector, conf *DumpConfig) (nextKey []
 			addr      common.Address
 			addrBytes = s.trie.GetKey(it.Key)
 		)
-		if addrBytes == nil {
+		missingAddressPreimage := addrBytes == nil
+		if missingAddressPreimage {
 			missingPreimages++
 			if conf.OnlyWithAddresses {
 				continue
 			}
 		} else {
+			if conf.OnlyIncompletes {
+				continue
+			}
 			addr = common.BytesToAddress(addrBytes)
 			address = &addr
 			account.Address = address
@@ -170,10 +175,22 @@ func (s *StateDB) DumpToCollector(c DumpCollector, conf *DumpConfig) (nextKey []
 		}
 		if !conf.SkipStorage {
 			account.Storage = make(map[common.Hash]string)
-			tr, err := obj.getTrie()
-			if err != nil {
-				log.Error("Failed to load storage trie", "err", err)
-				continue
+			var tr Trie
+			if missingAddressPreimage {
+				tr, err = trie.NewStateTrie(
+					trie.StorageTrieID(s.originalRoot, common.BytesToHash(it.Key), data.Root),
+					s.db.TrieDB(),
+				)
+				if err != nil {
+					log.Error("Failed to load storage trie for account without address preimage", "key", common.Bytes2Hex(it.Key), "err", err)
+					continue
+				}
+			} else {
+				tr, err = obj.getTrie()
+				if err != nil {
+					log.Error("Failed to load storage trie", "err", err)
+					continue
+				}
 			}
 			trieIt, err := tr.NodeIterator(nil)
 			if err != nil {
@@ -190,7 +207,7 @@ func (s *StateDB) DumpToCollector(c DumpCollector, conf *DumpConfig) (nextKey []
 				}
 				key := s.trie.GetKey(storageIt.Key)
 				if key == nil {
-					log.Error("Failed to get key from iterator", "key", common.Bytes2Hex(storageIt.Key), "value", common.Bytes2Hex(storageIt.Value))
+					log.Error("Failed to get key from iterator", "address", addr.Hex(), "key", common.Bytes2Hex(storageIt.Key), "value", common.Bytes2Hex(storageIt.Value))
 					missingSlotPreimages++
 					if account.StorageHashed == nil {
 						account.StorageHashed = make(map[common.Hash]string)
@@ -221,7 +238,13 @@ func (s *StateDB) DumpToCollector(c DumpCollector, conf *DumpConfig) (nextKey []
 		}
 	}
 	if missingPreimages > 0 {
-		log.Warn("Dump incomplete due to missing preimages", "missing", missingPreimages)
+		if conf.OnlyWithAddresses {
+			log.Warn("Dump incomplete due to missing preimages", "missing", missingPreimages)
+		} else if conf.OnlyIncompletes {
+			log.Info("Dumped only accounts without address preimages", "missing", missingPreimages)
+		} else {
+			log.Warn("Dump included accounts without address preimages", "missing", missingPreimages)
+		}
 	}
 	if missingSlotPreimages > 0 {
 		log.Warn(

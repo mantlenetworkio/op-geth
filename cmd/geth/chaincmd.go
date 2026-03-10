@@ -199,6 +199,7 @@ It's deprecated, please use "geth db import" instead.
 			utils.ExcludeCodeFlag,
 			utils.ExcludeStorageFlag,
 			utils.IncludeIncompletesFlag,
+			utils.OnlyIncompletesFlag,
 			utils.StartKeyFlag,
 			utils.DumpLimitFlag,
 		}, utils.DatabaseFlags),
@@ -624,15 +625,19 @@ func parseDumpConfig(ctx *cli.Context, db ethdb.Database) (*state.DumpConfig, co
 	default:
 		return nil, common.Hash{}, fmt.Errorf("invalid start argument: %x. 20 or 32 hex-encoded bytes required", startArg)
 	}
+	onlyIncompletes := ctx.Bool(utils.OnlyIncompletesFlag.Name)
+	includeIncompletes := ctx.Bool(utils.IncludeIncompletesFlag.Name) || onlyIncompletes
 	conf := &state.DumpConfig{
 		SkipCode:          ctx.Bool(utils.ExcludeCodeFlag.Name),
 		SkipStorage:       ctx.Bool(utils.ExcludeStorageFlag.Name),
-		OnlyWithAddresses: !ctx.Bool(utils.IncludeIncompletesFlag.Name),
+		OnlyWithAddresses: !includeIncompletes,
+		OnlyIncompletes:   onlyIncompletes,
 		Start:             start.Bytes(),
 		Max:               ctx.Uint64(utils.DumpLimitFlag.Name),
 	}
 	log.Info("State dump configured", "block", header.Number, "hash", header.Hash().Hex(),
 		"skipcode", conf.SkipCode, "skipstorage", conf.SkipStorage,
+		"onlyincompletes", conf.OnlyIncompletes,
 		"start", hexutil.Encode(conf.Start), "limit", conf.Max)
 	return conf, header.Root, nil
 }

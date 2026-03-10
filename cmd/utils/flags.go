@@ -202,6 +202,10 @@ var (
 		Name:  "incompletes",
 		Usage: "Include accounts for which we don't have the address (missing preimage)",
 	}
+	OnlyIncompletesFlag = &cli.BoolFlag{
+		Name:  "only-incompletes",
+		Usage: "Dump only accounts for which address preimage is missing",
+	}
 	ExcludeCodeFlag = &cli.BoolFlag{
 		Name:  "nocode",
 		Usage: "Exclude contract code (save db lookups)",
