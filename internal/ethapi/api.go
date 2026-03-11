@@ -1019,6 +1019,10 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		ErrorRatio:                 estimateGasErrorRatio,
 		DefaultGasPriceForEstimate: gasPriceForEstimate,
 	}
+	if rules.IsMantleArsia {
+		opts.L1CostFunc = types.NewL1CostFunc(b.ChainConfig(), state)
+		opts.OperatorCostFunc = types.NewOperatorCostFunc(b.ChainConfig(), state)
+	}
 	// Set any required transaction default, but make sure the gas cap itself is not messed with
 	// if it was not specified in the original argument list.
 	if args.Gas == nil {
