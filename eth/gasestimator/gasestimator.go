@@ -138,6 +138,15 @@ func Estimate(ctx context.Context, call *core.Message, opts *Options, gasCap uin
 				return params.TxGas, nil, nil
 			}
 		}
+		// EIP-7702 delegated account: 23-byte delegation designator. Plain transfer needs
+		// TxGas + cold account access. Avoid execute(hi) which triggers "insufficient funds".
+		if call.To != nil && opts.State.GetCodeSize(*call.To) == 23 {
+			gasFor7702 := params.TxGas + params.ColdAccountAccessCostEIP2929
+			failed, _, err := execute(ctx, call, opts, gasFor7702)
+			if !failed && err == nil {
+				return gasFor7702, nil, nil
+			}
+		}
 	}
 	// We first execute the transaction at the highest allowable gas limit, since if this fails we
 	// can return error immediately.
