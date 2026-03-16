@@ -359,19 +359,21 @@ func (st *stateTransition) buyGas(metaTxV3 bool) (*big.Int, error) {
 	mgval := new(big.Int).SetUint64(st.msg.GasLimit)
 	mgval.Mul(mgval, st.msg.GasPrice)
 
+	isMantleArsia := st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time)
+
 	var l1Cost *big.Int
 	var operatorCost *uint256.Int
 	if st.msg.RunMode == GasEstimationMode || st.msg.RunMode == GasEstimationWithSkipCheckBalanceMode {
 		st.CalculateRollupCostDataFromMessage()
 	}
-	if st.evm.Context.L1CostFunc != nil && st.msg.RunMode != EthcallMode {
+	if st.evm.Context.L1CostFunc != nil && st.msg.RunMode != EthcallMode && (!st.msg.SkipTransactionChecks || !isMantleArsia) {
 		l1Cost = st.evm.Context.L1CostFunc(st.msg.RollupCostData, st.evm.Context.Time)
 		// Before Arsia: Gas paid for l1 cost is not bought in advance but is included in gas used calculation
 		//               which decides how much gas to refund.
 		// After Arsia:  Gas paid for l1 cost is bought in advance and is excluded from gas used calculation.
 		//               It means that pre-bought gas for l1 cost is not refunded.(But pre-bought gas for operator
 		//               cost is calculated based on gas limit so it will be refunded according to gas used.)
-		if st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) {
+		if isMantleArsia {
 			if l1Cost != nil {
 				mgval = mgval.Add(mgval, l1Cost)
 			}
@@ -388,7 +390,7 @@ func (st *stateTransition) buyGas(metaTxV3 bool) (*big.Int, error) {
 		balanceCheck = balanceCheck.Mul(balanceCheck, st.msg.GasFeeCap)
 		// Before Arsia: Gas limit is a hard cap(xGasFeeCap) for total tx cost.
 		// After Arsia:  Gas limit only limits the l2 gas used.
-		if st.evm.ChainConfig().IsMantleArsia(st.evm.Context.Time) {
+		if isMantleArsia {
 			if l1Cost != nil {
 				balanceCheck.Add(balanceCheck, l1Cost)
 			}
