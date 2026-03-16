@@ -226,7 +226,7 @@ func Estimate(ctx context.Context, call *core.Message, opts *Options, gasCap uin
 // exceeds the caller's balance. Only runs on Mantle Arsia when L1/Operator cost funcs are set.
 // No-op otherwise.
 func mantleArsiaCheckFunds(gasLimit uint64, call *core.Message, opts *Options, feeCap *big.Int) error {
-	if !opts.Config.IsMantleArsia(opts.Header.Time) || opts.L1CostFunc == nil || opts.OperatorCostFunc == nil || feeCap.BitLen() == 0 {
+	if call.RunMode == core.GasEstimationWithSkipCheckBalanceMode || !opts.Config.IsMantleArsia(opts.Header.Time) || opts.L1CostFunc == nil || opts.OperatorCostFunc == nil || feeCap.BitLen() == 0 {
 		return nil
 	}
 	blockTime := opts.Header.Time
