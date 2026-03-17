@@ -73,11 +73,7 @@ func LocalVersion() string {
 		return "dev"
 	}
 	if git.Tag != "" {
-		tag := git.Tag
-		if len(tag) > 0 && tag[0] != 'v' {
-			tag = "v" + tag
-		}
-		return tag
+		return git.Tag
 	}
 	if len(git.Commit) >= 8 {
 		return "dev-" + git.Commit[:8]
