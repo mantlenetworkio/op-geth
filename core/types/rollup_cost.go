@@ -476,10 +476,9 @@ func newOperatorCostFunc(operatorFeeScalar *big.Int, operatorFeeConstant *big.In
 
 // DeriveL1GasInfoMantle reads L1 gas related information to be included before Arsia
 // on the receipt
-func DeriveL1GasInfoMantle(state StateGetter) (*big.Int, *big.Int, *big.Int, *big.Float, *big.Int) {
+func DeriveL1GasInfoMantle(state StateGetter) (*big.Int, *big.Int, *big.Int, *big.Float) {
 	l1BaseFee, overhead, scalar, scaled := readL1BlockStorageSlots(L1BlockAddr, state)
-	tokenRatio := readGPOStorageSlots(GasOracleAddr, state)
-	return l1BaseFee, overhead, scalar, scaled, tokenRatio
+	return l1BaseFee, overhead, scalar, scaled
 }
 
 func DeriveL1GasInfo(state StateGetter) (*big.Int, *big.Int, *big.Int, *big.Int, *big.Int) {
@@ -564,11 +563,6 @@ func ExtractOperatorFeeParams(operatorFeeParams common.Hash) (operatorFeeScalar,
 	operatorFeeScalar = new(big.Int).SetBytes(operatorFeeParams[20:24])
 	operatorFeeConstant = new(big.Int).SetBytes(operatorFeeParams[24:32])
 	return
-}
-
-func readGPOStorageSlots(addr common.Address, state StateGetter) *big.Int {
-	tokenRatio := state.GetState(addr, TokenRatioSlot)
-	return tokenRatio.Big()
 }
 
 // scaleDecimals will scale a value by decimals
