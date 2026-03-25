@@ -1228,6 +1228,15 @@ func (api *BlockChainAPI) EstimateTotalFee(ctx context.Context, args Transaction
 	totalFee := new(big.Int).Add(l2GasFee, l1DataFee)
 	totalFee.Add(totalFee, operatorFee)
 
+	log.Debug("EstimateTotalFee breakdown",
+		"l2GasFee", l2GasFee,
+		"l1DataFee", l1DataFee,
+		"operatorFee", operatorFee,
+		"totalFee", totalFee,
+		"gasEstimate", uint64(gasEstimate),
+		"gasPrice", gasPrice,
+	)
+
 	return (*hexutil.Big)(totalFee), nil
 }
 
