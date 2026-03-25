@@ -25,16 +25,16 @@ import (
 
 // Errors
 var (
-	ErrEnvNil                                                                 = errors.New("env is nil")
-	ErrOptimismSyncNil                                                        = errors.New("optimism sync status is nil")
-	ErrOptimismSyncNotOk                                                      = errors.New("optimism sync status is not ok")
-	ErrEnvTooOld                                                              = errors.New("env is too old")
-	ErrHeadL1BlockTooOld                                                      = errors.New("head l1 block is too old")
-	ErrCurrentL1NumberAndHeadL1NumberDistanceTooLarge                         = errors.New("current l1 number and head l1 number distance is too large")
-	ErrEnvBlockNumberLessThanUnsafeL2BlockNumber = errors.New("env block number is less than unsafe l2 block number")
+	ErrEnvNil                                               = errors.New("env is nil")
+	ErrOptimismSyncNil                                      = errors.New("optimism sync status is nil")
+	ErrOptimismSyncNotOk                                    = errors.New("optimism sync status is not ok")
+	ErrEnvTooOld                                            = errors.New("env is too old")
+	ErrHeadL1BlockTooOld                                    = errors.New("head l1 block is too old")
+	ErrCurrentL1NumberAndHeadL1NumberDistanceTooLarge       = errors.New("current l1 number and head l1 number distance is too large")
+	ErrEnvBlockNumberLessThanUnsafeL2BlockNumber            = errors.New("env block number is less than unsafe l2 block number")
 	ErrEnvBlockNumberAndUnsafeL2BlockNumberDistanceTooLarge = errors.New("env block number and unsafe l2 block number distance is too large")
-	ErrPreconfNotAvailable                                                    = errors.New("preconf is not available")
-	ErrNotEnoughDASpace                                                       = errors.New("not enough DA space for transaction")
+	ErrPreconfNotAvailable                                  = errors.New("preconf is not available")
+	ErrNotEnoughDASpace                                     = errors.New("not enough DA space for transaction")
 )
 
 const (
@@ -501,6 +501,11 @@ func (c *preconfChecker) UnpausePreconf(env *environment, preconfReady func()) {
 	if c.env.gasPool != nil {
 		c.env.gasPool.SetGas(c.env.header.GasLimit)
 		log.Trace("reset env", "env.header.Number", c.env.header.Number.Int64(), "env.gasPool", c.env.gasPool)
+	}
+
+	// Reset DA footprint for the new block
+	if c.env.header.BlobGasUsed != nil {
+		*c.env.header.BlobGasUsed = 0
 	}
 
 	// Load deposit txs
