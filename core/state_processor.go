@@ -20,8 +20,6 @@ import (
 	"fmt"
 	"math/big"
 
-	// "github.com/ethereum/go-ethereum/log"
-
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/core/state"
@@ -210,7 +208,7 @@ func MakeReceipt(evm *vm.EVM, result *ExecutionResult, statedb *state.StateDB, b
 	}
 
 	// used to record l1 fee
-	l1BaseFee, overhead, scalar, scaled, _ := types.DeriveL1GasInfoMantle(statedb)
+	l1BaseFee, overhead, scalar, scaled := types.DeriveL1GasInfoMantle(statedb)
 
 	// used to record calculating l1 fee for txs from Layer2
 	if !tx.IsDepositTx() {

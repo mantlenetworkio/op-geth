@@ -589,7 +589,6 @@ func (api *ConsensusAPI) GetBlobsV2(hashes []common.Hash) ([]*engine.BlobAndProo
 		getBlobsV2RequestMiss.Inc(1)
 		return nil, nil
 	}
-	getBlobsV2RequestHit.Inc(1)
 
 	blobs, _, proofs, err := api.eth.BlobTxPool().GetBlobs(hashes, types.BlobSidecarVersion1, false)
 	if err != nil {
