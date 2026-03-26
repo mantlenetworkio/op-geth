@@ -64,6 +64,39 @@ func WithCommit(gitCommit, gitDate string) string {
 	return vsn
 }
 
+// LocalVersion returns the local/mantle version from the git tag, or a dev fallback.
+// The tag is read from VCS (linker-injected or build info vcs.tag). If no tag is present,
+// returns "dev-" plus the short commit hash when available.
+func LocalVersion() string {
+	git, ok := VCS()
+	if !ok {
+		return "dev"
+	}
+	if git.Tag != "" {
+		return git.Tag
+	}
+	if len(git.Commit) >= 8 {
+		return "dev-" + git.Commit[:8]
+	}
+	return "dev"
+}
+
+// ShortVersion returns the string used for geth --version: LocalVersion-upstreamv<upstream>-<commit>.
+func ShortVersion(gitCommit, gitDate string) string {
+	upstream := fmt.Sprintf("v%d.%d.%d", version.Major, version.Minor, version.Patch)
+	if version.Meta != "" {
+		upstream += "-" + version.Meta
+	}
+	s := LocalVersion() + "-upstream" + upstream
+	if len(gitCommit) >= 8 {
+		s += "-" + gitCommit[:8]
+	}
+	if (version.Meta != "stable") && (gitDate != "") {
+		s += "-" + gitDate
+	}
+	return s
+}
+
 // Archive holds the textual version string used for Geth archives. e.g.
 // "1.8.11-dea1ce05" for stable releases, or "1.8.13-unstable-21c059b6" for unstable
 // releases.

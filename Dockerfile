@@ -6,6 +6,9 @@ ARG BUILDNUM=""
 # Build Geth in a stock Go builder container
 FROM golang:1.24-alpine AS builder
 
+ARG COMMIT=""
+ARG VERSION=""
+
 RUN apk add --no-cache gcc musl-dev linux-headers git
 
 # Get dependencies - will also be cached if we won't change go.mod/go.sum
@@ -14,7 +17,14 @@ COPY go.sum /go-ethereum/
 RUN cd /go-ethereum && go mod download
 
 ADD . /go-ethereum
-RUN cd /go-ethereum && go run build/ci.go install -static ./cmd/geth
+RUN cd /go-ethereum && \
+	GIT_TAG="$(git tag -l --points-at HEAD | head -n 1)" && \
+	set -- go run build/ci.go install -static && \
+	if [ -n "$VERSION" ]; then set -- "$@" -git-tag "$VERSION"; fi && \
+	if [ -n "$COMMIT" ]; then set -- "$@" -git-commit "$COMMIT"; fi && \
+	if [ -z "$VERSION" ] && [ -n "$GIT_TAG" ]; then set -- "$@" -git-tag "$GIT_TAG"; fi && \
+	set -- "$@" ./cmd/geth && \
+	"$@"
 
 # Pull Geth into a second stage deploy alpine container
 FROM alpine:latest

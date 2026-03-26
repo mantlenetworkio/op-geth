@@ -29,6 +29,7 @@ import (
 	"github.com/ethereum/go-ethereum/internal/ethapi/override"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/holiman/uint256"
 )
 
 // Options are the contextual parameters to execute the requested call.
@@ -46,6 +47,11 @@ type Options struct {
 	ErrorRatio float64 // Allowed overestimation ratio for faster estimation termination
 
 	DefaultGasPriceForEstimate *big.Int
+
+	// L1CostFunc and OperatorCostFunc are used on Mantle Arsia when gas price is specified,
+	// to cap hi by (available - L1 - operator) / feeCap for full cost simulation.
+	L1CostFunc       types.L1CostFunc       // optional, for Mantle Arsia
+	OperatorCostFunc types.OperatorCostFunc // optional, for Mantle Arsia
 }
 
 // Estimate returns the lowest possible gas limit that allows the transaction to
@@ -92,7 +98,7 @@ func Estimate(ctx context.Context, call *core.Message, opts *Options, gasCap uin
 	if feeCap.BitLen() != 0 && call.RunMode != core.GasEstimationWithSkipCheckBalanceMode {
 		balance := opts.State.GetBalance(call.From).ToBig()
 
-		available := balance
+		available := new(big.Int).Set(balance)
 		if call.Value != nil {
 			if call.Value.Cmp(available) >= 0 {
 				return 0, nil, core.ErrInsufficientFundsForTransfer
@@ -135,6 +141,9 @@ func Estimate(ctx context.Context, call *core.Message, opts *Options, gasCap uin
 		if call.To != nil && opts.State.GetCodeSize(*call.To) == 0 {
 			failed, _, err := execute(ctx, call, opts, params.TxGas)
 			if !failed && err == nil {
+				if err := mantleArsiaCheckFunds(params.TxGas, call, opts, feeCap); err != nil {
+					return 0, nil, err
+				}
 				return params.TxGas, nil, nil
 			}
 		}
@@ -207,7 +216,58 @@ func Estimate(ctx context.Context, call *core.Message, opts *Options, gasCap uin
 			hi = mid
 		}
 	}
+	if err := mantleArsiaCheckFunds(hi, call, opts, feeCap); err != nil {
+		return 0, nil, err
+	}
 	return hi, nil, nil
+}
+
+// mantleArsiaCheckFunds returns ErrInsufficientFunds if gasLimit*feeCap + L1 + operator + value
+// exceeds the caller's balance. Only runs on Mantle Arsia when L1/Operator cost funcs are set.
+// No-op otherwise.
+func mantleArsiaCheckFunds(gasLimit uint64, call *core.Message, opts *Options, feeCap *big.Int) error {
+	if call.RunMode == core.GasEstimationWithSkipCheckBalanceMode || !opts.Config.IsMantleArsia(opts.Header.Time) || opts.L1CostFunc == nil || opts.OperatorCostFunc == nil || feeCap.BitLen() == 0 {
+		return nil
+	}
+	blockTime := opts.Header.Time
+	gasTipCap := call.GasTipCap
+	if gasTipCap == nil {
+		gasTipCap = feeCap
+	}
+	gasFeeCap := call.GasFeeCap
+	if gasFeeCap == nil {
+		gasFeeCap = feeCap
+	}
+	tx := types.NewTx(&types.DynamicFeeTx{
+		Nonce:     call.Nonce,
+		Value:     call.Value,
+		Gas:       gasLimit,
+		GasTipCap: gasTipCap,
+		GasFeeCap: gasFeeCap,
+		Data:      call.Data,
+	})
+	rollupCostData := tx.RollupCostData()
+	rollupCostData.Ones += 80
+	l1Cost := opts.L1CostFunc(rollupCostData, blockTime)
+	if l1Cost == nil {
+		l1Cost = new(big.Int)
+	}
+	operatorCost := opts.OperatorCostFunc(gasLimit, blockTime)
+	if operatorCost == nil {
+		operatorCost = uint256.NewInt(0)
+	}
+	totalCost := new(big.Int).SetUint64(gasLimit)
+	totalCost.Mul(totalCost, feeCap)
+	totalCost.Add(totalCost, l1Cost)
+	totalCost.Add(totalCost, operatorCost.ToBig())
+	if call.Value != nil {
+		totalCost.Add(totalCost, call.Value)
+	}
+	balance := opts.State.GetBalance(call.From).ToBig()
+	if totalCost.Cmp(balance) > 0 {
+		return core.ErrInsufficientFunds
+	}
+	return nil
 }
 
 // execute is a helper that executes the transaction under a given gas limit and

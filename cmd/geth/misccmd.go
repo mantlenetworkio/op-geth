@@ -72,7 +72,7 @@ func printVersion(ctx *cli.Context) error {
 	git, _ := version.VCS()
 
 	fmt.Println(strings.Title(clientIdentifier))
-	fmt.Println("Version:", version.WithMeta)
+	fmt.Println("Version:", version.LocalVersion())
 	if git.Commit != "" {
 		fmt.Println("Git Commit:", git.Commit)
 	}
