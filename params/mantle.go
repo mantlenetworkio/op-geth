@@ -22,7 +22,7 @@ var (
 		MantleEverestTime:     u64Ptr(1_742_367_600),
 		MantleSkadiTime:       u64Ptr(1_756_278_000),
 		MantleLimbTime:        u64Ptr(1_768_374_000),
-		MantleArsiaTime:       u64Ptr(1_775_026_800),
+		MantleArsiaTime:       u64Ptr(1_775_041_200),
 	}
 	MantleSepoliaUpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               MantleSepoliaChainId,
