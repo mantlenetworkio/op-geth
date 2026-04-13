@@ -32,8 +32,11 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		LogNoHistory                 bool   `toml:",omitempty"`
 		LogExportCheckpoints         string
 		StateHistory                 uint64                 `toml:",omitempty"`
+		TrienodeHistory              int64                  `toml:",omitempty"`
+		NodeFullValueCheckpoint      uint32                 `toml:",omitempty"`
 		StateScheme                  string                 `toml:",omitempty"`
 		RequiredBlocks               map[uint64]common.Hash `toml:"-"`
+		SlowBlockThreshold           time.Duration          `toml:",omitempty"`
 		SkipBcVersionCheck           bool                   `toml:"-"`
 		DatabaseHandles              int                    `toml:"-"`
 		DatabaseCache                int
@@ -59,15 +62,18 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		RPCGasCap                    uint64
 		RPCEVMTimeout                time.Duration
 		RPCTxFeeCap                  float64
-		OverrideOsaka                *uint64 `toml:",omitempty"`
-		OverrideBPO1                 *uint64 `toml:",omitempty"`
-		OverrideBPO2                 *uint64 `toml:",omitempty"`
-		OverrideVerkle               *uint64 `toml:",omitempty"`
+		OverrideOsaka                *uint64       `toml:",omitempty"`
+		OverrideBPO1                 *uint64       `toml:",omitempty"`
+		OverrideBPO2                 *uint64       `toml:",omitempty"`
+		OverrideVerkle               *uint64       `toml:",omitempty"`
+		TxSyncDefaultTimeout         time.Duration `toml:",omitempty"`
+		TxSyncMaxTimeout             time.Duration `toml:",omitempty"`
+		RangeLimit                   uint64        `toml:",omitempty"`
 		OverrideOptimismBedrock      *big.Int
 		OverrideOptimismRegolith     *uint64 `toml:",omitempty"`
 		OverrideOptimism             *bool
-		ApplyMantleUpgrades          bool    `toml:",omitempty"`
 		OverrideMantleArsia          *uint64 `toml:",omitempty"`
+		ApplyMantleUpgrades          bool    `toml:",omitempty"`
 		RollupSequencerHTTP          string
 		RollupHistoricalRPC          string
 		RollupHistoricalRPCTimeout   time.Duration
@@ -91,8 +97,11 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.LogNoHistory = c.LogNoHistory
 	enc.LogExportCheckpoints = c.LogExportCheckpoints
 	enc.StateHistory = c.StateHistory
+	enc.TrienodeHistory = c.TrienodeHistory
+	enc.NodeFullValueCheckpoint = c.NodeFullValueCheckpoint
 	enc.StateScheme = c.StateScheme
 	enc.RequiredBlocks = c.RequiredBlocks
+	enc.SlowBlockThreshold = c.SlowBlockThreshold
 	enc.SkipBcVersionCheck = c.SkipBcVersionCheck
 	enc.DatabaseHandles = c.DatabaseHandles
 	enc.DatabaseCache = c.DatabaseCache
@@ -122,11 +131,14 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.OverrideBPO1 = c.OverrideBPO1
 	enc.OverrideBPO2 = c.OverrideBPO2
 	enc.OverrideVerkle = c.OverrideVerkle
+	enc.TxSyncDefaultTimeout = c.TxSyncDefaultTimeout
+	enc.TxSyncMaxTimeout = c.TxSyncMaxTimeout
+	enc.RangeLimit = c.RangeLimit
 	enc.OverrideOptimismBedrock = c.OverrideOptimismBedrock
 	enc.OverrideOptimismRegolith = c.OverrideOptimismRegolith
 	enc.OverrideOptimism = c.OverrideOptimism
-	enc.ApplyMantleUpgrades = c.ApplyMantleUpgrades
 	enc.OverrideMantleArsia = c.OverrideMantleArsia
+	enc.ApplyMantleUpgrades = c.ApplyMantleUpgrades
 	enc.RollupSequencerHTTP = c.RollupSequencerHTTP
 	enc.RollupHistoricalRPC = c.RollupHistoricalRPC
 	enc.RollupHistoricalRPCTimeout = c.RollupHistoricalRPCTimeout
@@ -154,8 +166,11 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		LogNoHistory                 *bool   `toml:",omitempty"`
 		LogExportCheckpoints         *string
 		StateHistory                 *uint64                `toml:",omitempty"`
+		TrienodeHistory              *int64                 `toml:",omitempty"`
+		NodeFullValueCheckpoint      *uint32                `toml:",omitempty"`
 		StateScheme                  *string                `toml:",omitempty"`
 		RequiredBlocks               map[uint64]common.Hash `toml:"-"`
+		SlowBlockThreshold           *time.Duration         `toml:",omitempty"`
 		SkipBcVersionCheck           *bool                  `toml:"-"`
 		DatabaseHandles              *int                   `toml:"-"`
 		DatabaseCache                *int
@@ -181,15 +196,18 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		RPCGasCap                    *uint64
 		RPCEVMTimeout                *time.Duration
 		RPCTxFeeCap                  *float64
-		OverrideOsaka                *uint64 `toml:",omitempty"`
-		OverrideBPO1                 *uint64 `toml:",omitempty"`
-		OverrideBPO2                 *uint64 `toml:",omitempty"`
-		OverrideVerkle               *uint64 `toml:",omitempty"`
+		OverrideOsaka                *uint64        `toml:",omitempty"`
+		OverrideBPO1                 *uint64        `toml:",omitempty"`
+		OverrideBPO2                 *uint64        `toml:",omitempty"`
+		OverrideVerkle               *uint64        `toml:",omitempty"`
+		TxSyncDefaultTimeout         *time.Duration `toml:",omitempty"`
+		TxSyncMaxTimeout             *time.Duration `toml:",omitempty"`
+		RangeLimit                   *uint64        `toml:",omitempty"`
 		OverrideOptimismBedrock      *big.Int
 		OverrideOptimismRegolith     *uint64 `toml:",omitempty"`
 		OverrideOptimism             *bool
-		ApplyMantleUpgrades          *bool   `toml:",omitempty"`
 		OverrideMantleArsia          *uint64 `toml:",omitempty"`
+		ApplyMantleUpgrades          *bool   `toml:",omitempty"`
 		RollupSequencerHTTP          *string
 		RollupHistoricalRPC          *string
 		RollupHistoricalRPCTimeout   *time.Duration
@@ -244,11 +262,20 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.StateHistory != nil {
 		c.StateHistory = *dec.StateHistory
 	}
+	if dec.TrienodeHistory != nil {
+		c.TrienodeHistory = *dec.TrienodeHistory
+	}
+	if dec.NodeFullValueCheckpoint != nil {
+		c.NodeFullValueCheckpoint = *dec.NodeFullValueCheckpoint
+	}
 	if dec.StateScheme != nil {
 		c.StateScheme = *dec.StateScheme
 	}
 	if dec.RequiredBlocks != nil {
 		c.RequiredBlocks = dec.RequiredBlocks
+	}
+	if dec.SlowBlockThreshold != nil {
+		c.SlowBlockThreshold = *dec.SlowBlockThreshold
 	}
 	if dec.SkipBcVersionCheck != nil {
 		c.SkipBcVersionCheck = *dec.SkipBcVersionCheck
@@ -337,6 +364,15 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.OverrideVerkle != nil {
 		c.OverrideVerkle = dec.OverrideVerkle
 	}
+	if dec.TxSyncDefaultTimeout != nil {
+		c.TxSyncDefaultTimeout = *dec.TxSyncDefaultTimeout
+	}
+	if dec.TxSyncMaxTimeout != nil {
+		c.TxSyncMaxTimeout = *dec.TxSyncMaxTimeout
+	}
+	if dec.RangeLimit != nil {
+		c.RangeLimit = *dec.RangeLimit
+	}
 	if dec.OverrideOptimismBedrock != nil {
 		c.OverrideOptimismBedrock = dec.OverrideOptimismBedrock
 	}
@@ -346,11 +382,11 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.OverrideOptimism != nil {
 		c.OverrideOptimism = dec.OverrideOptimism
 	}
-	if dec.ApplyMantleUpgrades != nil {
-		c.ApplyMantleUpgrades = *dec.ApplyMantleUpgrades
-	}
 	if dec.OverrideMantleArsia != nil {
 		c.OverrideMantleArsia = dec.OverrideMantleArsia
+	}
+	if dec.ApplyMantleUpgrades != nil {
+		c.ApplyMantleUpgrades = *dec.ApplyMantleUpgrades
 	}
 	if dec.RollupSequencerHTTP != nil {
 		c.RollupSequencerHTTP = *dec.RollupSequencerHTTP

@@ -31,6 +31,9 @@ Available commands are:
 	install    [ -arch architecture ] [ -cc compiler ] [ packages... ] -- builds packages and executables
 	test       [ -coverage ] [ packages... ]                           -- runs the tests
 
+	keeper     [ -dlgo ]
+	keeper-archive [ -signer key-envvar ] [ -signify key-envvar ] [ -upload dest ]
+
 	archive    [ -arch architecture ] [ -type zip|tar ] [ -signer key-envvar ] [ -signify key-envvar ] [ -upload dest ] -- archives build artifacts
 	importkeys                                                                                  -- imports signing keys from env
 	debsrc     [ -signer key-id ] [ -upload dest ]                                              -- creates a debian source package
@@ -86,6 +89,46 @@ var (
 		executablePath("clef"),
 	}
 
+	// Keeper build targets with their configurations
+	keeperTargets = []struct {
+		Name   string
+		GOOS   string
+		GOARCH string
+		CC     string
+		Tags   string
+		Env    map[string]string
+	}{
+		{
+			Name:   "ziren",
+			GOOS:   "linux",
+			GOARCH: "mipsle",
+			// enable when cgo works
+			// CC:     "mipsel-linux-gnu-gcc",
+			Tags: "ziren",
+			Env:  map[string]string{"GOMIPS": "softfloat", "CGO_ENABLED": "0"},
+		},
+		{
+			Name:   "womir",
+			GOOS:   "wasip1",
+			GOARCH: "wasm",
+			Tags:   "womir",
+		},
+		{
+			Name:   "wasm-js",
+			GOOS:   "js",
+			GOARCH: "wasm",
+		},
+		{
+			Name:   "wasm-wasi",
+			GOOS:   "wasip1",
+			GOARCH: "wasm",
+		},
+		{
+			Name: "example",
+			Tags: "example",
+		},
+	}
+
 	// A debian package is created for all executables listed here.
 	debExecutables = []debExecutable{
 		{
@@ -124,13 +167,11 @@ var (
 
 	// Distros for which packages are created
 	debDistros = []string{
-		"xenial",   // 16.04, EOL: 04/2026
-		"bionic",   // 18.04, EOL: 04/2028
-		"focal",    // 20.04, EOL: 04/2030
-		"jammy",    // 22.04, EOL: 04/2032
-		"noble",    // 24.04, EOL: 04/2034
-		"oracular", // 24.10, EOL: 07/2025
-		"plucky",   // 25.04, EOL: 01/2026
+		"xenial", // 16.04, EOL: 04/2026
+		"bionic", // 18.04, EOL: 04/2028
+		"focal",  // 20.04, EOL: 04/2030
+		"jammy",  // 22.04, EOL: 04/2032
+		"noble",  // 24.04, EOL: 04/2034
 	}
 
 	// This is where the tests should be unpacked.
@@ -178,6 +219,10 @@ func main() {
 		doPurge(os.Args[2:])
 	case "sanitycheck":
 		doSanityCheck()
+	case "keeper":
+		doInstallKeeper(os.Args[2:])
+	case "keeper-archive":
+		doKeeperArchive(os.Args[2:])
 	default:
 		log.Fatal("unknown command ", os.Args[1])
 	}
@@ -212,9 +257,6 @@ func doInstall(cmdline []string) {
 	// Configure the build.
 	gobuild := tc.Go("build", buildFlags(env, *staticlink, buildTags)...)
 
-	// We use -trimpath to avoid leaking local paths into the built executables.
-	gobuild.Args = append(gobuild.Args, "-trimpath")
-
 	// Show packages during build.
 	gobuild.Args = append(gobuild.Args, "-v")
 
@@ -231,6 +273,43 @@ func doInstall(cmdline []string) {
 		args = append(args, "-o", executablePath(path.Base(pkg)))
 		args = append(args, pkg)
 		build.MustRun(&exec.Cmd{Path: gobuild.Path, Args: args, Env: gobuild.Env})
+	}
+}
+
+// doInstallKeeper builds keeper binaries for all supported targets.
+func doInstallKeeper(cmdline []string) {
+	var dlgo = flag.Bool("dlgo", false, "Download Go and build with it")
+
+	flag.CommandLine.Parse(cmdline)
+	env := build.Env()
+
+	// Configure the toolchain.
+	tc := build.GoToolchain{}
+	if *dlgo {
+		csdb := download.MustLoadChecksums("build/checksums.txt")
+		tc.Root = build.DownloadGo(csdb)
+	}
+
+	for _, target := range keeperTargets {
+		log.Printf("Building keeper-%s", target.Name)
+
+		// Configure the build.
+		tc.GOARCH = target.GOARCH
+		tc.GOOS = target.GOOS
+		tc.CC = target.CC
+		gobuild := tc.Go("build", buildFlags(env, true, []string{target.Tags})...)
+		gobuild.Dir = "./cmd/keeper"
+		gobuild.Args = append(gobuild.Args, "-v")
+
+		for key, value := range target.Env {
+			gobuild.Env = append(gobuild.Env, key+"="+value)
+		}
+		outputName := fmt.Sprintf("keeper-%s", target.Name)
+
+		args := slices.Clone(gobuild.Args)
+		args = append(args, "-o", executablePath(outputName))
+		args = append(args, ".")
+		build.MustRun(&exec.Cmd{Path: gobuild.Path, Args: args, Env: gobuild.Env, Dir: gobuild.Dir})
 	}
 }
 
@@ -269,12 +348,18 @@ func buildFlags(env build.Environment, staticLinking bool, buildTags []string) (
 		}
 		ld = append(ld, "-extldflags", "'"+strings.Join(extld, " ")+"'")
 	}
+	// TODO(gballet): revisit after the input api has been defined
+	if runtime.GOARCH == "wasm" {
+		ld = append(ld, "-gcflags=all=-d=softfloat")
+	}
 	if len(ld) > 0 {
 		flags = append(flags, "-ldflags", strings.Join(ld, " "))
 	}
 	if len(buildTags) > 0 {
 		flags = append(flags, "-tags", strings.Join(buildTags, ","))
 	}
+	// We use -trimpath to avoid leaking local paths into the built executables.
+	flags = append(flags, "-trimpath")
 	return flags
 }
 
@@ -284,16 +369,15 @@ func buildFlags(env build.Environment, staticLinking bool, buildTags []string) (
 
 func doTest(cmdline []string) {
 	var (
-		dlgo          = flag.Bool("dlgo", false, "Download Go and build with it")
-		arch          = flag.String("arch", "", "Run tests for given architecture")
-		cc            = flag.String("cc", "", "Sets C compiler binary")
-		coverage      = flag.Bool("coverage", false, "Whether to record code coverage")
-		verbose       = flag.Bool("v", false, "Whether to log verbosely")
-		race          = flag.Bool("race", false, "Execute the race detector")
-		short         = flag.Bool("short", false, "Pass the 'short'-flag to go test")
-		cachedir      = flag.String("cachedir", "./build/cache", "directory for caching downloads")
-		skipspectests = flag.Bool("skip-spectests", false, "Skip downloading execution-spec-tests fixtures")
-		threads       = flag.Int("p", 1, "Number of CPU threads to use for testing")
+		dlgo     = flag.Bool("dlgo", false, "Download Go and build with it")
+		arch     = flag.String("arch", "", "Run tests for given architecture")
+		cc       = flag.String("cc", "", "Sets C compiler binary")
+		coverage = flag.Bool("coverage", false, "Whether to record code coverage")
+		verbose  = flag.Bool("v", false, "Whether to log verbosely")
+		race     = flag.Bool("race", false, "Execute the race detector")
+		short    = flag.Bool("short", false, "Pass the 'short'-flag to go test")
+		cachedir = flag.String("cachedir", "./build/cache", "directory for caching downloads")
+		threads  = flag.Int("p", 1, "Number of CPU threads to use for testing")
 	)
 	flag.CommandLine.Parse(cmdline)
 
@@ -301,7 +385,7 @@ func doTest(cmdline []string) {
 	csdb := download.MustLoadChecksums("build/checksums.txt")
 
 	// Get test fixtures.
-	if !*skipspectests {
+	if !*short {
 		downloadSpecTestFixtures(csdb, *cachedir)
 	}
 
@@ -383,9 +467,14 @@ func doCheckGenerate() {
 	)
 	pathList := []string{filepath.Join(protocPath, "bin"), protocGenGoPath, os.Getenv("PATH")}
 
+	excludes := []string{"tests/testdata", "build/cache", ".git"}
+	for i := range excludes {
+		excludes[i] = filepath.FromSlash(excludes[i])
+	}
+
 	for _, mod := range goModules {
 		// Compute the origin hashes of all the files
-		hashes, err := build.HashFolder(mod, []string{"tests/testdata", "build/cache", ".git"})
+		hashes, err := build.HashFolder(mod, excludes)
 		if err != nil {
 			log.Fatal("Error computing hashes", "err", err)
 		}
@@ -395,7 +484,7 @@ func doCheckGenerate() {
 		c.Dir = mod
 		build.MustRun(c)
 		// Check if generate file hashes have changed
-		generated, err := build.HashFolder(mod, []string{"tests/testdata", "build/cache", ".git"})
+		generated, err := build.HashFolder(mod, excludes)
 		if err != nil {
 			log.Fatalf("Error re-computing hashes: %v", err)
 		}
@@ -630,6 +719,32 @@ func doArchive(cmdline []string) {
 		if err := archiveUpload(archive, *upload, *signer, *signify); err != nil {
 			log.Fatal(err)
 		}
+	}
+}
+
+func doKeeperArchive(cmdline []string) {
+	var (
+		signer  = flag.String("signer", "", `Environment variable holding the signing key (e.g. LINUX_SIGNING_KEY)`)
+		signify = flag.String("signify", "", `Environment variable holding the signify key (e.g. LINUX_SIGNIFY_KEY)`)
+		upload  = flag.String("upload", "", `Destination to upload the archives (usually "gethstore/builds")`)
+	)
+	flag.CommandLine.Parse(cmdline)
+
+	var (
+		env    = build.Env()
+		vsn    = version.Archive(env.Commit)
+		keeper = "keeper-" + vsn + ".tar.gz"
+	)
+	maybeSkipArchive(env)
+	files := []string{"COPYING"}
+	for _, target := range keeperTargets {
+		files = append(files, executablePath(fmt.Sprintf("keeper-%s", target.Name)))
+	}
+	if err := build.WriteArchive(keeper, files); err != nil {
+		log.Fatal(err)
+	}
+	if err := archiveUpload(keeper, *upload, *signer, *signify); err != nil {
+		log.Fatal(err)
 	}
 }
 
@@ -1088,7 +1203,7 @@ func doWindowsInstaller(cmdline []string) {
 	var (
 		arch    = flag.String("arch", runtime.GOARCH, "Architecture for cross build packaging")
 		signer  = flag.String("signer", "", `Environment variable holding the signing key (e.g. WINDOWS_SIGNING_KEY)`)
-		signify = flag.String("signify key", "", `Environment variable holding the signify signing key (e.g. WINDOWS_SIGNIFY_KEY)`)
+		signify = flag.String("signify", "", `Environment variable holding the signify signing key (e.g. WINDOWS_SIGNIFY_KEY)`)
 		upload  = flag.String("upload", "", `Destination to upload the archives (usually "gethstore/builds")`)
 		workdir = flag.String("workdir", "", `Output directory for packages (uses temp dir if unset)`)
 	)

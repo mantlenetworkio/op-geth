@@ -15,9 +15,9 @@ type preconfTxPool interface {
 	// SubscribeNewPreconfTxRequestEvent subscribes to new preconf transaction request events.
 	SubscribeNewPreconfTxRequestEvent(ch chan<- *core.NewPreconfTxRequest) event.Subscription
 
-	// PendingPreconfTxs returns all currently processable preconf and pending transactions, grouped by origin
+	// PendingWithPreconfTxs returns all currently processable preconf and pending transactions, grouped by origin
 	// account and sorted by nonce.
-	PendingPreconfTxs(filter PendingFilter) ([]*types.Transaction, map[common.Address][]*LazyTransaction)
+	PendingWithPreconfTxs(filter PendingFilter) ([]*types.Transaction, map[common.Address][]*LazyTransaction, int)
 
 	// PreconfReady closes the preconfReadyCh channel to notify the miner that preconf is ready
 	// This is called every time a worker is ready with an env, but it only closes once, so we need to use sync.Once to ensure it only closes once
@@ -47,17 +47,19 @@ func (p *TxPool) SubscribeNewPreconfTxRequestEvent(ch chan<- *core.NewPreconfTxR
 	return p.subs.Track(event.JoinSubscriptions(subs...))
 }
 
-func (p *TxPool) PendingPreconfTxs(filter PendingFilter) ([]*types.Transaction, map[common.Address][]*LazyTransaction) {
+func (p *TxPool) PendingWithPreconfTxs(filter PendingFilter) ([]*types.Transaction, map[common.Address][]*LazyTransaction, int) {
+	var count int
 	preconfTxs := make([]*types.Transaction, 0)
-	pendingTxs := make(map[common.Address][]*LazyTransaction)
+	txs := make(map[common.Address][]*LazyTransaction)
 	for _, subpool := range p.subpools {
-		preconfTxsSub, pendingTxsSub := subpool.PendingPreconfTxs(filter)
+		preconfTxsSub, set, n := subpool.PendingWithPreconfTxs(filter)
 		preconfTxs = append(preconfTxs, preconfTxsSub...)
-		for addr, txs := range pendingTxsSub {
-			pendingTxs[addr] = append(pendingTxs[addr], txs...)
+		for addr, list := range set {
+			txs[addr] = list
 		}
+		count += n
 	}
-	return preconfTxs, pendingTxs
+	return preconfTxs, txs, count
 }
 
 // PreconfReady closes the preconfReadyCh channel to notify the miner that preconf is ready

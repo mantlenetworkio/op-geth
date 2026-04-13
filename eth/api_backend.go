@@ -319,6 +319,11 @@ func (b *EthAPIBackend) SubscribeChainHeadEvent(ch chan<- core.ChainHeadEvent) e
 	return b.eth.BlockChain().SubscribeChainHeadEvent(ch)
 }
 
+// SubscribeNewPayloadEvent registers a subscription for NewPayloadEvent.
+func (b *EthAPIBackend) SubscribeNewPayloadEvent(ch chan<- core.NewPayloadEvent) event.Subscription {
+	return b.eth.BlockChain().SubscribeNewPayloadEvent(ch)
+}
+
 func (b *EthAPIBackend) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscription {
 	return b.eth.BlockChain().SubscribeLogsEvent(ch)
 }
@@ -430,7 +435,7 @@ func (b *EthAPIBackend) sendTxWithPreconf(ctx context.Context, tx *types.Transac
 }
 
 func (b *EthAPIBackend) GetPoolTransactions() (types.Transactions, error) {
-	pending := b.eth.txPool.Pending(txpool.PendingFilter{})
+	pending, _ := b.eth.txPool.Pending(txpool.PendingFilter{})
 	var txs types.Transactions
 	for _, batch := range pending {
 		for _, lazy := range batch {
@@ -577,6 +582,14 @@ func (b *EthAPIBackend) StateAtBlock(ctx context.Context, block *types.Block, re
 
 func (b *EthAPIBackend) StateAtTransaction(ctx context.Context, block *types.Block, txIndex int, reexec uint64) (*types.Transaction, vm.BlockContext, *state.StateDB, tracers.StateReleaseFunc, error) {
 	return b.eth.stateAtTransaction(ctx, block, txIndex, reexec)
+}
+
+func (b *EthAPIBackend) RPCTxSyncDefaultTimeout() time.Duration {
+	return b.eth.config.TxSyncDefaultTimeout
+}
+
+func (b *EthAPIBackend) RPCTxSyncMaxTimeout() time.Duration {
+	return b.eth.config.TxSyncMaxTimeout
 }
 
 func (b *EthAPIBackend) HistoricalRPCService() *rpc.Client {

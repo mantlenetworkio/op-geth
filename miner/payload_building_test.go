@@ -17,6 +17,7 @@
 package miner
 
 import (
+	"context"
 	"math/big"
 	"reflect"
 	"testing"
@@ -165,7 +166,7 @@ func TestBuildPayload(t *testing.T) {
 		FeeRecipient: recipient,
 		BaseFee:      big.NewInt(1e9),
 	}
-	payload, err := w.buildPayload(args, false)
+	payload, err := w.buildPayload(context.Background(), args, false)
 	if err != nil {
 		t.Fatalf("Failed to build payload %v", err)
 	}

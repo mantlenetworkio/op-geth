@@ -121,7 +121,7 @@ func (tracker *PreconfTxTracker) loop() {
 	journal := func() {
 		// No need to recheck, as journal is only used during restart and only accepts pre-confirmed transactions that won't be evicted by the system
 		start := time.Now()
-		preconfTxs, _ := tracker.pool.PendingPreconfTxs(txpool.PendingFilter{})
+		preconfTxs, _, _ := tracker.pool.PendingWithPreconfTxs(txpool.PendingFilter{})
 		tracker.TrackAll(preconfTxs, true)
 		// Use same address as key, so preconf transactions will be processed in order during rotation
 		// without needing to modify the rotate function signature

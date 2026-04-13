@@ -46,6 +46,11 @@ func VerifyEIP1559Header(config *params.ChainConfig, parent, header *types.Heade
 	if header.BaseFee == nil {
 		return errors.New("header is missing baseFee")
 	}
+
+	// Verify the parent header is not malformed
+	if config.IsLondon(parent.Number) && parent.BaseFee == nil {
+		return errors.New("parent header is missing baseFee")
+	}
 	if config.IsMantleArsia(parent.Time) {
 		// Verify the baseFee is correct based on the parent header.
 		expectedBaseFee := CalcBaseFee(config, parent)
