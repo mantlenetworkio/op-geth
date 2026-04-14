@@ -230,11 +230,13 @@ func (api *FilterAPI) NewPreconfTransaction(ctx context.Context) (*rpc.Subscript
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
 	}
 
-	rpcSub := notifier.CreateSubscription()
+	var (
+		rpcSub       = notifier.CreateSubscription()
+		preconfTx    = make(chan core.NewPreconfTxEvent, txChanSize)
+		preconfTxSub = api.events.SubscribePreconfTxs(preconfTx)
+	)
 
 	go func() {
-		preconfTx := make(chan core.NewPreconfTxEvent, txChanSize)
-		preconfTxSub := api.events.SubscribePreconfTxs(preconfTx)
 		defer preconfTxSub.Unsubscribe()
 
 		for {
