@@ -684,16 +684,19 @@ func (c *ChainConfig) String() string {
 		result += fmt.Sprintf(", MantleMetaTxV3UpgradeTime: %v", *c.MetaTxV3UpgradeTime)
 	}
 	if c.ProxyOwnerUpgradeTime != nil {
-		result += fmt.Sprintf(", MantleSkadiTime: %v", *c.ProxyOwnerUpgradeTime)
+		result += fmt.Sprintf(", ProxyOwnerUpgradeTime: %v", *c.ProxyOwnerUpgradeTime)
 	}
 	if c.MantleEverestTime != nil {
-		result += fmt.Sprintf(", MantleLimbTime: %v", *c.MantleEverestTime)
+		result += fmt.Sprintf(", MantleEverestTime: %v", *c.MantleEverestTime)
 	}
 	if c.MantleSkadiTime != nil {
 		result += fmt.Sprintf(", MantleSkadiTime: %v", *c.MantleSkadiTime)
 	}
 	if c.MantleLimbTime != nil {
 		result += fmt.Sprintf(", MantleLimbTime: %v", *c.MantleLimbTime)
+	}
+	if c.MantleArsiaTime != nil {
+		result += fmt.Sprintf(", MantleArsiaTime: %v", *c.MantleArsiaTime)
 	}
 	result += "}"
 	return result
