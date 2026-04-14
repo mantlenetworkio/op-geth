@@ -189,7 +189,7 @@ func erc20Test(endpoint string) {
 				log.Printf("paying %d", i)
 			}
 			if err := pay(ctx, client, addr1Auth, i, nonce+uint64(i), transferAmount, &addr1Txs, &addr1PreconfFailedTx); err != nil {
-				if strings.Contains(err.Error(), miner.ErrEnvBlockNumberAndEngineSyncTargetBlockNumberDistanceTooLarge.Error()) {
+				if strings.Contains(err.Error(), miner.ErrEnvBlockNumberAndUnsafeL2BlockNumberDistanceTooLarge.Error()) {
 					log.Println("so many preconf txs, wait for new preconf tx")
 					time.Sleep(config.WaitTime)
 					continue

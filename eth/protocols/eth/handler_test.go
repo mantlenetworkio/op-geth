@@ -511,14 +511,14 @@ func TestHashBody(t *testing.T) {
 	}
 	uncles := []*types.Header{{Number: big.NewInt(10)}}
 	body1 := &types.Body{Transactions: txs, Uncles: uncles}
-	block1 := types.NewBlock(header, body1, nil, trie.NewStackTrie(nil))
+	block1 := types.NewBlock(header, body1, nil, trie.NewStackTrie(nil), types.DefaultBlockConfig)
 
 	// create block 2 (has withdrawals)
 	header2 := &types.Header{Number: big.NewInt(12)}
 	body2 := &types.Body{
 		Withdrawals: []*types.Withdrawal{{Index: 10}, {Index: 11}},
 	}
-	block2 := types.NewBlock(header2, body2, nil, trie.NewStackTrie(nil))
+	block2 := types.NewBlock(header2, body2, nil, trie.NewStackTrie(nil), types.DefaultBlockConfig)
 
 	expectedHashes := BlockBodyHashes{
 		TransactionRoots: []common.Hash{block1.TxHash(), block2.TxHash()},

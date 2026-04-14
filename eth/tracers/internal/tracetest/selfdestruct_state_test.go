@@ -614,11 +614,12 @@ func TestSelfdestructStateTracer(t *testing.T) {
 
 			tracer := newSelfdestructStateTracer()
 			hookedState := state.NewHookedState(statedb, tracer.Hooks())
-			msg, err := core.TransactionToMessage(tx, signer, nil)
+			rules := tt.genesis.Config.Rules(block.Number(), true, block.Time())
+			msg, err := core.TransactionToMessage(tx, signer, nil, &rules)
 			if err != nil {
 				t.Fatalf("failed to prepare transaction for tracing: %v", err)
 			}
-			context := core.NewEVMBlockContext(block.Header(), blockchain, nil)
+			context := core.NewEVMBlockContext(block.Header(), blockchain, nil, tt.genesis.Config, statedb)
 			evm := vm.NewEVM(context, hookedState, tt.genesis.Config, vm.Config{Tracer: tracer.Hooks()})
 			_, err = core.ApplyTransactionWithEVM(msg, core.NewGasPool(msg.GasLimit), statedb, block.Number(), block.Hash(), block.Time(), tx, evm)
 			if err != nil {

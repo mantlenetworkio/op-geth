@@ -247,7 +247,7 @@ func sendBatchPreconfTxs(ctx context.Context, client *ethclient.Client, auth *bi
 				log.Printf("preconf tx replaced by deposit tx, from: %s, nonce: %d, tx: %s", auth.From.Hex(), nonce+uint64(i), tx.Hash().Hex())
 				continue
 			}
-			if strings.Contains(err.Error(), miner.ErrEnvBlockNumberAndEngineSyncTargetBlockNumberDistanceTooLarge.Error()) { // env block number and engine sync target block number distance too large
+			if strings.Contains(err.Error(), miner.ErrEnvBlockNumberAndUnsafeL2BlockNumberDistanceTooLarge.Error()) { // env block number and engine sync target block number distance too large
 				log.Printf("env block number and engine sync target block number distance too large, wait for new preconf tx: %s", tx.Hash().Hex())
 				time.Sleep(config.WaitTime)
 				continue

@@ -215,7 +215,7 @@ func sendRawTransactionWithPreconf(
 	}
 
 	if result.Status == core.PreconfStatusFailed {
-		if result.Reason == miner.ErrEnvBlockNumberAndEngineSyncTargetBlockNumberDistanceTooLarge.Error() {
+		if result.Reason == miner.ErrEnvBlockNumberAndUnsafeL2BlockNumberDistanceTooLarge.Error() {
 			log.Printf("Transaction %d failed: %s, wait for new preconf tx\n", iteration, result.Reason)
 			time.Sleep(config.WaitTime)
 			return TxResult{ResponseTime: responseTime, StartTime: startTime, EndTime: endTime, Tx: signedTx, TxHash: txHash}

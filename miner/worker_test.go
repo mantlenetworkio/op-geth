@@ -50,7 +50,7 @@ func TestEnvironmentCopy(t *testing.T) {
 			Time:       1000,
 			Difficulty: big.NewInt(1),
 		},
-		gasPool: new(core.GasPool).AddGas(1000000),
+		gasPool: core.NewGasPool(1000000),
 		blobs:   5,
 	}
 
@@ -93,7 +93,7 @@ func TestEnvironmentCopy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("can't create new chain %v", err)
 	}
-	statedb, _ := state.New(bc.Genesis().Root(), bc.StateCache())
+	statedb, _ := state.New(bc.Genesis().Root(), state.NewDatabaseForTesting())
 	blockchain := &testBlockChain{bc.Genesis().Root(), chainConfig, statedb, 10000000, new(event.Feed)}
 	// Create EVM
 	blockCtx := core.NewEVMBlockContext(original.header, blockchain, nil, chainConfig, original.state)
@@ -177,7 +177,7 @@ func TestEnvironmentCopy(t *testing.T) {
 	}
 
 	// Modify gas pool
-	copied.gasPool = new(core.GasPool).AddGas(2000000)
+	copied.gasPool = core.NewGasPool(2000000)
 	if original.gasPool.Gas() == copied.gasPool.Gas() {
 		t.Error("modifying copy's gas pool affected original")
 	}

@@ -89,7 +89,7 @@ func transferTest(endpoint string) {
 					log.Printf("this tx will in the next block? %v", err)
 					continue
 				}
-				if strings.Contains(err.Error(), miner.ErrEnvBlockNumberAndEngineSyncTargetBlockNumberDistanceTooLarge.Error()) { // env block number and engine sync target block number distance too large
+				if strings.Contains(err.Error(), miner.ErrEnvBlockNumberAndUnsafeL2BlockNumberDistanceTooLarge.Error()) { // env block number and engine sync target block number distance too large
 					log.Printf("env block number and engine sync target block number distance too large, wait for new preconf tx: %s", tx.Hash().Hex())
 					time.Sleep(config.WaitTime)
 					continue
