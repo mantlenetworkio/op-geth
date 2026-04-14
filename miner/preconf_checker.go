@@ -360,7 +360,7 @@ func (c *preconfChecker) applyTxWithResetEnv(env *environment, tx *types.Transac
 	defer preconf.LogIfSlow(time.Now(), "applyTxWithResetEnv", "tx", tx.Hash().Hex(), "nonce", tx.Nonce())
 	receipt, returnData, err := c.applyTx(env, tx)
 	if err != nil {
-		if errors.Is(err, core.ErrGasLimitReached) || errors.Is(err, core.ErrDAFootprintLimitReached) {
+		if errors.Is(err, core.ErrGasLimitReached) || errors.Is(err, core.ErrBlockOversized) || errors.Is(err, core.ErrDAFootprintLimitReached) {
 			// This indicates we should reset the env's gas limit and increment header.number+1.
 			// This avoids gas limit reached errors and nonce too high errors for subsequent preconfirmation transactions.
 			// No need to worry about transactions that always fill up the block gas limit,
@@ -368,11 +368,12 @@ func (c *preconfChecker) applyTxWithResetEnv(env *environment, tx *types.Transac
 			preGasLimit, txGasLimit := c.env.gasPool.Gas(), tx.Gas()
 			c.env.header.Number = new(big.Int).Add(c.env.header.Number, common.Big1)
 			c.env.gasPool = core.NewGasPool(c.env.header.GasLimit)
+			c.env.size = 0
 			// Reset DA footprint for the new block
 			if c.env.header.BlobGasUsed != nil {
 				*c.env.header.BlobGasUsed = 0
 			}
-			log.Trace("reset env for gas limit or da footprint reached", "env.header.Number", c.env.header.Number, "env.gasPool(pre)", preGasLimit, "tx.gas", txGasLimit, "env.gasPool(now)", c.env.gasPool.Gas(), "tx", tx.Hash())
+			log.Trace("reset env for limit reached", "env.header.Number", c.env.header.Number, "env.gasPool(pre)", preGasLimit, "tx.gas", txGasLimit, "env.gasPool(now)", c.env.gasPool.Gas(), "tx", tx.Hash())
 			return c.applyTx(c.env, tx)
 		}
 		return nil, nil, err
@@ -389,6 +390,10 @@ func (c *preconfChecker) applyTx(env *environment, tx *types.Transaction) (*type
 			log.Trace("Preconf applyTx checkDAFootprint failed", "err", err)
 			return nil, nil, err
 		}
+	}
+
+	if !env.txFitsSize(tx) {
+		return nil, nil, fmt.Errorf("block size exceeds maximum in preconf: %w", core.ErrBlockOversized)
 	}
 
 	env.state.SetTxContext(tx.Hash(), env.tcount)

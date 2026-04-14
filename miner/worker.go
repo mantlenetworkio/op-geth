@@ -813,8 +813,6 @@ func (miner *Miner) commitFIFOTransactions(ctx context.Context, env *environment
 		isMantleArsia = miner.chainConfig.IsMantleArsia(env.header.Time)
 		gasLimit      = env.header.GasLimit
 
-		// limitReached indicates whether we broke the loop due to gas limit of DA Footprint
-		limitReached = false
 		// breakIndex tracks the index where we broke due to gas limit
 		breakIndex = -1
 	)
@@ -822,7 +820,6 @@ func (miner *Miner) commitFIFOTransactions(ctx context.Context, env *environment
 		env.gasPool = core.NewGasPool(gasLimit)
 	}
 
-FIFO:
 	for i, tx := range txs {
 		// Check interruption signal and abort building if it's fired.
 		if interrupt != nil {
@@ -833,7 +830,13 @@ FIFO:
 		// If we don't have enough gas for any further transactions then we're done.
 		if env.gasPool.Gas() < params.TxGas {
 			log.Trace("Not enough gas for further transactions", "have", env.gasPool, "want", params.TxGas, "index", i, "tx", tx.Hash().Hex())
-			limitReached = true
+			breakIndex = i
+			break
+		}
+
+		// If we don't have enough space for the next transaction, break.
+		if env.gasPool.Gas() < tx.Gas() {
+			log.Trace("Not enough gas left for preconf transaction", "hash", tx.Hash(), "left", env.gasPool.Gas(), "needed", tx.Gas())
 			breakIndex = i
 			break
 		}
@@ -844,7 +847,6 @@ FIFO:
 			txDAFootprint, err = checkDAFootprint(env, tx.RollupCostData().EstimatedDASize().Uint64(), tx.Hash())
 			if err != nil {
 				log.Trace("commitFIFOTransactions checkDAFootprint failed", "err", err)
-				limitReached = true
 				breakIndex = i
 				break
 			}
@@ -853,7 +855,6 @@ FIFO:
 		// if inclusion of the transaction would put the block size over the
 		// maximum we allow, don't add any more txs to the payload.
 		if !env.txFitsSize(tx) {
-			limitReached = true
 			breakIndex = i
 			break
 		}
@@ -874,13 +875,6 @@ FIFO:
 
 		err = miner.commitTransaction(ctx, env, tx)
 		switch {
-		case errors.Is(err, core.ErrGasLimitReached):
-			// Pop the current out-of-gas transaction without shifting in the next from the account
-			log.Trace("Gas limit exceeded for current block", "sender", from, "index", i, "tx", tx.Hash().Hex())
-			limitReached = true
-			breakIndex = i
-			break FIFO
-
 		case errors.Is(err, core.ErrNonceTooLow):
 			// New head notification data race between the transaction pool and miner
 			log.Trace("Skipping transaction with low nonce", "hash", tx.Hash(), "sender", from, "nonce", tx.Nonce())
@@ -900,7 +894,7 @@ FIFO:
 
 	// Return unprocessed transactions only if we broke due to gas limit
 	unsealedTxs := make([]*types.Transaction, 0)
-	if limitReached && breakIndex >= 0 {
+	if breakIndex >= 0 {
 		// Only return transactions from the break point onwards
 		unsealedTxs = txs[breakIndex:]
 		log.Debug("unsealed transactions due to gas limit", "breakIndex", breakIndex, "len(tx)", len(txs))
