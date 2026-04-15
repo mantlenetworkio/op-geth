@@ -311,6 +311,8 @@ func NewL1CostFuncArsia(l1BaseFee, l1BlobBaseFee, baseFeeScalar, blobFeeScalar *
 	fjordCostFunc := NewL1CostFuncFjord(l1BaseFee, l1BlobBaseFee, baseFeeScalar, blobFeeScalar)
 
 	return func(costData RollupCostData) (fee, gasUsed *big.Int) {
+		// Get the current token ratio from the gas oracle every time the L1 cost is calculated
+		// because after setting the token ratio in the gas oracle, it needs to be updated in the rest of txs of the block
 		currentTokenRatio := statedb.GetState(GasOracleAddr, TokenRatioSlot).Big()
 
 		fee, gasUsed = fjordCostFunc(costData)
@@ -482,7 +484,6 @@ func CalcDAFootprint(txs []*Transaction) (uint64, error) {
 	// First Jovian block doesn't set the DA footprint gas scalar yet and
 	// it must not have user transactions.
 	data := txs[0].Data()
-	log.Info("tx0 data length", "length", len(data))
 	if len(data) == BedrockL1AttributesLen {
 		if !txs[len(txs)-1].IsDepositTx() {
 			// sufficient to check last transaction because deposits precede non-deposit txs
