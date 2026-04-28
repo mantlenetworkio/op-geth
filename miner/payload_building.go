@@ -292,7 +292,6 @@ func (miner *Miner) buildPayload(ctx context.Context, args *BuildPayloadArgs, wi
 	// Construct a payload object for return.
 	payload := newPayload(empty.block, empty.requests, empty.witness, payloadID)
 
-
 	if args.NoTxPool { // don't start the background payload updating job if there is no tx pool to pull from
 		// make sure to make it appear as full, otherwise it will wait indefinitely for payload building to complete.
 		payload.full = empty.block
@@ -310,6 +309,7 @@ func (miner *Miner) buildPayload(ctx context.Context, args *BuildPayloadArgs, wi
 		random:        args.Random,
 		withdrawals:   args.Withdrawals,
 		beaconRoot:    args.BeaconRoot,
+		slotNum:       args.SlotNum,
 		noTxs:         false,
 		txs:           args.Transactions,
 		gasLimit:      args.GasLimit,
@@ -346,18 +346,8 @@ func (miner *Miner) buildPayload(ctx context.Context, args *BuildPayloadArgs, wi
 		// the Mainnet configuration) have passed since the point in time identified
 		// by the timestamp parameter.
 		endTimer := time.NewTimer(blockTime)
+		defer endTimer.Stop()
 
-		fullParams := &generateParams{
-			timestamp:   args.Timestamp,
-			forceTime:   true,
-			parentHash:  args.Parent,
-			coinbase:    args.FeeRecipient,
-			random:      args.Random,
-			withdrawals: args.Withdrawals,
-			beaconRoot:  args.BeaconRoot,
-			slotNum:     args.SlotNum,
-			noTxs:       false,
-		}
 		for {
 			select {
 			case <-timer.C:
