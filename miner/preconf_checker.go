@@ -14,6 +14,7 @@ import (
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -34,6 +35,7 @@ var (
 	ErrEnvBlockNumberLessThanUnsafeL2BlockNumber            = errors.New("env block number is less than unsafe l2 block number")
 	ErrEnvBlockNumberAndUnsafeL2BlockNumberDistanceTooLarge = errors.New("env block number and unsafe l2 block number distance is too large")
 	ErrPreconfNotAvailable                                  = errors.New("preconf is not available")
+	ErrPreconfBlockFull                                     = errors.New("preconf block is full")
 )
 
 const (
@@ -355,26 +357,17 @@ func (c *preconfChecker) precheck() error {
 	return nil
 }
 
-// applyTxWithResetEnv applies a transaction and resets the environment if a gas limit reached error occurs.
+// applyTxWithResetEnv applies a transaction. If the preconf block is full, it
+// returns ErrPreconfBlockFull without advancing the virtual block number. Block
+// number advances happen only in UnpausePreconf, enforcing single-block
+// preconfirmation semantics.
 func (c *preconfChecker) applyTxWithResetEnv(env *environment, tx *types.Transaction) (*types.Receipt, []byte, error) {
 	defer preconf.LogIfSlow(time.Now(), "applyTxWithResetEnv", "tx", tx.Hash().Hex(), "nonce", tx.Nonce())
 	receipt, returnData, err := c.applyTx(env, tx)
 	if err != nil {
 		if errors.Is(err, core.ErrGasLimitReached) || errors.Is(err, core.ErrBlockOversized) || errors.Is(err, core.ErrDAFootprintLimitReached) {
-			// This indicates we should reset the env's gas limit and increment header.number+1.
-			// This avoids gas limit reached errors and nonce too high errors for subsequent preconfirmation transactions.
-			// No need to worry about transactions that always fill up the block gas limit,
-			// as transactions that are too costly are filtered out when entering the transaction pool.
-			preGasLimit, txGasLimit := c.env.gasPool.Gas(), tx.Gas()
-			c.env.header.Number = new(big.Int).Add(c.env.header.Number, common.Big1)
-			c.env.gasPool = core.NewGasPool(c.env.header.GasLimit)
-			c.env.size = 0
-			// Reset DA footprint for the new block
-			if c.env.header.BlobGasUsed != nil {
-				*c.env.header.BlobGasUsed = 0
-			}
-			log.Trace("reset env for limit reached", "env.header.Number", c.env.header.Number, "env.gasPool(pre)", preGasLimit, "tx.gas", txGasLimit, "env.gasPool(now)", c.env.gasPool.Gas(), "tx", tx.Hash())
-			return c.applyTx(c.env, tx)
+			log.Debug("preconf block full, rejecting tx", "tx", tx.Hash(), "err", err)
+			return nil, nil, fmt.Errorf("%w: %w", ErrPreconfBlockFull, err)
 		}
 		return nil, nil, err
 	}
@@ -492,9 +485,23 @@ func (c *preconfChecker) UnpausePreconf(env *environment, preconfReady func()) {
 	defer c.mu.Unlock()
 	c.env = env
 	c.envUpdatedAt = time.Now()
-	// reset env
-	log.Debug("unpause preconf", "env.header.Number", env.header.Number.Int64(), "env.gasPool", c.env.gasPool, "envUpdatedAt", c.envUpdatedAt)
+
+	// Snapshot the sealed block header before mutating it. CalcBaseFee reads the
+	// parent header's Extra/GasUsed/BlobGasUsed under Arsia.
+	parentHeader := types.CopyHeader(c.env.header)
+
+	log.Debug("unpause preconf", "env.header.Number", c.env.header.Number.Int64(), "env.gasPool", c.env.gasPool, "envUpdatedAt", c.envUpdatedAt)
 	c.env.header.Number = new(big.Int).Add(c.env.header.Number, common.Big1)
+
+	chainConfig := c.env.evm.ChainConfig()
+	newBaseFee := eip1559.CalcBaseFee(chainConfig, parentHeader)
+	c.env.header.BaseFee = newBaseFee
+	log.Debug("recalculated baseFee for preconf block",
+		"parentNumber", parentHeader.Number,
+		"parentGasUsed", parentHeader.GasUsed,
+		"parentBaseFee", parentHeader.BaseFee,
+		"newBaseFee", newBaseFee)
+
 	if c.env.gasPool != nil {
 		c.env.gasPool = core.NewGasPool(c.env.header.GasLimit)
 		log.Trace("reset env", "env.header.Number", c.env.header.Number.Int64(), "env.gasPool", c.env.gasPool)
@@ -504,6 +511,9 @@ func (c *preconfChecker) UnpausePreconf(env *environment, preconfReady func()) {
 	if c.env.header.BlobGasUsed != nil {
 		*c.env.header.BlobGasUsed = 0
 	}
+
+	blockCtx := core.NewEVMBlockContext(c.env.header, c.blockchain, nil, chainConfig, c.env.state)
+	c.env.evm = vm.NewEVM(blockCtx, c.env.state, chainConfig, c.env.evm.Config)
 
 	// Load deposit txs
 	log.Trace("apply deposit txs", "deposit_txs", len(c.depositTxs))
