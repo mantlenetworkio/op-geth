@@ -1,6 +1,9 @@
 package main
 
 import (
+	"github.com/ethereum/go-ethereum/tests/preconf/basefee"
+	basefee_stress "github.com/ethereum/go-ethereum/tests/preconf/basefee_stress"
+	"github.com/ethereum/go-ethereum/tests/preconf/blockfull"
 	"github.com/ethereum/go-ethereum/tests/preconf/check"
 	frontrunning "github.com/ethereum/go-ethereum/tests/preconf/front_running"
 	"github.com/ethereum/go-ethereum/tests/preconf/sort"
@@ -17,5 +20,11 @@ func main() {
 	frontrunning.TransferTest()
 	sort.SortTest()
 	frontrunning.ERC20Test()
+
+	// baseFee consistency & block-full tests (added for preconf baseFee recalc PR)
+	basefee.BaseFeeConsistencyTest()
+	blockfull.BlockFullTest()
+	basefee_stress.StressTest()
+
 	// reorg.L1ReorgDetection(common.HexToHash("0xe3f60268eb85440e5b2212cb748b3ea3df4cac7973a846ea16f7fa85c68a5eda"))
 }

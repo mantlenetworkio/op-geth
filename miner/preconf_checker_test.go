@@ -2,14 +2,25 @@ package miner
 
 import (
 	"context"
+	"errors"
+	"math/big"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/ethash"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
+	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/preconf"
+	"github.com/holiman/uint256"
 )
 
 func TestIsSyncStatusOk(t *testing.T) {
@@ -397,5 +408,360 @@ func TestUpdateOptimismSyncStatusDelay(t *testing.T) {
 				t.Fatalf("UpdateOptimismSyncStatus() depositTxs update mismatch, expected update: %v", tt.expectDepositTxsUpdate)
 			}
 		})
+	}
+}
+
+// --- Test helpers for baseFee / block-full tests ---
+
+func newU64(v uint64) *uint64 { return &v }
+
+// newArsiaBlockchain creates a *core.BlockChain with MantleArsiaTime=0 (always active)
+// and Arsia EIP-1559 params encoded in genesis ExtraData.
+func newArsiaBlockchain(t *testing.T) *core.BlockChain {
+	t.Helper()
+	zero := uint64(0)
+	chainConfig := &params.ChainConfig{
+		ChainID:             big.NewInt(1337),
+		HomesteadBlock:      big.NewInt(0),
+		EIP150Block:         big.NewInt(0),
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         big.NewInt(0),
+		Ethash:              new(params.EthashConfig),
+		MantleArsiaTime:     &zero,
+		Optimism: &params.OptimismConfig{
+			EIP1559Elasticity:        50,
+			EIP1559Denominator:       50,
+			EIP1559DenominatorCanyon: newU64(50),
+		},
+	}
+	genesis := &core.Genesis{
+		Config:     chainConfig,
+		ExtraData:  eip1559.EncodeMinBaseFeeExtraData(50, 50, 0),
+		GasLimit:   30_000_000,
+		BaseFee:    big.NewInt(params.InitialBaseFee),
+		Difficulty: big.NewInt(1),
+	}
+	chainDB := rawdb.NewMemoryDatabase()
+	bc, err := core.NewBlockChain(chainDB, genesis, ethash.NewFaker(), nil)
+	if err != nil {
+		t.Fatalf("NewBlockChain: %v", err)
+	}
+	t.Cleanup(bc.Stop)
+	return bc
+}
+
+// newTestEnv creates a minimal *environment backed by the genesis state of bc.
+// gasPoolGas controls the available gas (pass header.GasLimit for a full pool).
+func newTestEnv(t *testing.T, bc *core.BlockChain, header *types.Header, gasPoolGas uint64) *environment {
+	t.Helper()
+	statedb, err := bc.StateAt(bc.Genesis().Root())
+	if err != nil {
+		t.Fatalf("StateAt: %v", err)
+	}
+	chainConfig := bc.Config()
+	hdr := types.CopyHeader(header)
+	blockCtx := core.NewEVMBlockContext(hdr, bc, nil, chainConfig, statedb)
+	evm := vm.NewEVM(blockCtx, statedb, chainConfig, vm.Config{})
+	gp := core.NewGasPool(gasPoolGas)
+	return &environment{
+		signer:  types.MakeSigner(chainConfig, hdr.Number, hdr.Time),
+		state:   statedb,
+		evm:     evm,
+		gasPool: gp,
+		header:  hdr,
+	}
+}
+
+// --- Block-full tests: verify virtual block advance is removed ---
+
+func TestApplyTxWithResetEnv_GasLimitReturnsBlockFull(t *testing.T) {
+	bc := newArsiaBlockchain(t)
+
+	blobGasUsed := uint64(0)
+	header := &types.Header{
+		Number:      big.NewInt(11),
+		GasLimit:    30_000_000,
+		BaseFee:     big.NewInt(params.InitialBaseFee),
+		Time:        0,
+		Extra:       eip1559.EncodeMinBaseFeeExtraData(50, 50, 0),
+		BlobGasUsed: &blobGasUsed,
+	}
+	// gasPool = 0 → any tx will trigger ErrGasLimitReached
+	env := newTestEnv(t, bc, header, 0)
+	originalNumber := new(big.Int).Set(env.header.Number)
+
+	checker := &preconfChecker{
+		blockchain:  bc,
+		env:         env,
+		minerConfig: &preconf.DefaultMinerConfig,
+	}
+
+	// Create a simple tx (gas required > 0 but pool has 0 gas)
+	key, _ := crypto.GenerateKey()
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	// Fund sender so it passes balance check and hits the gas pool check
+	env.state.AddBalance(sender, uint256.NewInt(1e18), tracing.BalanceChangeUnspecified)
+	signer := types.NewEIP155Signer(bc.Config().ChainID)
+	tx, _ := types.SignTx(types.NewTx(&types.LegacyTx{
+		Nonce:    0,
+		Gas:      21_000,
+		GasPrice: big.NewInt(params.InitialBaseFee),
+	}), signer, key)
+
+	_, _, err := checker.applyTxWithResetEnv(env, tx)
+
+	// Must get ErrPreconfBlockFull (wrapping ErrGasLimitReached)
+	if !errors.Is(err, ErrPreconfBlockFull) {
+		t.Fatalf("expected ErrPreconfBlockFull, got %v", err)
+	}
+	if !errors.Is(err, core.ErrGasLimitReached) {
+		t.Fatalf("expected wrapped ErrGasLimitReached, got %v", err)
+	}
+	// header.Number must NOT have advanced (no virtual block advance)
+	if env.header.Number.Cmp(originalNumber) != 0 {
+		t.Fatalf("header.Number must not advance: got %v, want %v", env.header.Number, originalNumber)
+	}
+}
+
+func TestApplyTxWithResetEnv_DASpaceReturnsBlockFull(t *testing.T) {
+	bc := newArsiaBlockchain(t)
+
+	blobGasUsed := uint64(30_000_000) // DA completely saturated
+	header := &types.Header{
+		Number:      big.NewInt(11),
+		GasLimit:    30_000_000,
+		BaseFee:     big.NewInt(params.InitialBaseFee),
+		Time:        0,
+		Extra:       eip1559.EncodeMinBaseFeeExtraData(50, 50, 0),
+		BlobGasUsed: &blobGasUsed,
+	}
+	// Gas pool is fine, but DA is exhausted
+	env := newTestEnv(t, bc, header, header.GasLimit)
+	env.daFootprintGasScalar = 1 // activate DA check (scalar=0 disables it)
+	originalNumber := new(big.Int).Set(env.header.Number)
+
+	checker := &preconfChecker{
+		blockchain:  bc,
+		env:         env,
+		minerConfig: &preconf.DefaultMinerConfig,
+	}
+
+	key, _ := crypto.GenerateKey()
+	signer := types.NewEIP155Signer(bc.Config().ChainID)
+	tx, _ := types.SignTx(types.NewTx(&types.LegacyTx{
+		Nonce:    0,
+		Gas:      21_000,
+		GasPrice: big.NewInt(params.InitialBaseFee),
+	}), signer, key)
+
+	_, _, err := checker.applyTxWithResetEnv(env, tx)
+
+	// Must get ErrPreconfBlockFull (wrapping ErrDAFootprintLimitReached)
+	if !errors.Is(err, ErrPreconfBlockFull) {
+		t.Fatalf("expected ErrPreconfBlockFull, got %v", err)
+	}
+	if !errors.Is(err, core.ErrDAFootprintLimitReached) {
+		t.Fatalf("expected wrapped ErrDAFootprintLimitReached, got %v", err)
+	}
+	// header.Number must NOT have advanced
+	if env.header.Number.Cmp(originalNumber) != 0 {
+		t.Fatalf("header.Number must not advance: got %v, want %v", env.header.Number, originalNumber)
+	}
+}
+
+// --- UnpausePreconf baseFee recalculation test ---
+
+func TestUnpausePreconf_BaseFeeRecalculated(t *testing.T) {
+	bc := newArsiaBlockchain(t)
+	chainConfig := bc.Config()
+
+	gasLimit := uint64(30_000_000)
+	daUsed := gasLimit // BlobGasUsed == GasLimit → parentGasMetered = max(GasUsed, BlobGasUsed)
+	arsiaExtra := eip1559.EncodeMinBaseFeeExtraData(50, 50, 0)
+
+	sealedHeader := &types.Header{
+		Number:      big.NewInt(10),
+		GasLimit:    gasLimit,
+		GasUsed:     gasLimit, // 100% utilisation → baseFee must increase
+		BlobGasUsed: &daUsed,
+		BaseFee:     big.NewInt(params.InitialBaseFee),
+		Time:        0,
+		Extra:       arsiaExtra,
+		Difficulty:  big.NewInt(1),
+	}
+
+	// Ground truth: what CalcBaseFee computes for the next block
+	expectedBaseFee := eip1559.CalcBaseFee(chainConfig, sealedHeader)
+	if expectedBaseFee.Cmp(sealedHeader.BaseFee) == 0 {
+		t.Fatal("test setup error: baseFee unchanged — gas params may be wrong")
+	}
+
+	// Build environment from the sealed header
+	env := newTestEnv(t, bc, sealedHeader, gasLimit)
+	// BlobGasUsed must match for CalcBaseFee to read the correct parentGasMetered
+	*env.header.BlobGasUsed = daUsed
+	env.header.GasUsed = gasLimit
+
+	// Set up the unsealed preconf txs channel (empty, no overflow)
+	unSealedCh := make(chan []*types.Transaction, 1)
+	unSealedCh <- []*types.Transaction{}
+
+	checker := &preconfChecker{
+		blockchain:           bc,
+		depositTxs:           nil,
+		unSealedPreconfTxsCh: unSealedCh,
+		minerConfig:          &preconf.DefaultMinerConfig,
+	}
+
+	readyCalled := false
+	// UnpausePreconf defers mu.Unlock(), so we must hold the lock
+	checker.mu.Lock()
+	checker.UnpausePreconf(env, func() { readyCalled = true })
+
+	// preconfReady callback was called
+	if !readyCalled {
+		t.Error("preconfReady was not called")
+	}
+
+	// Block number advanced by 1
+	wantNumber := new(big.Int).Add(sealedHeader.Number, common.Big1)
+	if checker.env.header.Number.Cmp(wantNumber) != 0 {
+		t.Errorf("header.Number: got %v, want %v", checker.env.header.Number, wantNumber)
+	}
+
+	// BaseFee on the header is recalculated (not stale)
+	if checker.env.header.BaseFee.Cmp(expectedBaseFee) != 0 {
+		t.Errorf("header.BaseFee: got %v, want %v",
+			checker.env.header.BaseFee, expectedBaseFee)
+	}
+
+	// EVM BlockContext.BaseFee is also updated (EVM was rebuilt)
+	if checker.env.evm.Context.BaseFee.Cmp(expectedBaseFee) != 0 {
+		t.Errorf("evm.Context.BaseFee: got %v, want %v",
+			checker.env.evm.Context.BaseFee, expectedBaseFee)
+	}
+
+	// BlobGasUsed reset to 0 for new block
+	if *checker.env.header.BlobGasUsed != 0 {
+		t.Errorf("BlobGasUsed not reset: got %d", *checker.env.header.BlobGasUsed)
+	}
+
+	// Gas pool reset to full
+	if checker.env.gasPool.Gas() != gasLimit {
+		t.Errorf("gasPool.Gas(): got %d, want %d", checker.env.gasPool.Gas(), gasLimit)
+	}
+}
+
+// --- C1 supplement: non gas/DA errors pass through without wrapping ---
+
+func TestApplyTxWithResetEnv_OtherErrorsPassThrough(t *testing.T) {
+	bc := newArsiaBlockchain(t)
+
+	blobGasUsed := uint64(0)
+	header := &types.Header{
+		Number:      big.NewInt(11),
+		GasLimit:    30_000_000,
+		BaseFee:     big.NewInt(params.InitialBaseFee),
+		Time:        0,
+		Extra:       eip1559.EncodeMinBaseFeeExtraData(50, 50, 0),
+		BlobGasUsed: &blobGasUsed,
+	}
+	env := newTestEnv(t, bc, header, header.GasLimit) // gas pool is full
+
+	checker := &preconfChecker{
+		blockchain:  bc,
+		env:         env,
+		minerConfig: &preconf.DefaultMinerConfig,
+	}
+
+	// Create a tx with nonce=999 (way ahead of actual nonce 0) → triggers nonce-too-high error
+	key, _ := crypto.GenerateKey()
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	env.state.AddBalance(sender, uint256.NewInt(1e18), tracing.BalanceChangeUnspecified)
+	signer := types.NewEIP155Signer(bc.Config().ChainID)
+	tx, _ := types.SignTx(types.NewTx(&types.LegacyTx{
+		Nonce:    999, // nonce too high
+		Gas:      21_000,
+		GasPrice: big.NewInt(params.InitialBaseFee),
+	}), signer, key)
+
+	_, _, err := checker.applyTxWithResetEnv(env, tx)
+
+	// Must NOT be ErrPreconfBlockFull — should be original error
+	if err == nil {
+		t.Fatal("expected error for nonce-too-high tx, got nil")
+	}
+	if errors.Is(err, ErrPreconfBlockFull) {
+		t.Fatalf("non gas/DA error should not be wrapped as ErrPreconfBlockFull, got %v", err)
+	}
+}
+
+// --- C2 supplement: baseFee decreases on low utilisation ---
+
+func TestUnpausePreconf_BaseFeeDecreasesOnLowUtil(t *testing.T) {
+	bc := newArsiaBlockchain(t)
+	chainConfig := bc.Config()
+
+	gasLimit := uint64(30_000_000)
+	daUsed := uint64(0) // empty block
+	arsiaExtra := eip1559.EncodeMinBaseFeeExtraData(50, 50, 0)
+
+	// Start with a high baseFee so there's room to decrease
+	highBaseFee := new(big.Int).Mul(big.NewInt(params.InitialBaseFee), big.NewInt(10))
+
+	sealedHeader := &types.Header{
+		Number:      big.NewInt(10),
+		GasLimit:    gasLimit,
+		GasUsed:     0, // 0% utilisation → baseFee must decrease
+		BlobGasUsed: &daUsed,
+		BaseFee:     highBaseFee,
+		Time:        0,
+		Extra:       arsiaExtra,
+		Difficulty:  big.NewInt(1),
+	}
+
+	expectedBaseFee := eip1559.CalcBaseFee(chainConfig, sealedHeader)
+	if expectedBaseFee.Cmp(sealedHeader.BaseFee) >= 0 {
+		t.Fatal("test setup error: baseFee did not decrease — expected lower baseFee for empty block")
+	}
+
+	env := newTestEnv(t, bc, sealedHeader, gasLimit)
+	*env.header.BlobGasUsed = daUsed
+	env.header.GasUsed = 0
+
+	unSealedCh := make(chan []*types.Transaction, 1)
+	unSealedCh <- []*types.Transaction{}
+
+	checker := &preconfChecker{
+		blockchain:           bc,
+		depositTxs:           nil,
+		unSealedPreconfTxsCh: unSealedCh,
+		minerConfig:          &preconf.DefaultMinerConfig,
+	}
+
+	checker.mu.Lock()
+	checker.UnpausePreconf(env, func() {})
+
+	// BaseFee must have decreased
+	if checker.env.header.BaseFee.Cmp(highBaseFee) >= 0 {
+		t.Errorf("header.BaseFee should decrease: got %v, parent was %v",
+			checker.env.header.BaseFee, highBaseFee)
+	}
+	if checker.env.header.BaseFee.Cmp(expectedBaseFee) != 0 {
+		t.Errorf("header.BaseFee: got %v, want %v",
+			checker.env.header.BaseFee, expectedBaseFee)
+	}
+
+	// EVM must also reflect the decreased baseFee
+	if checker.env.evm.Context.BaseFee.Cmp(expectedBaseFee) != 0 {
+		t.Errorf("evm.Context.BaseFee: got %v, want %v",
+			checker.env.evm.Context.BaseFee, expectedBaseFee)
 	}
 }
