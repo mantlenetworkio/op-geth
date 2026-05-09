@@ -290,6 +290,11 @@ var (
 		Usage:    "Manually specify the MantleArsia fork timestamp, overriding the bundled setting",
 		Category: flags.EthCategory,
 	}
+	OverrideMantleElysium = &cli.Uint64Flag{
+		Name:     "override.elysium",
+		Usage:    "Manually specify the MantleElysium fork timestamp, overriding the bundled setting",
+		Category: flags.EthCategory,
+	}
 	OverrideGenesisFlag = &cli.StringFlag{
 		Name:     "override.genesis",
 		Usage:    "Load genesis block and configuration from file at this path",

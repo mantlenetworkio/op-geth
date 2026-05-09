@@ -297,6 +297,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if config.OverrideMantleArsia != nil {
 		overrides.OverrideMantleArsia = config.OverrideMantleArsia
 	}
+	if config.OverrideMantleElysium != nil {
+		overrides.OverrideMantleElysium = config.OverrideMantleElysium
+	}
 	overrides.ApplyMantleUpgrades = config.ApplyMantleUpgrades
 	options.Overrides = &overrides
 

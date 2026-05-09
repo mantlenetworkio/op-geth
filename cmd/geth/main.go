@@ -71,6 +71,7 @@ var (
 		utils.OverrideOptimismRegolith,
 		utils.OverrideOptimism,
 		utils.OverrideMantleArsia,
+		utils.OverrideMantleElysium,
 		utils.TxPoolFromPreconfsFlag,
 		utils.TxPoolToPreconfsFlag,
 		utils.TxPoolAllPreconfsFlag,

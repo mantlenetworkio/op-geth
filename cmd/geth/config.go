@@ -257,6 +257,11 @@ func makeFullNode(ctx *cli.Context) *node.Node {
 		cfg.Eth.OverrideMantleArsia = &v
 	}
 
+	if ctx.IsSet(utils.OverrideMantleElysium.Name) {
+		v := ctx.Uint64(utils.OverrideMantleElysium.Name)
+		cfg.Eth.OverrideMantleElysium = &v
+	}
+
 	// Start metrics export if enabled.
 	utils.SetupMetrics(&cfg.Metrics)
 

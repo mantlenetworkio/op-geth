@@ -208,18 +208,18 @@ func flushAlloc(ga *types.GenesisAlloc, triedb *triedb.Database, tracer *tracing
 	if tracer != nil && tracer.OnStateUpdate != nil {
 		r, update, err := statedb.CommitWithUpdate(0, false, false)
 		if err != nil {
-			return common.Hash{}, common.Hash{},err
+			return common.Hash{}, common.Hash{}, err
 		}
 		trUpdate, err := update.ToTracingUpdate()
 		if err != nil {
-			return common.Hash{}, common.Hash{},err
+			return common.Hash{}, common.Hash{}, err
 		}
 		tracer.OnStateUpdate(trUpdate)
 		root = r
 	} else {
 		root, err = statedb.Commit(0, false, false)
 		if err != nil {
-			return common.Hash{}, common.Hash{},err
+			return common.Hash{}, common.Hash{}, err
 		}
 	}
 	var storageRootMessagePasser common.Hash
@@ -307,8 +307,9 @@ type ChainOverrides struct {
 	OverrideOptimism         *bool
 
 	// mantle
-	OverrideMantleArsia *uint64
-	ApplyMantleUpgrades bool
+	OverrideMantleArsia   *uint64
+	OverrideMantleElysium *uint64
+	ApplyMantleUpgrades   bool
 }
 
 // apply applies the chain overrides on the supplied chain config.
@@ -359,10 +360,14 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 			cfg.MantleSkadiTime = mantleUpgradeChainConfig.MantleSkadiTime
 			cfg.MantleLimbTime = mantleUpgradeChainConfig.MantleLimbTime
 			cfg.MantleArsiaTime = mantleUpgradeChainConfig.MantleArsiaTime
+			cfg.MantleElysiumTime = mantleUpgradeChainConfig.MantleElysiumTime
 		}
 
 		if o.OverrideMantleArsia != nil {
 			cfg.MantleArsiaTime = o.OverrideMantleArsia
+		}
+		if o.OverrideMantleElysium != nil {
+			cfg.MantleElysiumTime = o.OverrideMantleElysium
 		}
 
 		// override optimism fork times (canyon/ecotone/fjord/granite/holocene/isthmus/jovian)
@@ -382,6 +387,7 @@ func (o *ChainOverrides) apply(cfg *params.ChainConfig) error {
 		cfg.PragueTime = cfg.MantleSkadiTime
 		// active standard EVM version (osaka)  in mantle limb time
 		cfg.OsakaTime = cfg.MantleLimbTime
+		//TODO: active standard EVM version (amsterdam)  in mantle elysium time
 	}
 
 	return cfg.CheckConfigForkOrder()

@@ -205,7 +205,6 @@ type Config struct {
 	// OverrideVerkle (TODO: remove after the fork)
 	OverrideVerkle *uint64 `toml:",omitempty"`
 
-
 	// EIP-7966: eth_sendRawTransactionSync timeouts
 	TxSyncDefaultTimeout time.Duration `toml:",omitempty"`
 	TxSyncMaxTimeout     time.Duration `toml:",omitempty"`
@@ -218,7 +217,8 @@ type Config struct {
 	OverrideOptimism         *bool
 
 	// OverrideMantle* will take into effect if and only if ApplyMantleUpgrades is true.
-	OverrideMantleArsia *uint64 `toml:",omitempty"`
+	OverrideMantleArsia   *uint64 `toml:",omitempty"`
+	OverrideMantleElysium *uint64 `toml:",omitempty"`
 	// ApplyMantleUpgrades requests the node to update chain-configuration from the mantle config.
 	// ApplyMantleUpgrades is acting as a toggle for enabling/disabling all mantle updates to the chain config.
 	ApplyMantleUpgrades bool `toml:",omitempty"`

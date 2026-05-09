@@ -23,6 +23,7 @@ var (
 		MantleSkadiTime:       u64Ptr(1_756_278_000),
 		MantleLimbTime:        u64Ptr(1_768_374_000),
 		MantleArsiaTime:       u64Ptr(1_776_841_200),
+		MantleElysiumTime:     nil,
 	}
 	MantleSepoliaUpgradeConfig = MantleUpgradeChainConfig{
 		ChainID:               MantleSepoliaChainId,
@@ -35,6 +36,7 @@ var (
 		MantleSkadiTime:       u64Ptr(1_752_649_200),
 		MantleLimbTime:        u64Ptr(1_764_745_200),
 		MantleArsiaTime:       u64Ptr(1_774_422_000),
+		MantleElysiumTime:     nil,
 	}
 
 	// Starting from arsia, hardcoding upgrade timestamps of qa/dev/local networks are deprecated.
@@ -51,6 +53,7 @@ var (
 		MantleSkadiTime:       u64Ptr(0),
 		MantleLimbTime:        u64Ptr(0),
 		MantleArsiaTime:       u64Ptr(0),
+		MantleElysiumTime:     nil,
 	}
 	MantleDefaultUpgradeConfig = MantleUpgradeChainConfig{
 		BaseFeeTime:           u64Ptr(0),
@@ -62,6 +65,7 @@ var (
 		MantleSkadiTime:       u64Ptr(0),
 		MantleLimbTime:        u64Ptr(0),
 		MantleArsiaTime:       u64Ptr(0),
+		MantleElysiumTime:     nil,
 	}
 )
 
@@ -77,6 +81,7 @@ type MantleUpgradeChainConfig struct {
 	MantleSkadiTime       *uint64 `json:"mantleSkadiTime"`       // MantleSkadiTime identifies the current block time is ensuring prague upgrade
 	MantleLimbTime        *uint64 `json:"mantleLimbTime"`        // MantleLimbTime identifies the current block time is ensuring osaka upgrade
 	MantleArsiaTime       *uint64 `json:"mantleArsiaTime"`       // MantleArsiaTime identifies the current block time is ensuring arsia upgrade
+	MantleElysiumTime     *uint64 `json:"mantleElysiumTime"`     // MantleElysiumTime identifies the current block time is ensuring elysium upgrade
 }
 
 // GetUpgradeConfigForMantle returns a mantle upgrade config for Mainnet and Sepolia.

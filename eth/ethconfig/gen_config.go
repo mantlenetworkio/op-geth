@@ -73,6 +73,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		OverrideOptimismRegolith     *uint64 `toml:",omitempty"`
 		OverrideOptimism             *bool
 		OverrideMantleArsia          *uint64 `toml:",omitempty"`
+		OverrideMantleElysium        *uint64 `toml:",omitempty"`
 		ApplyMantleUpgrades          bool    `toml:",omitempty"`
 		RollupSequencerHTTP          string
 		RollupHistoricalRPC          string
@@ -138,6 +139,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.OverrideOptimismRegolith = c.OverrideOptimismRegolith
 	enc.OverrideOptimism = c.OverrideOptimism
 	enc.OverrideMantleArsia = c.OverrideMantleArsia
+	enc.OverrideMantleElysium = c.OverrideMantleElysium
 	enc.ApplyMantleUpgrades = c.ApplyMantleUpgrades
 	enc.RollupSequencerHTTP = c.RollupSequencerHTTP
 	enc.RollupHistoricalRPC = c.RollupHistoricalRPC
@@ -207,6 +209,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		OverrideOptimismRegolith     *uint64 `toml:",omitempty"`
 		OverrideOptimism             *bool
 		OverrideMantleArsia          *uint64 `toml:",omitempty"`
+		OverrideMantleElysium        *uint64 `toml:",omitempty"`
 		ApplyMantleUpgrades          *bool   `toml:",omitempty"`
 		RollupSequencerHTTP          *string
 		RollupHistoricalRPC          *string
@@ -384,6 +387,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.OverrideMantleArsia != nil {
 		c.OverrideMantleArsia = dec.OverrideMantleArsia
+	}
+	if dec.OverrideMantleElysium != nil {
+		c.OverrideMantleElysium = dec.OverrideMantleElysium
 	}
 	if dec.ApplyMantleUpgrades != nil {
 		c.ApplyMantleUpgrades = *dec.ApplyMantleUpgrades
