@@ -1668,7 +1668,7 @@ type Rules struct {
 	IsMantleBaseFee, IsMantleBVMETHMintUpgrade              bool
 	IsMetaTxV2, IsMetaTxV3                                  bool
 	IsMantleEverest, IsMantleSkadi, IsMantleLimb            bool
-	IsMantleArsia                                           bool
+	IsMantleArsia, IsMantleElysium                          bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -1708,5 +1708,6 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		IsMantleSkadi:             c.IsMantleSkadi(timestamp),
 		IsMantleLimb:              c.IsMantleLimb(timestamp),
 		IsMantleArsia:             c.IsMantleArsia(timestamp),
+		IsMantleElysium:           c.IsMantleElysium(timestamp),
 	}
 }
