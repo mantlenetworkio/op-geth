@@ -458,7 +458,7 @@ func applyPreconfTransaction(evm *vm.EVM, gp *core.GasPool, statedb *state.State
 
 	// Merge the tx-local access event into the "block-local" one, in order to collect
 	// all values, so that the witness can be built.
-	if statedb.Database().TrieDB().IsVerkle() {
+	if statedb.Database().Type().Is(state.TypeUBT) {
 		statedb.AccessEvents().Merge(evm.AccessEvents)
 	}
 
