@@ -435,7 +435,10 @@ func (sim *simulator) processBlock(ctx context.Context, block *simBlock, header,
 	chainHeadReader := &simChainHeadReader{ctx, sim.b}
 
 	// Assemble the block
-	b := core.AssembleBlock(sim.b.Engine(), chainHeadReader, header, sim.state, blockBody, receipts)
+	b, err := core.AssembleBlock(sim.b.Engine(), chainHeadReader, header, sim.state, blockBody, receipts)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 
 	repairLogs(callResults, b.Hash())
 	return b, callResults, senders, nil

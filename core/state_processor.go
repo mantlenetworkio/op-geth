@@ -19,6 +19,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -460,8 +461,32 @@ func onSystemCallStart(tracer *tracing.Hooks, ctx *tracing.VMContext) {
 
 // AssembleBlock finalizes the state and assembles the block with provided
 // body and receipts.
-func AssembleBlock(engine consensus.Engine, chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB, body *types.Body, receipts []*types.Receipt) *types.Block {
+func AssembleBlock(engine consensus.Engine, chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB, body *types.Body, receipts []*types.Receipt) (*types.Block, error) {
 	engine.Finalize(chain, header, state, body)
 	header.Root = state.IntermediateRoot(chain.Config().IsEIP158(header.Number))
-	return types.NewBlock(header, body, receipts, trie.NewStackTrie(nil), chain.Config())
+
+	if chain.Config().IsOptimismWithSkadi(header.Time) {
+		if body.Withdrawals == nil || len(body.Withdrawals) > 0 {
+			return nil, fmt.Errorf("expected non-nil empty withdrawals operation list in skadi, but got: %v", body.Withdrawals)
+		}
+		// State-root has just been computed, we can get an accurate storage-root now.
+		h := state.GetStorageRoot(params.OptimismL2ToL1MessagePasser)
+		header.WithdrawalsHash = &h
+		sa := state.AccessEvents()
+		if sa != nil {
+			sa.AddAccount(params.OptimismL2ToL1MessagePasser, false, math.MaxUint64) // include in execution witness
+		}
+	}
+
+	// Store DA footprint in BlobGasUsed header field if it hasn't already been set yet.
+	// Builder code may already calculate it during block building to avoid recalculating it here.
+	if chain.Config().IsMantleArsia(header.Time) && (header.BlobGasUsed == nil || *header.BlobGasUsed == 0) {
+		daFootprint, err := types.CalcDAFootprint(body.Transactions)
+		if err != nil {
+			return nil, fmt.Errorf("error calculating DA footprint: %w", err)
+		}
+		header.BlobGasUsed = &daFootprint
+	}
+
+	return types.NewBlock(header, body, receipts, trie.NewStackTrie(nil), chain.Config()), nil
 }
