@@ -26,7 +26,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/internal/ethapi/override"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
@@ -38,11 +37,12 @@ import (
 // these together, it would be excessively hard to test. Splitting the parts out
 // allows testing without needing a proper live chain.
 type Options struct {
-	Config         *params.ChainConfig      // Chain configuration for hard fork selection
-	Chain          core.ChainContext        // Chain context to access past block hashes
-	Header         *types.Header            // Header defining the block context to execute in
-	State          *state.StateDB           // Pre-state on top of which to estimate the gas
-	BlockOverrides *override.BlockOverrides // Block overrides to apply during the estimation
+	Config *params.ChainConfig // Chain configuration for hard fork selection
+	Chain  core.ChainContext   // Chain context to access past block hashes
+	Header *types.Header       // Header defining the block context to execute in
+	State  *state.StateDB      // Pre-state on top of which to estimate the gas
+
+	BlobBaseFee *big.Int // BlobBaseFee optionally overrides the blob base fee in the execution context.
 
 	ErrorRatio float64 // Allowed overestimation ratio for faster estimation termination
 
@@ -70,35 +70,26 @@ func Estimate(ctx context.Context, call *core.Message, opts *Options, gasCap uin
 	}
 
 	// Cap the maximum gas allowance according to EIP-7825 if the estimation targets Osaka
-	if !opts.Config.IsOptimism() && hi > params.MaxTxGas {
-		blockNumber, blockTime := opts.Header.Number, opts.Header.Time
-		if opts.BlockOverrides != nil {
-			if opts.BlockOverrides.Number != nil {
-				blockNumber = opts.BlockOverrides.Number.ToInt()
-			}
-			if opts.BlockOverrides.Time != nil {
-				blockTime = uint64(*opts.BlockOverrides.Time)
-			}
-		}
-		if opts.Config.IsOsaka(blockNumber, blockTime) {
-			hi = params.MaxTxGas
-		}
+	isOsaka := opts.Config.IsOsaka(opts.Header.Number, opts.Header.Time)
+	isAmsterdam := opts.Config.IsAmsterdam(opts.Header.Number, opts.Header.Time)
+	if !opts.Config.IsOptimism() && hi > params.MaxTxGas && isOsaka && !isAmsterdam {
+		hi = params.MaxTxGas
 	}
 
 	// Normalize the max fee per gas the call is willing to spend.
-	var feeCap *big.Int
+	var feeCap *uint256.Int
 	if call.GasFeeCap != nil {
 		feeCap = call.GasFeeCap
 	} else if call.GasPrice != nil {
 		feeCap = call.GasPrice
 	} else {
-		feeCap = opts.DefaultGasPriceForEstimate
+		feeCap = uint256.MustFromBig(opts.DefaultGasPriceForEstimate)
 	}
 	// Recap the highest gas limit with account's available balance.
 	if feeCap.BitLen() != 0 && call.RunMode != core.GasEstimationWithSkipCheckBalanceMode {
-		balance := opts.State.GetBalance(call.From).ToBig()
+		balance := opts.State.GetBalance(call.From).Clone()
 
-		available := new(big.Int).Set(balance)
+		available := balance
 		if call.Value != nil {
 			if call.Value.Cmp(available) >= 0 {
 				return 0, nil, core.ErrInsufficientFundsForTransfer
@@ -106,8 +97,8 @@ func Estimate(ctx context.Context, call *core.Message, opts *Options, gasCap uin
 			available.Sub(available, call.Value)
 		}
 		if opts.Config.IsCancun(opts.Header.Number, opts.Header.Time) && len(call.BlobHashes) > 0 {
-			blobGasPerBlob := new(big.Int).SetInt64(params.BlobTxBlobGasPerBlob)
-			blobBalanceUsage := new(big.Int).SetInt64(int64(len(call.BlobHashes)))
+			blobGasPerBlob := uint256.NewInt(params.BlobTxBlobGasPerBlob)
+			blobBalanceUsage := uint256.NewInt(uint64(len(call.BlobHashes)))
 			blobBalanceUsage.Mul(blobBalanceUsage, blobGasPerBlob)
 			blobBalanceUsage.Mul(blobBalanceUsage, call.BlobGasFeeCap)
 			if blobBalanceUsage.Cmp(available) >= 0 {
@@ -115,13 +106,13 @@ func Estimate(ctx context.Context, call *core.Message, opts *Options, gasCap uin
 			}
 			available.Sub(available, blobBalanceUsage)
 		}
-		allowance := new(big.Int).Div(available, feeCap)
+		allowance := new(uint256.Int).Div(available, feeCap)
 
 		// If the allowance is larger than maximum uint64, skip checking
 		if allowance.IsUint64() && hi > allowance.Uint64() {
 			transfer := call.Value
 			if transfer == nil {
-				transfer = new(big.Int)
+				transfer = new(uint256.Int)
 			}
 			log.Debug("Gas estimation capped by limited funds", "original", hi, "balance", balance,
 				"sent", transfer, "maxFeePerGas", feeCap, "fundable", allowance)
@@ -225,7 +216,7 @@ func Estimate(ctx context.Context, call *core.Message, opts *Options, gasCap uin
 // mantleArsiaCheckFunds returns ErrInsufficientFunds if gasLimit*feeCap + L1 + operator + value
 // exceeds the caller's balance. Only runs on Mantle Arsia when L1/Operator cost funcs are set.
 // No-op otherwise.
-func mantleArsiaCheckFunds(gasLimit uint64, call *core.Message, opts *Options, feeCap *big.Int) error {
+func mantleArsiaCheckFunds(gasLimit uint64, call *core.Message, opts *Options, feeCap *uint256.Int) error {
 	if call.RunMode == core.GasEstimationWithSkipCheckBalanceMode || !opts.Config.IsMantleArsia(opts.Header.Time) || opts.L1CostFunc == nil || opts.OperatorCostFunc == nil || feeCap.BitLen() == 0 {
 		return nil
 	}
@@ -240,10 +231,10 @@ func mantleArsiaCheckFunds(gasLimit uint64, call *core.Message, opts *Options, f
 	}
 	tx := types.NewTx(&types.DynamicFeeTx{
 		Nonce:     call.Nonce,
-		Value:     call.Value,
+		Value:     call.Value.ToBig(),
 		Gas:       gasLimit,
-		GasTipCap: gasTipCap,
-		GasFeeCap: gasFeeCap,
+		GasTipCap: gasTipCap.ToBig(),
+		GasFeeCap: gasFeeCap.ToBig(),
 		Data:      call.Data,
 	})
 	rollupCostData := tx.RollupCostData()
@@ -256,14 +247,14 @@ func mantleArsiaCheckFunds(gasLimit uint64, call *core.Message, opts *Options, f
 	if operatorCost == nil {
 		operatorCost = uint256.NewInt(0)
 	}
-	totalCost := new(big.Int).SetUint64(gasLimit)
+	totalCost := new(uint256.Int).SetUint64(gasLimit)
 	totalCost.Mul(totalCost, feeCap)
-	totalCost.Add(totalCost, l1Cost)
-	totalCost.Add(totalCost, operatorCost.ToBig())
+	totalCost.Add(totalCost, uint256.MustFromBig(l1Cost))
+	totalCost.Add(totalCost, operatorCost)
 	if call.Value != nil {
 		totalCost.Add(totalCost, call.Value)
 	}
-	balance := opts.State.GetBalance(call.From).ToBig()
+	balance := opts.State.GetBalance(call.From)
 	if totalCost.Cmp(balance) > 0 {
 		return core.ErrInsufficientFunds
 	}
@@ -302,10 +293,8 @@ func run(ctx context.Context, call *core.Message, opts *Options) (*core.Executio
 		evmContext = core.NewEVMBlockContext(opts.Header, opts.Chain, nil, opts.Config, opts.State)
 		dirtyState = opts.State.Copy()
 	)
-	if opts.BlockOverrides != nil {
-		if err := opts.BlockOverrides.Apply(&evmContext); err != nil {
-			return nil, err
-		}
+	if opts.BlobBaseFee != nil {
+		evmContext.BlobBaseFee = new(big.Int).Set(opts.BlobBaseFee)
 	}
 	// Lower the basefee to 0 to avoid breaking EVM
 	// invariants (basefee < feecap).
@@ -316,6 +305,7 @@ func run(ctx context.Context, call *core.Message, opts *Options) (*core.Executio
 		evmContext.BlobBaseFee = new(big.Int)
 	}
 	evm := vm.NewEVM(evmContext, dirtyState, opts.Config, vm.Config{NoBaseFee: true})
+	defer evm.Release()
 
 	// Monitor the outer context and interrupt the EVM upon cancellation. To avoid
 	// a dangling goroutine until the outer estimation finishes, create an internal

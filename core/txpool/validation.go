@@ -128,7 +128,7 @@ func ValidateTransaction(tx *types.Transaction, head *types.Header, signer types
 			return err
 		}
 	}
-	if !opts.Config.IsOptimism() && rules.IsOsaka && tx.Gas() > params.MaxTxGas {
+	if !opts.Config.IsOptimism() && rules.IsOsaka && !rules.IsAmsterdam && tx.Gas() > params.MaxTxGas {
 		return fmt.Errorf("%w (cap: %d, tx: %d)", core.ErrGasLimitTooHigh, params.MaxTxGas, tx.Gas())
 	}
 	// Transactions can't be negative. This may never happen using RLP decoded
@@ -314,8 +314,9 @@ func ValidateTransactionWithState(tx *types.Transaction, head *types.Header, sig
 		return core.ErrFeeCapTooLow
 	}
 
-	// Ensure the transaction has more gas than the bare minimum needed to cover the transaction metadata
-	intrGas, err := core.IntrinsicGas(tx.Data(), tx.AccessList(), tx.SetCodeAuthorizations(), tx.To() == nil, true, rules.IsIstanbul, rules.IsShanghai)
+	// Ensure the transaction has more gas than the bare minimum needed to cover
+	// the transaction metadata
+	intrGas, err := core.IntrinsicGas(tx.Data(), tx.AccessList(), tx.SetCodeAuthorizations(), tx.To() == nil, true, rules.IsIstanbul, rules.IsShanghai, rules.IsAmsterdam)
 	if err != nil {
 		return err
 	}
@@ -324,19 +325,18 @@ func ValidateTransactionWithState(tx *types.Transaction, head *types.Header, sig
 		gasMultiplier = tokenRatio
 	}
 
-	if tx.Gas() < intrGas*gasMultiplier {
-		return fmt.Errorf("%w: gas %v, minimum needed %v", core.ErrIntrinsicGas, tx.Gas(), intrGas*gasMultiplier)
+	if tx.Gas() < intrGas.RegularGas*gasMultiplier {
+		return fmt.Errorf("%w: gas %v, minimum needed %v", core.ErrIntrinsicGas, tx.Gas(), intrGas.RegularGas*gasMultiplier)
 	}
 
 	// Ensure the transaction can cover floor data gas.
 	if rules.IsPrague {
-		floorDataGas, err := core.FloorDataGas(tx.Data())
+		floorDataGas, err := core.FloorDataGas(rules, tx.Data(), tx.AccessList())
 		if err != nil {
 			return err
 		}
-		requiredFloorGas := floorDataGas * gasMultiplier
-		if tx.Gas() < requiredFloorGas {
-			return fmt.Errorf("%w: gas %v, minimum needed %v", core.ErrFloorDataGas, tx.Gas(), requiredFloorGas)
+		if tx.Gas() < floorDataGas * gasMultiplier{
+			return fmt.Errorf("%w: gas %v, minimum needed %v", core.ErrFloorDataGas, tx.Gas(), floorDataGas*gasMultiplier)
 		}
 	}
 

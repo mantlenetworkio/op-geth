@@ -8,6 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/holiman/uint256"
 )
 
 const (
@@ -86,14 +87,14 @@ func MetaTxCheck(txData []byte) error {
 	return nil
 }
 
-func CalculateSponsorPercentAmount(mxParams *MetaTxParams, amount *big.Int) (*big.Int, *big.Int) {
+func CalculateSponsorPercentAmount(mxParams *MetaTxParams, amount *uint256.Int) (*uint256.Int, *uint256.Int) {
 	if mxParams == nil {
 		return nil, nil
 	}
-	sponsorAmount := new(big.Int).Div(
-		new(big.Int).Mul(amount, big.NewInt(int64(mxParams.SponsorPercent))),
-		big.NewInt(OneHundredPercent))
-	selfAmount := new(big.Int).Sub(amount, sponsorAmount)
+
+	sponsorAmount := new(uint256.Int).Mul(amount, uint256.NewInt(mxParams.SponsorPercent))
+	sponsorAmount = new(uint256.Int).Div(sponsorAmount, uint256.NewInt(OneHundredPercent))
+	selfAmount := new(uint256.Int).Sub(amount, sponsorAmount)
 	return sponsorAmount, selfAmount
 }
 
