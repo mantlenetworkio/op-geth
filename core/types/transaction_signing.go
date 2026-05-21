@@ -265,7 +265,12 @@ func (s *modernSigner) Sender(tx *Transaction) (common.Address, error) {
 		return s.legacy.Sender(tx)
 	}
 	if tt == DepositTxType {
-		return tx.inner.(*DepositTx).From, nil
+		switch tx.inner.(type) {
+		case *DepositTx:
+			return tx.inner.(*DepositTx).From, nil
+		case *depositTxWithNonce:
+			return tx.inner.(*depositTxWithNonce).From, nil
+		}
 	}
 	if tx.ChainId().Cmp(s.chainID) != 0 {
 		return common.Address{}, fmt.Errorf("%w: have %d want %d", ErrInvalidChainId, tx.ChainId(), s.chainID)
