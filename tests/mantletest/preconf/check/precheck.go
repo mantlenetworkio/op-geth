@@ -6,7 +6,7 @@ import (
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/ethereum/go-ethereum/tests/preconf/config"
+	"github.com/ethereum/go-ethereum/tests/mantletest/preconf/config"
 )
 
 func precheck() {

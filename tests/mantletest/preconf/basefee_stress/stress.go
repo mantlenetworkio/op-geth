@@ -17,7 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/ethereum/go-ethereum/tests/preconf/config"
+	"github.com/ethereum/go-ethereum/tests/mantletest/preconf/config"
 )
 
 const (

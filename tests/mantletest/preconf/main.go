@@ -1,13 +1,13 @@
 package main
 
 import (
-	"github.com/ethereum/go-ethereum/tests/preconf/basefee"
-	basefee_stress "github.com/ethereum/go-ethereum/tests/preconf/basefee_stress"
-	"github.com/ethereum/go-ethereum/tests/preconf/blockfull"
-	"github.com/ethereum/go-ethereum/tests/preconf/check"
-	frontrunning "github.com/ethereum/go-ethereum/tests/preconf/front_running"
-	"github.com/ethereum/go-ethereum/tests/preconf/sort"
-	"github.com/ethereum/go-ethereum/tests/preconf/stress"
+	"github.com/ethereum/go-ethereum/tests/mantletest/preconf/basefee"
+	basefee_stress "github.com/ethereum/go-ethereum/tests/mantletest/preconf/basefee_stress"
+	"github.com/ethereum/go-ethereum/tests/mantletest/preconf/blockfull"
+	"github.com/ethereum/go-ethereum/tests/mantletest/preconf/check"
+	frontrunning "github.com/ethereum/go-ethereum/tests/mantletest/preconf/front_running"
+	"github.com/ethereum/go-ethereum/tests/mantletest/preconf/sort"
+	"github.com/ethereum/go-ethereum/tests/mantletest/preconf/stress"
 )
 
 // There are three tests that require manual modification of op-geth configuration to cover:
