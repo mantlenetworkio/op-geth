@@ -33,9 +33,8 @@ import (
 	"github.com/ethereum/go-ethereum/crypto/keccak"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
-	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/sha3"
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 )
 
 // Tests block header storage and retrieval operations.

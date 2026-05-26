@@ -186,7 +186,7 @@ func (bc *testBlockChain) StateAt(header *types.Header) (*state.StateDB, error) 
 }
 
 func (bc *testBlockChain) Genesis() *types.Block {
-	return types.NewBlock(bc.CurrentBlock(), nil, nil, trie.NewStackTrie(nil))
+	return types.NewBlock(bc.CurrentBlock(), nil, nil, trie.NewStackTrie(nil), types.DefaultBlockConfig)
 }
 
 // reserver is a utility struct to sanity check that accounts are

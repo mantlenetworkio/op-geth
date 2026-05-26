@@ -110,7 +110,7 @@ func (bc *testBlockChain) StateAt(header *types.Header) (*state.StateDB, error) 
 }
 
 func (bc *testBlockChain) Genesis() *types.Block {
-	return types.NewBlock(bc.CurrentBlock(), nil, nil, trie.NewStackTrie(nil))
+	return types.NewBlock(bc.CurrentBlock(), nil, nil, trie.NewStackTrie(nil), bc.Config())
 }
 
 func (bc *testBlockChain) HasState(root common.Hash) bool {

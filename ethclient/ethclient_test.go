@@ -1019,7 +1019,7 @@ func ExampleRevertErrorData() {
 }
 
 func TestSimulateV1(t *testing.T) {
-	backend, _, err := newTestBackend(nil)
+	backend, _, err := newTestBackend(t, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to create test backend: %v", err)
 	}
@@ -1090,7 +1090,7 @@ func TestSimulateV1(t *testing.T) {
 }
 
 func TestSimulateV1WithBlockOverrides(t *testing.T) {
-	backend, _, err := newTestBackend(nil)
+	backend, _, err := newTestBackend(t, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to create test backend: %v", err)
 	}
@@ -1152,7 +1152,7 @@ func TestSimulateV1WithBlockOverrides(t *testing.T) {
 }
 
 func TestSimulateV1WithStateOverrides(t *testing.T) {
-	backend, _, err := newTestBackend(nil)
+	backend, _, err := newTestBackend(t, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to create test backend: %v", err)
 	}
@@ -1219,7 +1219,7 @@ func TestSimulateV1WithStateOverrides(t *testing.T) {
 }
 
 func TestSimulateV1WithBlockNumberOrHash(t *testing.T) {
-	backend, _, err := newTestBackend(nil)
+	backend, _, err := newTestBackend(t, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to create test backend: %v", err)
 	}

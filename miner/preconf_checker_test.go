@@ -461,7 +461,7 @@ func newArsiaBlockchain(t *testing.T) *core.BlockChain {
 // gasPoolGas controls the available gas (pass header.GasLimit for a full pool).
 func newTestEnv(t *testing.T, bc *core.BlockChain, header *types.Header, gasPoolGas uint64) *environment {
 	t.Helper()
-	statedb, err := bc.StateAt(bc.Genesis().Root())
+	statedb, err := bc.StateAt(bc.Genesis().Header())
 	if err != nil {
 		t.Fatalf("StateAt: %v", err)
 	}
