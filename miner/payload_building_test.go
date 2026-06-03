@@ -303,3 +303,114 @@ func TestDeterministicPayloadId(t *testing.T) {
 	id2 := makeArgs().Id().String()
 	require.Equal(t, id1, id2)
 }
+
+// TestBuildPayload_DepositGasPoolBoundary is an end-to-end sequencer test
+// pinning the cross-client block-gas admission bound shared by op-geth and
+// reth. It mirrors reth's miner_payload_builder_rejects_oversized_mempool_tx
+// (src/reth/crates/optimism/node/tests/it/deposit_boundary.rs).
+//
+//	block.GasLimit = 30_000_000
+//	tx[0] = deposit (Gas = 2_000_000)              ← engine-API forced-include
+//	mempool: one oversized regular (Gas = 30_000_001) ← block.GasLimit + 1
+//
+// Why GasLimit+1 is the chosen boundary (and NOT GasLimit-depositGas+1):
+// In the current code a deposit reserves its full GasLimit via
+// gp.SubGas(GasLimit) in preCheck and never returns the unused reservation to
+// the pool (the deposit branch in core/state_transition.go returns before any
+// gp.ReturnGas, which runs only for non-deposit txs). So after a 2M-gas-limit
+// deposit geth's available pool is block.GasLimit - 2M = 28M, whereas reth's
+// block_available_gas = block.gas_limit - cumulative_actual_gas = ~30M-21k.
+// These DIVERGE: a 28M+1 regular tx would fork the clients (geth's
+// SubGas(28M+1) fails against a 28M pool; reth admits it). This test does NOT
+// probe that fork point. It pins only the GasLimit+1 boundary, the one tx both
+// clients reject regardless of how deposit gas is accounted.
+//
+// geth admission rule (commitTransaction → buyGas → gp.SubGas(tx.Gas())):
+// SubGas(30M+1) fails against a pool that never exceeds 30M.
+// reth rule (alloy-op-evm block/mod.rs:127): tx.gas_limit() > block_available_gas.
+// Both reject 30M+1 regardless of deposit gas accounting.
+//
+// The txpool may also refuse the oversized tx at intake (Gas > block gas
+// limit); like the reth test, that is treated as equally valid evidence of
+// the strict admission posture. Either way the built payload must contain
+// exactly 1 tx (the forced deposit), never the oversized mempool tx.
+func TestBuildPayload_DepositGasPoolBoundary(t *testing.T) {
+	const blockGasLimit uint64 = 30_000_000
+
+	db := rawdb.NewMemoryDatabase()
+	gspec := &core.Genesis{
+		Config:   params.OptimismTestConfig,
+		Alloc:    types.GenesisAlloc{testBankAddress: {Balance: testBankFunds}},
+		GasLimit: blockGasLimit,
+	}
+	chain, err := core.NewBlockChain(db, gspec, ethash.NewFaker(), &core.BlockChainConfig{ArchiveMode: true})
+	require.NoError(t, err)
+	pool := legacypool.New(testTxPoolConfig, chain)
+	tp, err := txpool.New(testTxPoolConfig.PriceLimit, chain, []txpool.SubPool{pool})
+	require.NoError(t, err)
+
+	backend := &testWorkerBackend{db: db, chain: chain, txPool: tp, genesis: gspec}
+	cfg := testConfig
+	cfg.GasCeil = blockGasLimit
+	w := New(backend, cfg, ethash.NewFaker())
+
+	// Mempool: oversized regular tx (Gas = blockGasLimit + 1) — the tightest
+	// tx that exceeds the full block gas limit, the boundary both geth and
+	// reth must always reject irrespective of deposit gas accounting.
+	signer := types.LatestSigner(params.OptimismTestConfig)
+	const depositGas uint64 = 2_000_000
+	const oversizedGas = blockGasLimit + 1
+	oversized, err := types.SignNewTx(testBankKey, signer, &types.DynamicFeeTx{
+		ChainID:   params.OptimismTestConfig.ChainID,
+		Nonce:     0,
+		To:        &testUserAddress,
+		Value:     big.NewInt(0),
+		Gas:       oversizedGas,
+		GasFeeCap: big.NewInt(2 * params.InitialBaseFee),
+		GasTipCap: big.NewInt(1),
+	})
+	require.NoError(t, err)
+	// txpool rejection at intake is valid evidence of the strict admission
+	// posture (mirrors the reth test's inject_tx Err branch); only the
+	// built-payload assertion below is load-bearing.
+	if errs := tp.Add([]*types.Transaction{oversized}, true); len(errs) > 0 && errs[0] != nil {
+		t.Logf("[expected] txpool rejected oversized tx (Gas=%d > block.GasLimit=%d): %v",
+			oversizedGas, blockGasLimit, errs[0])
+	}
+
+	// Forced-include deposit (engine API style).
+	deposit := types.NewTx(&types.DepositTx{
+		SourceHash: common.HexToHash("0x01"),
+		From:       testUserAddress,
+		To:         &testUserAddress,
+		Value:      big.NewInt(0),
+		Gas:        depositGas,
+		Mint:       nil,
+	})
+
+	gl := blockGasLimit
+	args := &BuildPayloadArgs{
+		Parent:       chain.CurrentBlock().Hash(),
+		Timestamp:    chain.CurrentBlock().Time + 12,
+		FeeRecipient: common.HexToAddress("0xdeadbeef"),
+		Transactions: []*types.Transaction{deposit},
+		GasLimit:     &gl,
+		BaseFee:      big.NewInt(params.InitialBaseFee),
+	}
+
+	payload, err := w.buildPayload(context.Background(), args, false)
+	require.NoError(t, err, "buildPayload must not fail")
+
+	full := payload.ResolveFull()
+	require.NotNil(t, full, "ResolveFull returned nil")
+	txCount := len(full.ExecutionPayload.Transactions)
+
+	t.Logf("block.GasLimit=%d, deposit.Gas=%d, oversized.Gas=%d, payload tx count=%d",
+		blockGasLimit, depositGas, oversizedGas, txCount)
+
+	require.Equal(t, 1, txCount,
+		"expected exactly 1 tx (deposit only). Got %d. "+
+			"If >1, the oversized mempool tx (Gas>block.GasLimit) was admitted — "+
+			"the resulting block would be rejected by reth "+
+			"(TransactionGasLimitMoreThanAvailableBlockGas).", txCount)
+}
