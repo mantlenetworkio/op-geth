@@ -302,3 +302,105 @@ func TestDeterministicPayloadId(t *testing.T) {
 	id2 := makeArgs().Id().String()
 	require.Equal(t, id1, id2)
 }
+
+// TestBuildPayload_DepositGasPoolBoundary is an end-to-end sequencer test
+// for the deposit-tx gas-pool reservation hotfix in core/state_transition.go.
+//
+// Constructs the exact boundary ExecutionPayload that reth rejects but
+// pre-hotfix legacy op-geth would have packed:
+//
+//	block.GasLimit = 30_000_000
+//	tx[0] = deposit (Gas = 2_000_000)              ← engine-API forced-include
+//	mempool: one oversized regular (Gas = 28_000_001) ← edge-load tx
+//
+// Sequencer admission rule (fillTransactions / processTransactionForCommit):
+//
+//	admit if env.gasPool.Gas() >= tx.Gas()
+//
+// Pre-hotfix: deposit DOES NOT touch gp → gp.Gas()=30M after tx[0] → oversized
+// regular passes the >=30M check → block has 2 txs → reth verifier rejects
+// this block via TransactionGasLimitMoreThanAvailableBlockGas. FORK.
+//
+// Post-hotfix: deposit reserves GasLimit → gp.Gas()=28M after tx[0] →
+// oversized regular (28M+1) fails admission → block has 1 tx (deposit only) →
+// stays within reth's strict block_available_gas bound. NO FORK.
+//
+// Assertion: payload must contain exactly 1 tx (the deposit). Any value
+// greater than 1 means the mempool oversized tx was admitted — i.e. the
+// pre-hotfix sequencer behavior is back, and the resulting block would be
+// rejected by reth on the wire.
+func TestBuildPayload_DepositGasPoolBoundary(t *testing.T) {
+	const blockGasLimit uint64 = 30_000_000
+
+	db := rawdb.NewMemoryDatabase()
+	gspec := &core.Genesis{
+		Config:   params.OptimismTestConfig,
+		Alloc:    types.GenesisAlloc{testBankAddress: {Balance: testBankFunds}},
+		GasLimit: blockGasLimit,
+	}
+	chain, err := core.NewBlockChain(db, gspec, ethash.NewFaker(), &core.BlockChainConfig{ArchiveMode: true})
+	require.NoError(t, err)
+	pool := legacypool.New(testTxPoolConfig, chain)
+	tp, err := txpool.New(testTxPoolConfig.PriceLimit, chain, []txpool.SubPool{pool})
+	require.NoError(t, err)
+
+	backend := &testWorkerBackend{db: db, chain: chain, txPool: tp, genesis: gspec}
+	cfg := testConfig
+	cfg.GasCeil = blockGasLimit
+	w := New(backend, cfg, ethash.NewFaker())
+
+	// Mempool: oversized regular tx (Gas = blockGasLimit - deposit.Gas + 1)
+	// — the smallest tx that exceeds the post-hotfix available gas by exactly
+	// 1 unit, so the differential signal is razor-sharp.
+	signer := types.LatestSigner(params.OptimismTestConfig)
+	const depositGas uint64 = 2_000_000
+	oversized, err := types.SignNewTx(testBankKey, signer, &types.DynamicFeeTx{
+		ChainID:   params.OptimismTestConfig.ChainID,
+		Nonce:     0,
+		To:        &testUserAddress,
+		Value:     big.NewInt(0),
+		Gas:       blockGasLimit - depositGas + 1,
+		GasFeeCap: big.NewInt(2 * params.InitialBaseFee),
+		GasTipCap: big.NewInt(1),
+	})
+	require.NoError(t, err)
+	if errs := tp.Add([]*types.Transaction{oversized}, true); len(errs) > 0 && errs[0] != nil {
+		t.Fatalf("txpool reject oversized tx: %v", errs[0])
+	}
+
+	// Forced-include deposit (engine API style).
+	deposit := types.NewTx(&types.DepositTx{
+		SourceHash: common.HexToHash("0x01"),
+		From:       testUserAddress,
+		To:         &testUserAddress,
+		Value:      big.NewInt(0),
+		Gas:        depositGas,
+		Mint:       nil,
+	})
+
+	gl := blockGasLimit
+	args := &BuildPayloadArgs{
+		Parent:       chain.CurrentBlock().Hash(),
+		Timestamp:    chain.CurrentBlock().Time + 12,
+		FeeRecipient: common.HexToAddress("0xdeadbeef"),
+		Transactions: []*types.Transaction{deposit},
+		GasLimit:     &gl,
+		BaseFee:      big.NewInt(params.InitialBaseFee),
+	}
+
+	payload, err := w.buildPayload(args, false)
+	require.NoError(t, err, "buildPayload must not fail")
+
+	full := payload.ResolveFull()
+	require.NotNil(t, full, "ResolveFull returned nil")
+	txCount := len(full.ExecutionPayload.Transactions)
+
+	t.Logf("block.GasLimit=%d, deposit.Gas=%d, oversized.Gas=%d, payload tx count=%d",
+		blockGasLimit, depositGas, blockGasLimit-depositGas+1, txCount)
+
+	require.Equal(t, 1, txCount,
+		"post-hotfix expects exactly 1 tx (deposit only). Got %d. "+
+			"If >1, the oversized mempool tx was admitted — pre-hotfix sequencer "+
+			"behavior is back, and the resulting block would be rejected by reth "+
+			"(TransactionGasLimitMoreThanAvailableBlockGas).", txCount)
+}

@@ -511,6 +511,9 @@ func (st *stateTransition) preCheck(metaTxV3 bool) (*big.Int, error) {
 			}
 			return common.Big0, nil
 		}
+		if err := st.gp.SubGas(st.msg.GasLimit); err != nil {
+			return nil, err
+		}
 		return common.Big0, nil // gas used by deposits may not be used by other txs
 	}
 
