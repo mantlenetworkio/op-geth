@@ -403,6 +403,7 @@ func (c *preconfChecker) applyTx(env *environment, tx *types.Transaction) (*type
 	env.txs = append(env.txs, tx)
 	env.receipts = append(env.receipts, receipt)
 	env.tcount++
+	env.size += tx.Size() // accumulate block byte-size during preconf admission, mirroring commitTransaction
 
 	// OP-Stack: accumulate DA footprint for Jovian (must match commit path)
 	if chainConfig.IsMantleArsia(env.header.Time) && !tx.IsDepositTx() && env.header.BlobGasUsed != nil {
@@ -511,6 +512,19 @@ func (c *preconfChecker) UnpausePreconf(env *environment, preconfReady func()) {
 	if c.env.header.BlobGasUsed != nil {
 		*c.env.header.BlobGasUsed = 0
 	}
+
+	// Start the new block's preconf env from a clean slate. environment.copy carries
+	// the just-sealed block's accumulators forward (tcount/receipts/blobs/txs/sidecars),
+	// so reset them as makeEnv would: seed size from header.Size() (the block-size budget
+	// covers the header plus the tx bodies applyTx adds) and empty the rest; the deposit
+	// and unsealed-preconf re-apply below repopulate them. (witness is left as-is: the
+	// preconf env never seals it and it is nil here.)
+	c.env.size = uint64(c.env.header.Size())
+	c.env.tcount = 0
+	c.env.txs = nil
+	c.env.receipts = nil
+	c.env.sidecars = nil
+	c.env.blobs = 0
 
 	blockCtx := core.NewEVMBlockContext(c.env.header, c.blockchain, nil, chainConfig, c.env.state)
 	c.env.evm = vm.NewEVM(blockCtx, c.env.state, chainConfig, c.env.evm.Config)
