@@ -1038,7 +1038,10 @@ func TestPreconf_SizeCap_AdmissionBaseMatchesPacking(t *testing.T) {
 	sealedHdr := sizeTestHeader()
 	sealedHdr.GasLimit = hugeGas
 	sealed := newTestEnv(t, bc, sealedHdr, hugeGas)
-	checker := &preconfChecker{blockchain: bc, minerConfig: &preconf.DefaultMinerConfig}
+	// Empty unsealed-tx channel so UnpausePreconf returns immediately (no 1s timeout).
+	ch := make(chan []*types.Transaction, 1)
+	ch <- nil
+	checker := &preconfChecker{blockchain: bc, unSealedPreconfTxsCh: ch, minerConfig: &preconf.DefaultMinerConfig}
 	checker.mu.Lock()
 	checker.UnpausePreconf(sealed.copy(bc), func() {})
 	admitEnv := checker.env
@@ -1132,8 +1135,13 @@ func TestPreconf_UnpausePreconf_ResetsStateAcrossBlocks(t *testing.T) {
 	sealed.receipts = []*types.Receipt{{Status: types.ReceiptStatusSuccessful}}
 	sealed.sidecars = []*types.BlobTxSidecar{{}}
 	sealed.blobs = 3
+	sealed.header.GasUsed = 5_000_000 // P2: the CumulativeGasUsed accumulator carried in the header must not leak into N+1
 
-	checker := &preconfChecker{blockchain: bc, minerConfig: &preconf.DefaultMinerConfig}
+	// Pre-load an empty unsealed-tx channel, mirroring the real Pause→channel→Unpause path,
+	// so UnpausePreconf's select returns immediately instead of hitting the 1s timeout branch.
+	ch := make(chan []*types.Transaction, 1)
+	ch <- nil
+	checker := &preconfChecker{blockchain: bc, unSealedPreconfTxsCh: ch, minerConfig: &preconf.DefaultMinerConfig}
 	// Advance to the next block. (UnpausePreconf defers mu.Unlock(), so hold the lock first.)
 	checker.mu.Lock()
 	checker.UnpausePreconf(sealed.copy(bc), func() {})
@@ -1158,6 +1166,139 @@ func TestPreconf_UnpausePreconf_ResetsStateAcrossBlocks(t *testing.T) {
 	}
 	if checker.env.blobs != 0 {
 		t.Fatalf("blob count leaked across blocks: blobs=%d (want 0)", checker.env.blobs)
+	}
+	if checker.env.header.GasUsed != 0 {
+		t.Fatalf("header.GasUsed leaked across blocks: GasUsed=%d (want 0; block N's total gas must not seed N+1's first-tx receipt CumulativeGasUsed)", checker.env.header.GasUsed)
+	}
+}
+
+// TestEnvironment_FieldGuard is a tripwire: environment has 14 fields, and every one
+// must be considered in BOTH environment.copy (per-tx preconf snapshot) and nextBlockEnv
+// (cross-block preconf env). When upstream adds/removes a field this fails, forcing a
+// human to route the new field through both — turning the "two places to keep in sync"
+// human memory into a machine-enforced check. It touches no real sealing path.
+func TestEnvironment_FieldGuard(t *testing.T) {
+	const want = 14
+	if n := reflect.TypeOf(environment{}).NumField(); n != want {
+		t.Fatalf("environment now has %d fields (was %d): route the change through both environment.copy and nextBlockEnv, then update this guard to %d", n, want, n)
+	}
+}
+
+// TestNextBlockEnv_DoesNotMutateReceiver pins the read-only contract worker.go relies on when
+// it hands the just-sealed env to UnpausePreconf by reference (no .copy()). nextBlockEnv must
+// build the N+1 env purely from reads; a future edit that mutates env.header in place (as the
+// old UnpausePreconf did, e.g. *header.BlobGasUsed = 0) would silently corrupt the sealing env.
+func TestNextBlockEnv_DoesNotMutateReceiver(t *testing.T) {
+	bc := newArsiaBlockchain(t)
+	env := newTestEnv(t, bc, sizeTestHeader(), 30_000_000)
+	env.header.GasUsed = 5_000_000
+	env.size = 6_000_000
+	*env.header.BlobGasUsed = 700_000
+
+	wantNumber := new(big.Int).Set(env.header.Number)
+	wantGasUsed := env.header.GasUsed
+	wantSize := env.size
+	wantBlobGasUsed := *env.header.BlobGasUsed
+
+	next := env.nextBlockEnv(bc)
+
+	// Child is the next block: number advanced, gas accumulator zeroed.
+	if got, want := next.header.Number, new(big.Int).Add(wantNumber, common.Big1); got.Cmp(want) != 0 {
+		t.Fatalf("child header.Number=%s, want %s", got, want)
+	}
+	if next.header.GasUsed != 0 {
+		t.Fatalf("child header.GasUsed=%d, want 0", next.header.GasUsed)
+	}
+
+	// Receiver must be untouched.
+	if env.header.Number.Cmp(wantNumber) != 0 {
+		t.Fatalf("nextBlockEnv mutated receiver header.Number: got %s want %s", env.header.Number, wantNumber)
+	}
+	if env.header.GasUsed != wantGasUsed {
+		t.Fatalf("nextBlockEnv mutated receiver header.GasUsed: got %d want %d", env.header.GasUsed, wantGasUsed)
+	}
+	if env.size != wantSize {
+		t.Fatalf("nextBlockEnv mutated receiver size: got %d want %d", env.size, wantSize)
+	}
+	if *env.header.BlobGasUsed != wantBlobGasUsed {
+		t.Fatalf("nextBlockEnv mutated receiver header.BlobGasUsed: got %d want %d (in-place *ptr mutation leaks into the sealed env)", *env.header.BlobGasUsed, wantBlobGasUsed)
+	}
+}
+
+// TestPreconf_SizeCap_AccumulatesAcrossCopies mirrors production Preconf, which snapshots
+// the admission env with environment.copy() before every tx. copy() dropping the size field
+// zeroed the cumulative block-size accumulator on every tx, so the size cap could never trip
+// across txs (only a single >7.4MB tx would). Asserts size survives the per-tx copy and keeps
+// accumulating from the seeded base. Regresses to FAIL if copy() stops carrying size.
+func TestPreconf_SizeCap_AccumulatesAcrossCopies(t *testing.T) {
+	bc := newArsiaBlockchain(t)
+	env := newTestEnv(t, bc, sizeTestHeader(), 30_000_000)
+	checker := &preconfChecker{blockchain: bc, env: env, minerConfig: &preconf.DefaultMinerConfig}
+	chainID := bc.Config().ChainID
+
+	base := uint64(env.header.Size()) // makeEnv/UnpausePreconf seed size = header.Size()
+	checker.env.size = base
+
+	const n = 5
+	wantSize := base
+	for i := 0; i < n; i++ {
+		tx := newPreconfCalldataTx(t, chainID, 21_000, nil) // unique sender, plain transfer
+		// Production Preconf snapshots the env per tx via copy() before applying.
+		checker.env = checker.env.copy(bc)
+		fundSenders(t, checker.env, tx)
+		if _, _, err := checker.applyTxWithResetEnv(checker.env, tx); err != nil {
+			t.Fatalf("tx %d should be admitted, got %v", i, err)
+		}
+		wantSize += tx.Size()
+	}
+	if checker.env.size != wantSize {
+		t.Fatalf("env.size did not accumulate across per-tx copy() snapshots: env.size=%d want=%d (copy() dropping size resets the accumulator every tx)", checker.env.size, wantSize)
+	}
+}
+
+// TestPreconf_UnpausePreconf_ReceiptCumulativeStartsFromZero locks the downstream effect of
+// P2 on the preconf receipt's CumulativeGasUsed field: after advancing to N+1, the first
+// admitted tx's receipt CumulativeGasUsed must be its own gas, not block N's total gas plus
+// its own. Before the fix, header.GasUsed leaked across blocks and the *usedGas accumulator
+// started from block N's total (5,000,000 here).
+func TestPreconf_UnpausePreconf_ReceiptCumulativeStartsFromZero(t *testing.T) {
+	bc := newArsiaBlockchain(t)
+
+	sealed := newTestEnv(t, bc, sizeTestHeader(), 30_000_000)
+	sealed.header.GasUsed = 5_000_000 // block N's total gas — must not seed N+1
+
+	// Empty unsealed-tx channel so UnpausePreconf returns immediately (no 1s timeout).
+	ch := make(chan []*types.Transaction, 1)
+	ch <- nil
+	checker := &preconfChecker{blockchain: bc, unSealedPreconfTxsCh: ch, minerConfig: &preconf.DefaultMinerConfig}
+	checker.mu.Lock()
+	checker.UnpausePreconf(sealed.copy(bc), func() {})
+
+	if checker.env.header.GasUsed != 0 {
+		t.Fatalf("header.GasUsed did not reset entering N+1: GasUsed=%d (want 0)", checker.env.header.GasUsed)
+	}
+
+	// Plain transfer (exactly 21,000 gas used, regardless of price). Price it above the
+	// recalculated base fee — block N's 5,000,000 gas raises N+1's base fee over InitialBaseFee.
+	key, _ := crypto.GenerateKey()
+	to := common.Address{0x42}
+	tx, err := types.SignTx(types.NewTx(&types.LegacyTx{
+		Nonce:    0,
+		To:       &to,
+		Value:    big.NewInt(0),
+		Gas:      21_000,
+		GasPrice: new(big.Int).Mul(big.NewInt(params.InitialBaseFee), big.NewInt(10)),
+	}), types.NewEIP155Signer(bc.Config().ChainID), key)
+	if err != nil {
+		t.Fatalf("SignTx: %v", err)
+	}
+	fundSenders(t, checker.env, tx)
+	receipt, _, err := checker.applyTxWithResetEnv(checker.env, tx)
+	if err != nil {
+		t.Fatalf("first tx of N+1 should be admitted, got %v", err)
+	}
+	if receipt.CumulativeGasUsed != 21_000 {
+		t.Fatalf("receipt CumulativeGasUsed=%d, want 21000 (block N's 5,000,000 gas leaked into N+1's first receipt)", receipt.CumulativeGasUsed)
 	}
 }
 
