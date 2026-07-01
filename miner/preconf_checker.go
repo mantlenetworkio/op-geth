@@ -503,7 +503,7 @@ func (env *environment) nextBlockEnv(chain core.ChainContext) *environment {
 	}
 
 	state := env.state.Copy()
-	next := &environment{
+	return &environment{
 		// signer is never read on the preconf admission path (applyPreconfTransaction
 		// inlines MakeSigner per tx); rebuild it by block height only to keep it valid
 		// (non-nil and fork-correct) should anyone read it later.
@@ -514,12 +514,11 @@ func (env *environment) nextBlockEnv(chain core.ChainContext) *environment {
 		coinbase:             env.coinbase,
 		daFootprintGasScalar: env.daFootprintGasScalar,
 		header:               header,
+		// author=nil preserves current preconf behavior (copy/UnpausePreconf both pass nil;
+		// only makeEnv passes &coinbase); the EVM's COINBASE then resolves to header.Coinbase.
+		evm: vm.NewEVM(core.NewEVMBlockContext(header, chain, nil, chainConfig, state), state, chainConfig, env.evm.Config),
 		// tcount/txs/receipts/sidecars/blobs/witness intentionally left zero — new block.
 	}
-	// author=nil preserves current preconf behavior (copy/UnpausePreconf both pass nil;
-	// only makeEnv passes &coinbase). The EVM's COINBASE then resolves to header.Coinbase.
-	next.evm = vm.NewEVM(core.NewEVMBlockContext(header, chain, nil, chainConfig, state), state, chainConfig, env.evm.Config)
-	return next
 }
 
 func (c *preconfChecker) UnpausePreconf(env *environment, preconfReady func()) {
