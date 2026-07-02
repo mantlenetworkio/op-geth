@@ -403,6 +403,7 @@ func (c *preconfChecker) applyTx(env *environment, tx *types.Transaction) (*type
 	env.txs = append(env.txs, tx)
 	env.receipts = append(env.receipts, receipt)
 	env.tcount++
+	env.size += tx.Size() // accumulate block byte-size during preconf admission, mirroring commitTransaction
 
 	// OP-Stack: accumulate DA footprint for Jovian (must match commit path)
 	if chainConfig.IsMantleArsia(env.header.Time) && !tx.IsDepositTx() && env.header.BlobGasUsed != nil {
@@ -479,41 +480,58 @@ func (c *preconfChecker) PausePreconf() chan<- []*types.Transaction {
 	return c.unSealedPreconfTxsCh
 }
 
+// nextBlockEnv constructs the preconf admission environment for the block after env,
+// reusing env's post-execution state. It cannot use makeEnv (which derives from an
+// already-committed parent; block N is not committed at this point), so it whitelists
+// exactly the fields a fresh block needs. Anything not set here defaults to its zero
+// value — the safe direction when upstream adds a field to environment.
+//
+// nextBlockEnv MUST NOT mutate its receiver: worker.go passes the just-sealed env by
+// reference (no .copy()) and relies on this being read-only. The state is deep-copied
+// internally and the child header is a fresh CopyHeader, so env is never touched.
+func (env *environment) nextBlockEnv(chain core.ChainContext) *environment {
+	chainConfig := env.evm.ChainConfig()
+	header := types.CopyHeader(env.header)
+	// CalcBaseFee reads the parent's Extra/GasUsed/BlobGasUsed under Arsia, so compute it
+	// from the unmutated sealed header before zeroing GasUsed on the child.
+	header.BaseFee = eip1559.CalcBaseFee(chainConfig, env.header)
+	header.Number = new(big.Int).Add(env.header.Number, common.Big1)
+	header.GasUsed = 0 // P2: reset the CumulativeGasUsed accumulator carried in the header
+	if header.BlobGasUsed != nil {
+		zero := uint64(0)
+		header.BlobGasUsed = &zero
+	}
+
+	state := env.state.Copy()
+	return &environment{
+		// signer is never read on the preconf admission path (applyPreconfTransaction
+		// inlines MakeSigner per tx); rebuild it by block height only to keep it valid
+		// (non-nil and fork-correct) should anyone read it later.
+		signer:               types.MakeSigner(chainConfig, header.Number, header.Time),
+		state:                state,
+		size:                 uint64(header.Size()),
+		gasPool:              core.NewGasPool(header.GasLimit),
+		coinbase:             env.coinbase,
+		daFootprintGasScalar: env.daFootprintGasScalar,
+		header:               header,
+		// author=nil preserves current preconf behavior (copy/UnpausePreconf both pass nil;
+		// only makeEnv passes &coinbase); the EVM's COINBASE then resolves to header.Coinbase.
+		evm: vm.NewEVM(core.NewEVMBlockContext(header, chain, nil, chainConfig, state), state, chainConfig, env.evm.Config),
+		// tcount/txs/receipts/sidecars/blobs/witness intentionally left zero — new block.
+	}
+}
+
 func (c *preconfChecker) UnpausePreconf(env *environment, preconfReady func()) {
 	defer preconf.LogIfSlow(c.lastPauseNow, "UnpausePreconf", "env.header.Number", env.header.Number.Int64())
 	defer preconf.MetricsPreconfMinerPauseCost(c.lastPauseNow)
 	defer c.mu.Unlock()
-	c.env = env
+	// Build the next block's preconf admission env from the just-sealed env. nextBlockEnv
+	// whitelists exactly the fields a fresh block needs (Number+1, recalculated BaseFee,
+	// GasUsed/size/tx accumulators reset) instead of copy()'s "carry everything then
+	// hand-reset" blacklist, which silently leaked size (P1) and header.GasUsed (P2).
+	c.env = env.nextBlockEnv(c.blockchain)
 	c.envUpdatedAt = time.Now()
-
-	// Snapshot the sealed block header before mutating it. CalcBaseFee reads the
-	// parent header's Extra/GasUsed/BlobGasUsed under Arsia.
-	parentHeader := types.CopyHeader(c.env.header)
-
 	log.Debug("unpause preconf", "env.header.Number", c.env.header.Number.Int64(), "env.gasPool", c.env.gasPool, "envUpdatedAt", c.envUpdatedAt)
-	c.env.header.Number = new(big.Int).Add(c.env.header.Number, common.Big1)
-
-	chainConfig := c.env.evm.ChainConfig()
-	newBaseFee := eip1559.CalcBaseFee(chainConfig, parentHeader)
-	c.env.header.BaseFee = newBaseFee
-	log.Debug("recalculated baseFee for preconf block",
-		"parentNumber", parentHeader.Number,
-		"parentGasUsed", parentHeader.GasUsed,
-		"parentBaseFee", parentHeader.BaseFee,
-		"newBaseFee", newBaseFee)
-
-	if c.env.gasPool != nil {
-		c.env.gasPool = core.NewGasPool(c.env.header.GasLimit)
-		log.Trace("reset env", "env.header.Number", c.env.header.Number.Int64(), "env.gasPool", c.env.gasPool)
-	}
-
-	// Reset DA footprint for the new block
-	if c.env.header.BlobGasUsed != nil {
-		*c.env.header.BlobGasUsed = 0
-	}
-
-	blockCtx := core.NewEVMBlockContext(c.env.header, c.blockchain, nil, chainConfig, c.env.state)
-	c.env.evm = vm.NewEVM(blockCtx, c.env.state, chainConfig, c.env.evm.Config)
 
 	// Load deposit txs
 	log.Trace("apply deposit txs", "deposit_txs", len(c.depositTxs))
@@ -542,11 +560,12 @@ func (c *preconfChecker) UnpausePreconf(env *environment, preconfReady func()) {
 		log.Trace("applied unsealed preconf tx", "tx", tx.Hash().Hex(), "nonce", tx.Nonce(), "env.gasPool", c.env.gasPool.Gas(), "receipt.status", receipt.Status)
 	}
 
-	// Metrics
-	preconf.MetricsOpGethEnvBlockNumber(env.header.Number.Int64())
+	// Metrics (c.env is the new N+1 env; the input env is the sealed block N and no
+	// longer mutated in place, so report block numbers from c.env).
+	preconf.MetricsOpGethEnvBlockNumber(c.env.header.Number.Int64())
 
 	// notify txpool that preconf is ready
 	preconfReady()
 
-	log.Info("ready to preconf", "env.header.Number", env.header.Number.Int64(), "env.gasPool", env.gasPool, "envUpdatedAt", c.envUpdatedAt, "deposit_txs", len(c.depositTxs), "unsealed_preconf_txs", len(unsealedPreconfTxs))
+	log.Info("ready to preconf", "env.header.Number", c.env.header.Number.Int64(), "env.gasPool", c.env.gasPool, "envUpdatedAt", c.envUpdatedAt, "deposit_txs", len(c.depositTxs), "unsealed_preconf_txs", len(unsealedPreconfTxs))
 }

@@ -85,6 +85,7 @@ func (env *environment) copy(chain core.ChainContext) *environment {
 		signer:   env.signer,
 		state:    env.state.Copy(),
 		tcount:   env.tcount,
+		size:     env.size, // EIP-7934 block-size accumulator; must survive per-tx preconf snapshots
 		coinbase: env.coinbase,
 
 		daFootprintGasScalar: env.daFootprintGasScalar,
@@ -733,7 +734,9 @@ func (miner *Miner) fillTransactions(ctx context.Context, interrupt *atomic.Int3
 
 	unSealedPreconfTxsCh := miner.preconfChecker.PausePreconf()
 	defer func() {
-		miner.preconfChecker.UnpausePreconf(env.copy(miner.backend.BlockChain()), miner.txpool.PreconfReady)
+		// Pass env by reference (no .copy()): nextBlockEnv inside UnpausePreconf is read-only
+		// on its receiver and deep-copies the state itself, so the sealed env is not mutated.
+		miner.preconfChecker.UnpausePreconf(env, miner.txpool.PreconfReady)
 	}()
 
 	miner.confMu.RLock()
