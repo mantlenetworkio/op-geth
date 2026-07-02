@@ -1193,26 +1193,34 @@ func TestNextBlockEnv_DoesNotMutateReceiver(t *testing.T) {
 	env := newTestEnv(t, bc, sizeTestHeader(), 30_000_000)
 	env.header.GasUsed = 5_000_000
 	env.size = 6_000_000
+	env.header.Time = 1000
 	*env.header.BlobGasUsed = 700_000
 
 	wantNumber := new(big.Int).Set(env.header.Number)
 	wantGasUsed := env.header.GasUsed
 	wantSize := env.size
+	wantTime := env.header.Time
 	wantBlobGasUsed := *env.header.BlobGasUsed
 
 	next := env.nextBlockEnv(bc)
 
-	// Child is the next block: number advanced, gas accumulator zeroed.
+	// Child is the next block: number advanced, gas accumulator zeroed, time +interval.
 	if got, want := next.header.Number, new(big.Int).Add(wantNumber, common.Big1); got.Cmp(want) != 0 {
 		t.Fatalf("child header.Number=%s, want %s", got, want)
 	}
 	if next.header.GasUsed != 0 {
 		t.Fatalf("child header.GasUsed=%d, want 0", next.header.GasUsed)
 	}
+	if got, want := next.header.Time, wantTime+preconfL2BlockTime; got != want {
+		t.Fatalf("child header.Time=%d, want %d (parent+%d)", got, want, preconfL2BlockTime)
+	}
 
 	// Receiver must be untouched.
 	if env.header.Number.Cmp(wantNumber) != 0 {
 		t.Fatalf("nextBlockEnv mutated receiver header.Number: got %s want %s", env.header.Number, wantNumber)
+	}
+	if env.header.Time != wantTime {
+		t.Fatalf("nextBlockEnv mutated receiver header.Time: got %d want %d", env.header.Time, wantTime)
 	}
 	if env.header.GasUsed != wantGasUsed {
 		t.Fatalf("nextBlockEnv mutated receiver header.GasUsed: got %d want %d", env.header.GasUsed, wantGasUsed)
@@ -1222,6 +1230,30 @@ func TestNextBlockEnv_DoesNotMutateReceiver(t *testing.T) {
 	}
 	if *env.header.BlobGasUsed != wantBlobGasUsed {
 		t.Fatalf("nextBlockEnv mutated receiver header.BlobGasUsed: got %d want %d (in-place *ptr mutation leaks into the sealed env)", *env.header.BlobGasUsed, wantBlobGasUsed)
+	}
+}
+
+// TestNextBlockEnv_TimeAdvancesByBlockInterval locks the admission-env timestamp: the env
+// represents block N+1, so its timestamp must be sealed N's time + the fixed L2 block interval.
+// Otherwise CopyHeader carries N's time verbatim, making admission's TIMESTAMP one block (2s)
+// early relative to where the tx actually lands. Behaviour-level: also asserts the EVM block
+// context the tx simulates against sees the advanced time (TIMESTAMP opcode reads
+// evm.Context.Time). Regresses to FAIL if the +interval is dropped.
+func TestNextBlockEnv_TimeAdvancesByBlockInterval(t *testing.T) {
+	bc := newArsiaBlockchain(t)
+	env := newTestEnv(t, bc, sizeTestHeader(), 30_000_000)
+	env.header.Time = 1000 // arbitrary sealed-N timestamp
+
+	next := env.nextBlockEnv(bc)
+
+	want := uint64(1000 + preconfL2BlockTime)
+	if got := next.header.Time; got != want {
+		t.Fatalf("admission env header.Time=%d, want %d (sealed N.Time + %d)", got, want, preconfL2BlockTime)
+	}
+	// The EVM block context the admission simulates against must see the advanced time,
+	// otherwise the TIMESTAMP opcode would return N's time instead of N+1's.
+	if got := next.evm.Context.Time; got != want {
+		t.Fatalf("EVM block context Time=%d, want %d (TIMESTAMP opcode would read the wrong block's time)", got, want)
 	}
 }
 
