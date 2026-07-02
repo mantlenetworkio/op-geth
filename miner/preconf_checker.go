@@ -480,6 +480,12 @@ func (c *preconfChecker) PausePreconf() chan<- []*types.Transaction {
 	return c.unSealedPreconfTxsCh
 }
 
+// preconfL2BlockTime is the fixed Mantle L2 block interval in seconds. The admission
+// env is block N+1, so its timestamp = sealed N's time + this interval. The value is not
+// in params.ChainConfig (it lives in the op-node rollup config), so it is hardcoded here;
+// if the L2 block time ever changes this must be updated.
+const preconfL2BlockTime = 2
+
 // nextBlockEnv constructs the preconf admission environment for the block after env,
 // reusing env's post-execution state. It cannot use makeEnv (which derives from an
 // already-committed parent; block N is not committed at this point), so it whitelists
@@ -496,6 +502,13 @@ func (env *environment) nextBlockEnv(chain core.ChainContext) *environment {
 	// from the unmutated sealed header before zeroing GasUsed on the child.
 	header.BaseFee = eip1559.CalcBaseFee(chainConfig, env.header)
 	header.Number = new(big.Int).Add(env.header.Number, common.Big1)
+	// The admission env represents block N+1; its timestamp = sealed N's time + the fixed
+	// L2 block interval. Without this, CopyHeader carries N's time, so admission's TIMESTAMP
+	// is one block (2s) early relative to where the tx actually lands. Set it before
+	// MakeSigner below so the rebuilt signer is fork-correct for the child's time. Time is the
+	// only header field both obtainable and correct here; ParentHash and the roots can't be,
+	// since block N is not sealed yet when this env is built.
+	header.Time = env.header.Time + preconfL2BlockTime
 	header.GasUsed = 0 // P2: reset the CumulativeGasUsed accumulator carried in the header
 	if header.BlobGasUsed != nil {
 		zero := uint64(0)
