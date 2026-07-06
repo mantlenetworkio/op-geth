@@ -316,7 +316,14 @@ func New(config Config, chain BlockChain) *LegacyPool {
 
 	pool.reset(nil, chain.CurrentBlock())
 
+	// OP Stack diff
+	pool.queue.withRollupCostFnProvider(pool)
+
 	return pool
+}
+
+func (pool *LegacyPool) RollupCostFunc() txpool.RollupCostFunc {
+	return pool.rollupCostFn
 }
 
 // Filter returns whether the given transaction can be consumed by the legacy
@@ -624,13 +631,10 @@ func (pool *LegacyPool) validateTx(tx *types.Transaction) error {
 		ExistingCost: func(addr common.Address, nonce uint64) *big.Int {
 			if list := pool.pending[addr]; list != nil {
 				if tx := list.txs.Get(nonce); tx != nil {
-					cost := tx.Cost()
-					if pool.rollupCostFn != nil {
-						if rollupCost := pool.rollupCostFn(tx); rollupCost != nil {
-							cost = cost.Add(cost, rollupCost.ToBig())
-						}
-					}
-					return cost
+					// The total cost is guaranteed to not overflow because it got already
+					// successfully added to the list.
+					cost, _ := txpool.TotalTxCost(tx, pool.rollupCostFn)
+					return cost.ToBig()
 				}
 			}
 			return nil
@@ -918,7 +922,7 @@ func (pool *LegacyPool) enqueueTx(hash common.Hash, tx *types.Transaction, addAl
 func (pool *LegacyPool) promoteTx(addr common.Address, hash common.Hash, tx *types.Transaction) bool {
 	// Try to insert the transaction into the pending queue
 	if pool.pending[addr] == nil {
-		pool.pending[addr] = newList(true)
+		pool.pending[addr] = newRollupList(true, pool)
 		pendingAddrsGauge.Inc(1)
 	}
 	list := pool.pending[addr]

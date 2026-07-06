@@ -429,7 +429,7 @@ func TestInvalidTransactions(t *testing.T) {
 	pool.currentState.SetState(types.GasOracleAddr, types.TokenRatioSlot, common.BigToHash(big.NewInt(1)))
 
 	// Intrinsic gas too low
-	testAddBalance(pool, from, big.NewInt(1))
+	testAddBalance(pool, from, tx.Cost())
 	if err, want := pool.addRemote(tx), core.ErrIntrinsicGas; !errors.Is(err, want) {
 		t.Errorf("want %v have %v", want, err)
 	}
@@ -2801,6 +2801,7 @@ func TestExtractPreconfTxsFromPending(t *testing.T) {
 		}
 		// Add pre-confirmed transaction
 		pool.preconfTxs.Add(from1, tx1.Tx)
+		pool.preconfTxs.SetStatus(tx1.Tx.Hash(), core.PreconfStatusSuccess)
 		return pool
 	}
 
@@ -2869,6 +2870,9 @@ func TestExtractPreconfTxsFromPending(t *testing.T) {
 		pool.preconfTxs.Add(from2, tx2.Tx)
 		pool.preconfTxs.Add(from3, tx3.Tx)
 		pool.preconfTxs.Add(from4, tx4.Tx)
+		pool.preconfTxs.SetStatus(tx2.Tx.Hash(), core.PreconfStatusSuccess)
+		pool.preconfTxs.SetStatus(tx3.Tx.Hash(), core.PreconfStatusSuccess)
+		pool.preconfTxs.SetStatus(tx4.Tx.Hash(), core.PreconfStatusSuccess)
 
 		pending := make(map[common.Address][]*txpool.LazyTransaction)
 		pending[addr1] = []*txpool.LazyTransaction{tx1, tx2}
