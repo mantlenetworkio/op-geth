@@ -946,6 +946,9 @@ func (st *stateTransition) innerExecute() (*ExecutionResult, error) {
 		if st.msg.IsSystemTx {
 			gasUsed = 0
 		}
+		if err := st.gp.ReturnGas(0, gasUsed); err != nil {
+			return nil, fmt.Errorf("return gas for pre-Regolith deposit tx: %w", err)
+		}
 		return &ExecutionResult{
 			UsedGas:    gasUsed,
 			Err:        vmerr,
