@@ -47,10 +47,11 @@ import (
 // GoldenReceipt captures the mainnet receipt fields that a replay must match
 // byte-for-byte. Pointer fields are optional — nil means "skip this assertion".
 type GoldenReceipt struct {
-	Status    uint64   // required (use 0 or 1 as the receipt status)
-	GasUsed   uint64   // required
-	L1Fee     *big.Int // optional (non-deposit, post-Bedrock receipts only)
-	L1GasUsed *big.Int // optional
+	Status            uint64   // required (use 0 or 1 as the receipt status)
+	GasUsed           uint64   // required
+	L1Fee             *big.Int // optional (non-deposit, post-Bedrock receipts only)
+	L1GasUsed         *big.Int // optional
+	CumulativeGasUsed *uint64  // optional
 }
 
 // ReplayCase fully describes one historical Mantle mainnet transaction and
@@ -123,6 +124,12 @@ func (c *ReplayCase) Run(t *testing.T, cfg *params.ChainConfig) {
 
 	require.Equal(t, c.Golden.GasUsed, receipt.GasUsed,
 		"[%s] receipt.GasUsed local=%d, mainnet=%d", c.Name, receipt.GasUsed, c.Golden.GasUsed)
+
+	if c.Golden.CumulativeGasUsed != nil {
+		require.Equal(t, *c.Golden.CumulativeGasUsed, receipt.CumulativeGasUsed,
+			"[%s] receipt.CumulativeGasUsed local=%d, want=%d",
+			c.Name, receipt.CumulativeGasUsed, *c.Golden.CumulativeGasUsed)
+	}
 
 	if c.Golden.L1Fee != nil {
 		require.NotNil(t, receipt.L1Fee, "[%s] receipt.L1Fee must be populated", c.Name)

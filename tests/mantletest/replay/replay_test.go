@@ -180,10 +180,11 @@ func TestReplayMainnetTransfer_4b0a92d6(t *testing.T) {
 			TokenRatio: big.NewInt(0xce7), // 3303 (matches receipt.tokenRatio)
 		},
 		Golden: GoldenReceipt{
-			Status:    types.ReceiptStatusSuccessful,
-			GasUsed:   0x436aecd,                                  // 70,692,557
-			L1Fee:     hexutil.MustDecodeBig("0x18467146780e"),    // 26,690,827,221,006
-			L1GasUsed: big.NewInt(0x824),                          // 2,084 = rollupDataGas + overhead
+			Status:            types.ReceiptStatusSuccessful,
+			GasUsed:           0x436aecd,                               // 70,692,557
+			CumulativeGasUsed: u64Ptr(0x436aecd),                       // == GasUsed: normal-tx two-axis consistency (Used==CumulativeUsed)
+			L1Fee:             hexutil.MustDecodeBig("0x18467146780e"), // 26,690,827,221,006
+			L1GasUsed:         big.NewInt(0x824),                       // 2,084 = rollupDataGas + overhead
 		},
 		PostNonce: map[common.Address]uint64{sender: 1},
 	}).Run(t, MantleMainnetConfig())
@@ -268,11 +269,75 @@ func TestReplayMainnetTransfer_e0811036_PostArsia(t *testing.T) {
 			TokenRatio: big.NewInt(0xea0), // 3744 — kept for state-shape parity
 		},
 		Golden: GoldenReceipt{
-			Status:    types.ReceiptStatusSuccessful,
-			GasUsed:   0x5208, // 21,000 — vanilla-eth transfer
-			L1Fee:     hexutil.MustDecodeBig("0x253646c8b6da40"),
-			L1GasUsed: big.NewInt(0x640), // 1600
+			Status:            types.ReceiptStatusSuccessful,
+			GasUsed:           0x5208,            // 21,000 — vanilla-eth transfer
+			CumulativeGasUsed: u64Ptr(0x5208),    // == GasUsed: normal-tx two-axis consistency (Used==CumulativeUsed)
+			L1Fee:             hexutil.MustDecodeBig("0x253646c8b6da40"),
+			L1GasUsed:         big.NewInt(0x640), // 1600
 		},
 		PostNonce: map[common.Address]uint64{addr: 0x60},
+	}).Run(t, MantleMainnetConfig())
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Case 4: failed contract-creation deposit — new/old geth fork guard
+// ─────────────────────────────────────────────────────────────────────────
+
+// TestReplayFailedCreationDeposit_bf9aeffb replays mantle sepolia (QA4) block
+// 1,407,709 tx index 1: a contract-creation deposit whose 30,000 gas limit is
+// below the ~55,136 creation intrinsic, so it fails the intrinsic-gas check and
+// is recorded as using all its gas.
+// 0xbf9aeffba974f5214c63003f1ed54821dcd4f4ae8818652aaa931c51c602d0c6.
+//
+// This is the exact tx that forked geth v1.17.3 (new) from v1.16.5 (old). The
+// two-axis GasPool refactor advanced the block-header gasUsed for this failed
+// deposit (via the SubGas in preCheck) but the failed-deposit early-return
+// skipped the gp.ReturnGas that advances the receipt's cumulativeGasUsed, so
+// the cumulative counter lagged the header and the receiptsRoot diverged from
+// clients that account it. Fixed in core.stateTransition.execute()'s
+// failed-deposit branch via gp.ReturnGas(0, gasUsed).
+//
+// The per-tx receipt.GasUsed is derived from cumulative deltas on read, so it
+// alone hides the bug — the load-bearing assertion here is CumulativeGasUsed,
+// which is 30,000 with the fix and 0 without it.
+func TestReplayFailedCreationDeposit_bf9aeffb(t *testing.T) {
+	from := common.HexToAddress("0x28aaa9595a3a91c1804eae411ec7ee05ac55b16b")
+
+	// init code (0x60426000...f3) padded to 510 bytes; intrinsic gas to create it
+	// far exceeds the 30,000 gas limit.
+	input := append(hexutil.MustDecode("0x604260005260206000f3"), make([]byte, 500)...)
+
+	tx := types.NewTx(&types.DepositTx{
+		SourceHash:          common.HexToHash("0xad665e728c7378db35351056f685e1735296ed290b94efe0b6c627598cc4fca8"),
+		From:                from,
+		To:                  nil, // contract creation
+		Mint:                hexutil.MustDecodeBig("0x38d7ea4c68000"),
+		Value:               big.NewInt(0),
+		Gas:                 0x7530, // 30,000
+		IsSystemTransaction: false,
+		Data:                input,
+	})
+
+	cumulative := uint64(0x7530) // 30,000 — must equal the block-header gas for this tx
+
+	(&ReplayCase{
+		Name:       "failed-creation-deposit-bf9aeffb",
+		Tx:         tx,
+		ExpectHash: common.HexToHash("0xbf9aeffba974f5214c63003f1ed54821dcd4f4ae8818652aaa931c51c602d0c6"),
+		Header: &types.Header{
+			Number:   new(big.Int).SetUint64(1407709),
+			Time:     0x6a554c0e,
+			GasLimit: 0x3938700, // 60,000,000
+			BaseFee:  big.NewInt(0xba43b7400),
+			Coinbase: common.HexToAddress("0x4200000000000000000000000000000000000011"),
+		},
+		Sender:   from,
+		PreState: PreState{},
+		Golden: GoldenReceipt{
+			Status:            types.ReceiptStatusFailed,
+			GasUsed:           0x7530,      // full GasLimit: "failed deposit uses all gas"
+			CumulativeGasUsed: &cumulative, // consensus field; 0 without the fix (regression guard)
+		},
+		PostNonce: map[common.Address]uint64{from: 1}, // failed deposit still bumps nonce
 	}).Run(t, MantleMainnetConfig())
 }

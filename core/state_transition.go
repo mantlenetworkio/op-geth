@@ -778,6 +778,9 @@ func (st *stateTransition) execute() (*ExecutionResult, error) {
 		if st.msg.IsSystemTx && !st.evm.ChainConfig().IsRegolith(st.evm.Context.Time) {
 			gasUsed = 0
 		}
+		if err := st.gp.ReturnGas(0, gasUsed); err != nil {
+			return nil, fmt.Errorf("return gas for deposit tx: %w", err)
+		}
 		result = &ExecutionResult{
 			UsedGas:    gasUsed,
 			Err:        fmt.Errorf("failed deposit: %w", err),
