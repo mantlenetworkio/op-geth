@@ -72,6 +72,9 @@ var (
 	// transactions is reached for specific accounts.
 	ErrInflightTxLimitReached = errors.New("in-flight transaction limit reached for delegated accounts")
 
+	// ErrKZGVerificationError is returned when a KZG proof was not verified correctly.
+	ErrKZGVerificationError = errors.New("KZG verification error")
+
 	// ErrPreconfInProcess is returned if a transaction is in process as an preconf transaction
 	ErrPreconfInProcess = errors.New("exist preconf transaction in process")
 )

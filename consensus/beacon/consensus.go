@@ -19,19 +19,16 @@ package beacon
 import (
 	"errors"
 	"fmt"
-	"math"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
-	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/trie"
 	"github.com/holiman/uint256"
 )
 
@@ -277,11 +274,11 @@ func (beacon *Beacon) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 	if !cancun {
 		switch {
 		case header.ExcessBlobGas != nil:
-			return fmt.Errorf("invalid excessBlobGas: have %d, expected nil", header.ExcessBlobGas)
+			return fmt.Errorf("invalid excessBlobGas: have %d, expected nil", *header.ExcessBlobGas)
 		case header.BlobGasUsed != nil:
-			return fmt.Errorf("invalid blobGasUsed: have %d, expected nil", header.BlobGasUsed)
+			return fmt.Errorf("invalid blobGasUsed: have %d, expected nil", *header.BlobGasUsed)
 		case header.ParentBeaconRoot != nil:
-			return fmt.Errorf("invalid parentBeaconRoot, have %#x, expected nil", header.ParentBeaconRoot)
+			return fmt.Errorf("invalid parentBeaconRoot, have %#x, expected nil", *header.ParentBeaconRoot)
 		}
 	} else {
 		if header.ParentBeaconRoot == nil {
@@ -289,6 +286,24 @@ func (beacon *Beacon) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 		}
 		if err := eip4844.VerifyEIP4844Header(chain.Config(), parent, header); err != nil {
 			return err
+		}
+	}
+
+	// Verify the existence / non-existence of Amsterdam-specific header fields
+	amsterdam := chain.Config().IsAmsterdam(header.Number, header.Time)
+	if amsterdam {
+		if header.BlockAccessListHash == nil {
+			return errors.New("header is missing block access list hash")
+		}
+		if header.SlotNumber == nil {
+			return errors.New("header is missing slotNumber")
+		}
+	} else {
+		if header.BlockAccessListHash != nil {
+			return fmt.Errorf("invalid block access list hash: have %x, expected nil", *header.BlockAccessListHash)
+		}
+		if header.SlotNumber != nil {
+			return fmt.Errorf("invalid slotNumber: have %d, expected nil", *header.SlotNumber)
 		}
 	}
 	return nil
@@ -358,95 +373,6 @@ func (beacon *Beacon) Finalize(chain consensus.ChainHeaderReader, header *types.
 		state.AddBalance(w.Address, amount, tracing.BalanceIncreaseWithdrawal)
 	}
 	// No block reward which is issued by consensus layer instead.
-}
-
-// FinalizeAndAssemble implements consensus.Engine, setting the final state and
-// assembling the block.
-func (beacon *Beacon) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB, body *types.Body, receipts []*types.Receipt) (*types.Block, error) {
-	if !beacon.IsPoSHeader(header) {
-		return beacon.ethone.FinalizeAndAssemble(chain, header, state, body, receipts)
-	}
-	shanghai := chain.Config().IsShanghai(header.Number, header.Time)
-	if shanghai {
-		// All blocks after Shanghai must include a withdrawals root.
-		if body.Withdrawals == nil {
-			body.Withdrawals = make([]*types.Withdrawal, 0)
-		}
-	} else {
-		if len(body.Withdrawals) > 0 {
-			return nil, errors.New("withdrawals set before Shanghai activation")
-		}
-	}
-	// Finalize and assemble the block.
-	beacon.Finalize(chain, header, state, body)
-
-	// Assign the final state root to header.
-	header.Root = state.IntermediateRoot(true)
-
-	if chain.Config().IsOptimismWithSkadi(header.Time) {
-		if body.Withdrawals == nil || len(body.Withdrawals) > 0 {
-			return nil, fmt.Errorf("expected non-nil empty withdrawals operation list in skadi, but got: %v", body.Withdrawals)
-		}
-		// State-root has just been computed, we can get an accurate storage-root now.
-		h := state.GetStorageRoot(params.OptimismL2ToL1MessagePasser)
-		header.WithdrawalsHash = &h
-		sa := state.AccessEvents()
-		if sa != nil {
-			sa.AddAccount(params.OptimismL2ToL1MessagePasser, false, math.MaxUint64) // include in execution witness
-		}
-	}
-
-	// Store DA footprint in BlobGasUsed header field if it hasn't already been set yet.
-	// Builder code may already calculate it during block building to avoid recalculating it here.
-	if chain.Config().IsMantleArsia(header.Time) && (header.BlobGasUsed == nil || *header.BlobGasUsed == 0) {
-		daFootprint, err := types.CalcDAFootprint(body.Transactions)
-		if err != nil {
-			return nil, fmt.Errorf("error calculating DA footprint: %w", err)
-		}
-		header.BlobGasUsed = &daFootprint
-	}
-
-	// Assemble the final block.
-	block := types.NewBlock(header, body, receipts, trie.NewStackTrie(nil), chain.Config())
-
-	// Create the block witness and attach to block.
-	// This step needs to happen as late as possible to catch all access events.
-	if chain.Config().IsVerkle(header.Number, header.Time) {
-		keys := state.AccessEvents().Keys()
-
-		// Open the pre-tree to prove the pre-state against
-		parent := chain.GetHeaderByNumber(header.Number.Uint64() - 1)
-		if parent == nil {
-			return nil, fmt.Errorf("nil parent header for block %d", header.Number)
-		}
-		preTrie, err := state.Database().OpenTrie(parent.Root)
-		if err != nil {
-			return nil, fmt.Errorf("error opening pre-state tree root: %w", err)
-		}
-		postTrie := state.GetTrie()
-		if postTrie == nil {
-			return nil, errors.New("post-state tree is not available")
-		}
-		vktPreTrie, okpre := preTrie.(*trie.VerkleTrie)
-		vktPostTrie, okpost := postTrie.(*trie.VerkleTrie)
-
-		// The witness is only attached iff both parent and current block are
-		// using verkle tree.
-		if okpre && okpost {
-			if len(keys) > 0 {
-				verkleProof, stateDiff, err := vktPreTrie.Proof(vktPostTrie, keys)
-				if err != nil {
-					return nil, fmt.Errorf("error generating verkle proof for block %d: %w", header.Number, err)
-				}
-				block = block.WithWitness(&types.ExecutionWitness{
-					StateDiff:   stateDiff,
-					VerkleProof: verkleProof,
-				})
-			}
-		}
-	}
-
-	return block, nil
 }
 
 // Seal generates a new sealing request for the given input block and pushes

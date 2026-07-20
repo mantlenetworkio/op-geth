@@ -18,9 +18,10 @@ func (p *BlobPool) SubscribeNewPreconfTxRequestEvent(ch chan<- *core.NewPreconfT
 	return p.preconfTxRequestFeed.Subscribe(ch)
 }
 
-func (p *BlobPool) PendingPreconfTxs(filter txpool.PendingFilter) ([]*types.Transaction, map[common.Address][]*txpool.LazyTransaction) {
+func (p *BlobPool) PendingWithPreconfTxs(filter txpool.PendingFilter) ([]*types.Transaction, map[common.Address][]*txpool.LazyTransaction, int) {
 	// Blob pool does not support preconf transactions
-	return nil, p.Pending(filter)
+	pending, count := p.Pending(filter)
+	return nil, pending, count
 }
 
 // PreconfReady closes the preconfReadyCh channel to notify the miner that preconf is ready

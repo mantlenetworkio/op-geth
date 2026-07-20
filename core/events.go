@@ -18,9 +18,10 @@ package core
 
 import (
 	"sync"
+	"time"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
@@ -114,4 +115,11 @@ type ChainEvent struct {
 
 type ChainHeadEvent struct {
 	Header *types.Header
+}
+
+// NewPayloadEvent is posted when engine_newPayloadVX processes a block.
+type NewPayloadEvent struct {
+	Hash           common.Hash
+	Number         uint64
+	ProcessingTime time.Duration
 }

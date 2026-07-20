@@ -14,6 +14,7 @@ import (
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -34,7 +35,7 @@ var (
 	ErrEnvBlockNumberLessThanUnsafeL2BlockNumber            = errors.New("env block number is less than unsafe l2 block number")
 	ErrEnvBlockNumberAndUnsafeL2BlockNumberDistanceTooLarge = errors.New("env block number and unsafe l2 block number distance is too large")
 	ErrPreconfNotAvailable                                  = errors.New("preconf is not available")
-	ErrNotEnoughDASpace                                     = errors.New("not enough DA space for transaction")
+	ErrPreconfBlockFull                                     = errors.New("preconf block is full")
 )
 
 const (
@@ -356,25 +357,17 @@ func (c *preconfChecker) precheck() error {
 	return nil
 }
 
-// applyTxWithResetEnv applies a transaction and resets the environment if a gas limit reached error occurs.
+// applyTxWithResetEnv applies a transaction. If the preconf block is full, it
+// returns ErrPreconfBlockFull without advancing the virtual block number. Block
+// number advances happen only in UnpausePreconf, enforcing single-block
+// preconfirmation semantics.
 func (c *preconfChecker) applyTxWithResetEnv(env *environment, tx *types.Transaction) (*types.Receipt, []byte, error) {
 	defer preconf.LogIfSlow(time.Now(), "applyTxWithResetEnv", "tx", tx.Hash().Hex(), "nonce", tx.Nonce())
 	receipt, returnData, err := c.applyTx(env, tx)
 	if err != nil {
-		if errors.Is(err, core.ErrGasLimitReached) {
-			// This indicates we should reset the env's gas limit and increment header.number+1.
-			// This avoids gas limit reached errors and nonce too high errors for subsequent preconfirmation transactions.
-			// No need to worry about transactions that always fill up the block gas limit,
-			// as transactions that are too costly are filtered out when entering the transaction pool.
-			preGasLimit, txGasLimit := c.env.gasPool.Gas(), tx.Gas()
-			c.env.header.Number = new(big.Int).Add(c.env.header.Number, common.Big1)
-			c.env.gasPool.SetGas(c.env.header.GasLimit)
-			// Reset DA footprint for the new block
-			if c.env.header.BlobGasUsed != nil {
-				*c.env.header.BlobGasUsed = 0
-			}
-			log.Trace("reset env for gas limit reached", "env.header.Number", c.env.header.Number, "env.gasPool(pre)", preGasLimit, "tx.gas", txGasLimit, "env.gasPool(now)", c.env.gasPool.Gas(), "tx", tx.Hash())
-			return c.applyTx(c.env, tx)
+		if errors.Is(err, core.ErrGasLimitReached) || errors.Is(err, core.ErrBlockOversized) || errors.Is(err, core.ErrDAFootprintLimitReached) {
+			log.Debug("preconf block full, rejecting tx", "tx", tx.Hash(), "err", err)
+			return nil, nil, fmt.Errorf("%w: %w", ErrPreconfBlockFull, err)
 		}
 		return nil, nil, err
 	}
@@ -385,34 +378,32 @@ func (c *preconfChecker) applyTx(env *environment, tx *types.Transaction) (*type
 	// OP-Stack: DA footprint check for Jovian (must match commit path to avoid preconf rejection at seal time)
 	chainConfig := env.evm.ChainConfig()
 	if chainConfig.IsMantleArsia(env.header.Time) && !tx.IsDepositTx() && env.header.BlobGasUsed != nil {
-		gasLimit := env.header.GasLimit
-		daFootprintLeft := gasLimit - *env.header.BlobGasUsed
-		minTransactionDAFootprint := types.MinTransactionSize.Uint64() * uint64(env.daFootprintGasScalar)
-		if daFootprintLeft < minTransactionDAFootprint {
-			log.Debug("Preconf: not enough DA space for further transactions", "have", daFootprintLeft, "want", minTransactionDAFootprint)
-			return nil, nil, ErrNotEnoughDASpace
+		_, err := checkDAFootprint(env, tx.RollupCostData().EstimatedDASize().Uint64(), tx.Hash())
+		if err != nil {
+			log.Trace("Preconf applyTx checkDAFootprint failed", "err", err)
+			return nil, nil, err
 		}
-		txDAFootprint := tx.RollupCostData().EstimatedDASize().Uint64() * uint64(env.daFootprintGasScalar)
-		if daFootprintLeft < txDAFootprint {
-			log.Debug("Preconf: not enough DA space for transaction", "hash", tx.Hash(), "left", daFootprintLeft, "needed", txDAFootprint)
-			return nil, nil, ErrNotEnoughDASpace
-		}
+	}
+
+	if !env.txFitsSize(tx) {
+		return nil, nil, fmt.Errorf("block size exceeds maximum in preconf: %w", core.ErrBlockOversized)
 	}
 
 	env.state.SetTxContext(tx.Hash(), env.tcount)
 	var (
 		snap = env.state.Snapshot()
-		gp   = env.gasPool.Gas()
+		gp   = env.gasPool.Snapshot()
 	)
 	receipt, returnData, err := applyPreconfTransaction(env.evm, env.gasPool, env.state, env.header, tx, &env.header.GasUsed)
 	if err != nil {
 		env.state.RevertToSnapshot(snap)
-		env.gasPool.SetGas(gp)
+		env.gasPool.Set(gp)
 		return nil, nil, err
 	}
 	env.txs = append(env.txs, tx)
 	env.receipts = append(env.receipts, receipt)
 	env.tcount++
+	env.size += tx.Size() // accumulate block byte-size during preconf admission, mirroring commitTransaction
 
 	// OP-Stack: accumulate DA footprint for Jovian (must match commit path)
 	if chainConfig.IsMantleArsia(env.header.Time) && !tx.IsDepositTx() && env.header.BlobGasUsed != nil {
@@ -468,7 +459,7 @@ func applyPreconfTransaction(evm *vm.EVM, gp *core.GasPool, statedb *state.State
 
 	// Merge the tx-local access event into the "block-local" one, in order to collect
 	// all values, so that the witness can be built.
-	if statedb.Database().TrieDB().IsVerkle() {
+	if statedb.Database().Type().Is(state.TypeUBT) {
 		statedb.AccessEvents().Merge(evm.AccessEvents)
 	}
 
@@ -489,24 +480,71 @@ func (c *preconfChecker) PausePreconf() chan<- []*types.Transaction {
 	return c.unSealedPreconfTxsCh
 }
 
+// preconfL2BlockTime is the fixed Mantle L2 block interval in seconds. The admission
+// env is block N+1, so its timestamp = sealed N's time + this interval. The value is not
+// in params.ChainConfig (it lives in the op-node rollup config), so it is hardcoded here;
+// if the L2 block time ever changes this must be updated.
+const preconfL2BlockTime = 2
+
+// nextBlockEnv constructs the preconf admission environment for the block after env,
+// reusing env's post-execution state. It cannot use makeEnv (which derives from an
+// already-committed parent; block N is not committed at this point), so it whitelists
+// exactly the fields a fresh block needs. Anything not set here defaults to its zero
+// value — the safe direction when upstream adds a field to environment.
+//
+// nextBlockEnv MUST NOT mutate its receiver: worker.go passes the just-sealed env by
+// reference (no .copy()) and relies on this being read-only. The state is deep-copied
+// internally and the child header is a fresh CopyHeader, so env is never touched.
+func (env *environment) nextBlockEnv(chain core.ChainContext) *environment {
+	chainConfig := env.evm.ChainConfig()
+	header := types.CopyHeader(env.header)
+	// CalcBaseFee reads the parent's Extra/GasUsed/BlobGasUsed under Arsia, so compute it
+	// from the unmutated sealed header before zeroing GasUsed on the child.
+	header.BaseFee = eip1559.CalcBaseFee(chainConfig, env.header)
+	header.Number = new(big.Int).Add(env.header.Number, common.Big1)
+	// The admission env represents block N+1; its timestamp = sealed N's time + the fixed
+	// L2 block interval. Without this, CopyHeader carries N's time, so admission's TIMESTAMP
+	// is one block (2s) early relative to where the tx actually lands. Set it before
+	// MakeSigner below so the rebuilt signer is fork-correct for the child's time. Time is the
+	// only header field both obtainable and correct here; ParentHash and the roots can't be,
+	// since block N is not sealed yet when this env is built.
+	header.Time = env.header.Time + preconfL2BlockTime
+	header.GasUsed = 0 // P2: reset the CumulativeGasUsed accumulator carried in the header
+	if header.BlobGasUsed != nil {
+		zero := uint64(0)
+		header.BlobGasUsed = &zero
+	}
+
+	state := env.state.Copy()
+	return &environment{
+		// signer is never read on the preconf admission path (applyPreconfTransaction
+		// inlines MakeSigner per tx); rebuild it by block height only to keep it valid
+		// (non-nil and fork-correct) should anyone read it later.
+		signer:               types.MakeSigner(chainConfig, header.Number, header.Time),
+		state:                state,
+		size:                 uint64(header.Size()),
+		gasPool:              core.NewGasPool(header.GasLimit),
+		coinbase:             env.coinbase,
+		daFootprintGasScalar: env.daFootprintGasScalar,
+		header:               header,
+		// author=nil preserves current preconf behavior (copy/UnpausePreconf both pass nil;
+		// only makeEnv passes &coinbase); the EVM's COINBASE then resolves to header.Coinbase.
+		evm: vm.NewEVM(core.NewEVMBlockContext(header, chain, nil, chainConfig, state), state, chainConfig, env.evm.Config),
+		// tcount/txs/receipts/sidecars/blobs/witness intentionally left zero — new block.
+	}
+}
+
 func (c *preconfChecker) UnpausePreconf(env *environment, preconfReady func()) {
 	defer preconf.LogIfSlow(c.lastPauseNow, "UnpausePreconf", "env.header.Number", env.header.Number.Int64())
 	defer preconf.MetricsPreconfMinerPauseCost(c.lastPauseNow)
 	defer c.mu.Unlock()
-	c.env = env
+	// Build the next block's preconf admission env from the just-sealed env. nextBlockEnv
+	// whitelists exactly the fields a fresh block needs (Number+1, recalculated BaseFee,
+	// GasUsed/size/tx accumulators reset) instead of copy()'s "carry everything then
+	// hand-reset" blacklist, which silently leaked size (P1) and header.GasUsed (P2).
+	c.env = env.nextBlockEnv(c.blockchain)
 	c.envUpdatedAt = time.Now()
-	// reset env
-	log.Debug("unpause preconf", "env.header.Number", env.header.Number.Int64(), "env.gasPool", c.env.gasPool, "envUpdatedAt", c.envUpdatedAt)
-	c.env.header.Number = new(big.Int).Add(c.env.header.Number, common.Big1)
-	if c.env.gasPool != nil {
-		c.env.gasPool.SetGas(c.env.header.GasLimit)
-		log.Trace("reset env", "env.header.Number", c.env.header.Number.Int64(), "env.gasPool", c.env.gasPool)
-	}
-
-	// Reset DA footprint for the new block
-	if c.env.header.BlobGasUsed != nil {
-		*c.env.header.BlobGasUsed = 0
-	}
+	log.Debug("unpause preconf", "env.header.Number", c.env.header.Number.Int64(), "env.gasPool", c.env.gasPool, "envUpdatedAt", c.envUpdatedAt)
 
 	// Load deposit txs
 	log.Trace("apply deposit txs", "deposit_txs", len(c.depositTxs))
@@ -535,11 +573,12 @@ func (c *preconfChecker) UnpausePreconf(env *environment, preconfReady func()) {
 		log.Trace("applied unsealed preconf tx", "tx", tx.Hash().Hex(), "nonce", tx.Nonce(), "env.gasPool", c.env.gasPool.Gas(), "receipt.status", receipt.Status)
 	}
 
-	// Metrics
-	preconf.MetricsOpGethEnvBlockNumber(env.header.Number.Int64())
+	// Metrics (c.env is the new N+1 env; the input env is the sealed block N and no
+	// longer mutated in place, so report block numbers from c.env).
+	preconf.MetricsOpGethEnvBlockNumber(c.env.header.Number.Int64())
 
 	// notify txpool that preconf is ready
 	preconfReady()
 
-	log.Info("ready to preconf", "env.header.Number", env.header.Number.Int64(), "env.gasPool", env.gasPool, "envUpdatedAt", c.envUpdatedAt, "deposit_txs", len(c.depositTxs), "unsealed_preconf_txs", len(unsealedPreconfTxs))
+	log.Info("ready to preconf", "env.header.Number", c.env.header.Number.Int64(), "env.gasPool", c.env.gasPool, "envUpdatedAt", c.envUpdatedAt, "deposit_txs", len(c.depositTxs), "unsealed_preconf_txs", len(unsealedPreconfTxs))
 }

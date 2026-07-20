@@ -41,10 +41,11 @@ type ChainContext interface {
 // NewEVMBlockContext creates a new context for use in the EVM.
 func NewEVMBlockContext(header *types.Header, chain ChainContext, author *common.Address, config *params.ChainConfig, statedb types.StateGetter) vm.BlockContext {
 	var (
-		beneficiary    common.Address
-		baseFee        *big.Int
-		blobBaseFee    *big.Int
-		random         *common.Hash
+		beneficiary common.Address
+		baseFee     *big.Int
+		blobBaseFee *big.Int
+		random      *common.Hash
+		slotNum     uint64
 		operatorCostFn types.OperatorCostFunc
 	)
 
@@ -63,21 +64,26 @@ func NewEVMBlockContext(header *types.Header, chain ChainContext, author *common
 	if header.Difficulty.Sign() == 0 {
 		random = &header.MixDigest
 	}
+	if header.SlotNumber != nil {
+		slotNum = *header.SlotNumber
+	}
 	if config.IsMantleArsia(header.Time) {
 		operatorCostFn = types.NewOperatorCostFunc(config, statedb)
 	}
+
 	return vm.BlockContext{
-		CanTransfer:      CanTransfer,
-		Transfer:         Transfer,
-		GetHash:          GetHashFn(header, chain),
-		Coinbase:         beneficiary,
-		BlockNumber:      new(big.Int).Set(header.Number),
-		Time:             header.Time,
-		Difficulty:       new(big.Int).Set(header.Difficulty),
-		BaseFee:          baseFee,
-		BlobBaseFee:      blobBaseFee,
-		GasLimit:         header.GasLimit,
-		Random:           random,
+		CanTransfer: CanTransfer,
+		Transfer:    Transfer,
+		GetHash:     GetHashFn(header, chain),
+		Coinbase:    beneficiary,
+		BlockNumber: new(big.Int).Set(header.Number),
+		Time:        header.Time,
+		Difficulty:  new(big.Int).Set(header.Difficulty),
+		BaseFee:     baseFee,
+		BlobBaseFee: blobBaseFee,
+		GasLimit:    header.GasLimit,
+		Random:      random,
+		SlotNum:     slotNum,
 		L1CostFunc:       types.NewL1CostFunc(config, statedb),
 		OperatorCostFunc: operatorCostFn,
 	}
@@ -87,11 +93,8 @@ func NewEVMBlockContext(header *types.Header, chain ChainContext, author *common
 func NewEVMTxContext(msg *Message) vm.TxContext {
 	ctx := vm.TxContext{
 		Origin:     msg.From,
-		GasPrice:   new(big.Int).Set(msg.GasPrice),
+		GasPrice:   msg.GasPrice,
 		BlobHashes: msg.BlobHashes,
-	}
-	if msg.BlobGasFeeCap != nil {
-		ctx.BlobFeeCap = new(big.Int).Set(msg.BlobGasFeeCap)
 	}
 	return ctx
 }
@@ -142,7 +145,10 @@ func CanTransfer(db vm.StateDB, addr common.Address, amount *uint256.Int) bool {
 }
 
 // Transfer subtracts amount from sender and adds amount to recipient using the given Db
-func Transfer(db vm.StateDB, sender, recipient common.Address, amount *uint256.Int) {
+func Transfer(db vm.StateDB, sender, recipient common.Address, amount *uint256.Int, rules *params.Rules) {
 	db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
 	db.AddBalance(recipient, amount, tracing.BalanceChangeTransfer)
+	if rules.IsAmsterdam && !amount.IsZero() && sender != recipient {
+		db.AddLog(types.EthTransferLog(sender, recipient, amount))
+	}
 }

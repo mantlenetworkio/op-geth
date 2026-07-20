@@ -58,13 +58,13 @@ var (
 	// by a transaction is higher than what's left in the block.
 	ErrGasLimitReached = errors.New("gas limit reached")
 
+	// ErrGasLimitOverflow is returned by the gas pool if the remaining gas
+	// exceeds the maximum value of uint64.
+	ErrGasLimitOverflow = errors.New("gas limit overflow")
+
 	// ErrInsufficientFundsForTransfer is returned if the transaction sender doesn't
 	// have enough funds for transfer(topmost call only).
 	ErrInsufficientFundsForTransfer = errors.New("insufficient funds for transfer")
-
-	// ErrMaxInitCodeSizeExceeded is returned if creation transaction provides the init code bigger
-	// than init code size limit.
-	ErrMaxInitCodeSizeExceeded = errors.New("max initcode size exceeded")
 
 	// ErrInsufficientBalanceWitness is returned if the transaction sender has enough
 	// funds to cover the transfer, but not enough to pay for witness access/modification
@@ -142,6 +142,10 @@ var (
 
 	// ErrEthTxValueTooLarge is returned when EthTxValue is larger than the BVM balance of msg.from
 	ErrEthTxValueTooLarge = errors.New("eth tx value is too large")
+
+	// ErrDAFootprintLimitReached is returned if the amount of da footprint required
+	// by a transaction is higher than what's left in the block.
+	ErrDAFootprintLimitReached = errors.New("da footprint limit reached")
 )
 
 // EIP-7702 state transition errors.

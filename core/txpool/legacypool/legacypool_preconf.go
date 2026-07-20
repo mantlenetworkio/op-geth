@@ -26,19 +26,19 @@ func (pool *LegacyPool) SubscribeNewPreconfTxRequestEvent(ch chan<- *core.NewPre
 	return pool.preconfTxRequestFeed.Subscribe(ch)
 }
 
-// PendingPreconfTxs retrieves the preconf transactions and the pending transactions.
-func (pool *LegacyPool) PendingPreconfTxs(filter txpool.PendingFilter) ([]*types.Transaction, map[common.Address][]*txpool.LazyTransaction) {
+// PendingWithPreconfTxs retrieves the preconf transactions and the pending transactions.
+func (pool *LegacyPool) PendingWithPreconfTxs(filter txpool.PendingFilter) ([]*types.Transaction, map[common.Address][]*txpool.LazyTransaction, int) {
 	defer preconf.MetricsPreconfTxPoolFilterCost(time.Now())
 	// If only blob transactions are requested, this pool is unsuitable as it
 	// contains none, don't even bother.
 	if filter.BlobTxs {
-		return nil, nil
+		return nil, nil, 0
 	}
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 
-	pending := pool.pendingWithFilter(filter)
-	return pool.extractPreconfTxsFromPending(pending), pending
+	pending, count := pool.pendingWithFilter(filter)
+	return pool.extractPreconfTxsFromPending(pending), pending, count
 }
 
 // extractPreconfTxsFromPending extracts pre-confirmation transactions from the pending pool and ensures consistency

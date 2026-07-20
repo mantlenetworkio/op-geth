@@ -34,6 +34,8 @@ type queue struct {
 	signer types.Signer
 	queued map[common.Address]*list     // Queued but non-processable transactions
 	beats  map[common.Address]time.Time // Last heartbeat from each known account
+
+	rollupCostFnProvider rollupCostFuncProvider // OP Stack diff
 }
 
 func newQueue(config Config, signer types.Signer) *queue {
@@ -43,6 +45,10 @@ func newQueue(config Config, signer types.Signer) *queue {
 		queued: make(map[common.Address]*list),
 		beats:  make(map[common.Address]time.Time),
 	}
+}
+
+func (q *queue) withRollupCostFnProvider(p rollupCostFuncProvider) {
+	q.rollupCostFnProvider = p
 }
 
 // evictList returns the hashes of transactions that are old enough to be evicted.
@@ -88,8 +94,12 @@ func (q *queue) get(addr common.Address) (*list, bool) {
 	return l, ok
 }
 
+// bump updates the heartbeat for the given account address.
+// If the address is unknown, the call is a no-op.
 func (q *queue) bump(addr common.Address) {
-	q.beats[addr] = time.Now()
+	if _, ok := q.beats[addr]; ok {
+		q.beats[addr] = time.Now()
+	}
 }
 
 func (q *queue) addresses() []common.Address {
@@ -114,6 +124,7 @@ func (q *queue) remove(addr common.Address, tx *types.Transaction) {
 		if future.Empty() {
 			delete(q.queued, addr)
 			delete(q.beats, addr)
+			queuedAddrsGauge.Dec(1)
 		}
 	}
 }
@@ -122,7 +133,8 @@ func (q *queue) add(tx *types.Transaction) (*common.Hash, error) {
 	// Try to insert the transaction into the future queue
 	from, _ := types.Sender(q.signer, tx) // already validated
 	if q.queued[from] == nil {
-		q.queued[from] = newList(false)
+		q.queued[from] = newRollupList(false, q.rollupCostFnProvider) // OP Stack diff
+		queuedAddrsGauge.Inc(1)
 	}
 	inserted, old := q.queued[from].Add(tx, q.config.PriceBump)
 	if !inserted {
@@ -200,6 +212,7 @@ func (q *queue) promoteExecutables(accounts []common.Address, gasLimit uint64, c
 		if list.Empty() {
 			delete(q.queued, addr)
 			delete(q.beats, addr)
+			queuedAddrsGauge.Dec(1)
 			removedAddresses = append(removedAddresses, addr)
 		}
 	}

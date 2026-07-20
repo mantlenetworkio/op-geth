@@ -22,7 +22,9 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/event"
@@ -619,11 +621,11 @@ func TestRollupCostFn_TokenRatioChange(t *testing.T) {
 
 	from, _ := types.Sender(types.HomesteadSigner{}, pricedTransaction(0, 21000, big.NewInt(1), key))
 
-	// Set sufficient balance
-	pool.currentState.AddBalance(from, uint256.NewInt(10000000000000000), 0)
-
 	// Add first transaction (tokenRatio = 1.0)
 	tx1 := pricedTransaction(0, 21000, big.NewInt(1000000000), key)
+	tx1Cost, overflow := txpool.TotalTxCost(tx1, pool.rollupCostFn)
+	require.False(t, overflow)
+	pool.currentState.AddBalance(from, tx1Cost, 0)
 	err := pool.addRemoteSync(tx1)
 	require.NoError(t, err, "first transaction should be accepted")
 
@@ -633,6 +635,9 @@ func TestRollupCostFn_TokenRatioChange(t *testing.T) {
 
 	// Add second transaction (should use the new tokenRatio)
 	tx2 := pricedTransaction(1, 21000, big.NewInt(1000000000), key)
+	tx2Cost, overflow := txpool.TotalTxCost(tx2, pool.rollupCostFn)
+	require.False(t, overflow)
+	pool.currentState.AddBalance(from, tx2Cost, 0)
 	err = pool.addRemoteSync(tx2)
 	require.NoError(t, err, "second transaction should be accepted with new tokenRatio")
 
@@ -936,9 +941,7 @@ func TestRollupCostFn_DynamicFeeTxInsufficientBalance(t *testing.T) {
 
 // TestRollupCostFn_MultiTxCumulativeBalance tests that with multiple pending
 // transactions and rollup costs, the pool correctly rejects transactions when
-// the cumulative base cost + new tx's rollup cost exceeds balance.
-// Note: ExistingExpenditure uses list.totalcost (base costs only) for performance,
-// consistent with upstream geth design. The new tx's rollup cost IS included via TotalTxCost.
+// the cumulative total cost exceeds balance.
 func TestRollupCostFn_MultiTxCumulativeBalance(t *testing.T) {
 	t.Parallel()
 
@@ -956,7 +959,7 @@ func TestRollupCostFn_MultiTxCumulativeBalance(t *testing.T) {
 	// Each tx total cost (base + rollup) = ~22e12
 	// Balance = 3 * totalCost = ~66e12
 	//
-	// Adding 4th tx check: need = spent(baseCosts of 3 txs = ~63e12) + cost(~22e12) = ~85e12 > ~66e12 -> rejected
+	// Adding 4th tx check: need = spent(total costs of 3 txs = ~66e12) + cost(~22e12) = ~88e12 > ~66e12 -> rejected
 	baseCostPerTx := new(big.Int).Add(
 		new(big.Int).Mul(big.NewInt(21000), big.NewInt(1000000000)),
 		big.NewInt(100),
@@ -982,6 +985,45 @@ func TestRollupCostFn_MultiTxCumulativeBalance(t *testing.T) {
 	// Verify exactly 3 pending
 	pending, _ := pool.Stats()
 	require.Equal(t, 3, pending)
+}
+
+// TestRollupCostFn_PendingTotalCostIncludesRollupCost verifies the pending
+// expenditure used by validation includes the rollup cost of already pooled txs.
+func TestRollupCostFn_PendingTotalCostIncludesRollupCost(t *testing.T) {
+	t.Parallel()
+
+	pool, key := setupPool()
+	defer pool.Close()
+
+	rollupCostPerTx := uint256.NewInt(1000000000000)
+	pool.rollupCostFn = func(tx types.RollupTransaction) *uint256.Int {
+		return new(uint256.Int).Set(rollupCostPerTx)
+	}
+
+	tx0 := pricedTransaction(0, 21000, big.NewInt(1000000000), key)
+	tx1 := pricedTransaction(1, 21000, big.NewInt(1000000000), key)
+	from, _ := types.Sender(types.HomesteadSigner{}, tx0)
+
+	tx0TotalCost, overflow := txpool.TotalTxCost(tx0, pool.rollupCostFn)
+	require.False(t, overflow)
+	tx1TotalCost, overflow := txpool.TotalTxCost(tx1, pool.rollupCostFn)
+	require.False(t, overflow)
+
+	// This balance intentionally covers base(tx0) + total(tx1), but not
+	// total(tx0) + total(tx1). Before the totalcost fix, tx1 was accepted.
+	balance := new(big.Int).Add(tx0.Cost(), tx1TotalCost.ToBig())
+	pool.currentState.SetBalance(from, uint256.MustFromBig(balance), 0)
+
+	require.NoError(t, pool.addRemoteSync(tx0))
+	require.Equal(t, tx0TotalCost, pool.pending[from].totalcost)
+
+	err := pool.addRemoteSync(tx1)
+	require.Error(t, err)
+	require.ErrorIs(t, err, core.ErrInsufficientFunds)
+
+	pending, queued := pool.Stats()
+	require.Equal(t, 1, pending)
+	require.Equal(t, 0, queued)
 }
 
 // TestRollupCostFn_ReplacementWithExistingExpenditure tests that tx replacement
@@ -1068,4 +1110,185 @@ func TestRollupCostFn_RollupCostChangesAfterReset(t *testing.T) {
 	err = pool.addRemote(tx2)
 	require.Error(t, err, "should fail with higher rollup cost")
 	require.Contains(t, err.Error(), "insufficient funds")
+}
+
+// mockRollupCostProvider is a test double for rollupCostFuncProvider that lets a
+// test swap the rollup cost function at runtime, simulating the per-block change
+// of L1/operator fee scalars that resetRollupCostFn performs in production.
+type mockRollupCostProvider struct {
+	fn txpool.RollupCostFunc
+}
+
+func (m *mockRollupCostProvider) RollupCostFunc() txpool.RollupCostFunc { return m.fn }
+
+func constRollupCost(c *uint256.Int) txpool.RollupCostFunc {
+	return func(types.RollupTransaction) *uint256.Int { return new(uint256.Int).Set(c) }
+}
+
+// TestRollupCostFn_RemoveUsesCachedCostAfterFnChange is the core regression guard
+// for the txCosts cache: a transaction's cost is cached at Add time, and removal
+// must subtract that cached value even if the rollup cost function has since
+// changed.
+//
+// This is the whole reason the txCosts cache exists. Without it (i.e. if
+// subTotalCost recomputed TotalTxCost with the current, changed function) the
+// removal would subtract a different amount than was added, leaving totalcost
+// drifted or underflowing. The pool-level tests only exercise adding after a cost
+// change, so this pins the removal-side invariant directly on the list.
+func TestRollupCostFn_RemoveUsesCachedCostAfterFnChange(t *testing.T) {
+	t.Parallel()
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	low := uint256.NewInt(100_000)
+	mock := &mockRollupCostProvider{fn: constRollupCost(low)}
+	l := newRollupList(true, mock)
+
+	tx := pricedTransaction(0, 21000, big.NewInt(1_000_000_000), key)
+	added, _ := l.Add(tx, 0)
+	require.True(t, added)
+
+	// After Add, totalcost must be base cost + the (low) rollup cost.
+	wantAddCost, overflow := txpool.TotalTxCost(tx, mock.RollupCostFunc())
+	require.False(t, overflow)
+	require.Equal(t, wantAddCost, l.totalcost, "totalcost after Add must include the low rollup cost")
+	require.Len(t, l.txCosts, 1, "one cached cost entry expected after Add")
+
+	// Bump the rollup cost function to a much higher value, as a new block would.
+	high := uint256.NewInt(1_000_000_000_000)
+	mock.fn = constRollupCost(high)
+
+	// Removal must use the CACHED add-time (low) cost, not the recomputed high
+	// cost, so totalcost returns to exactly zero without underflow.
+	removed, _ := l.Remove(tx)
+	require.True(t, removed)
+	require.True(t, l.totalcost.IsZero(),
+		"totalcost must return to 0 using the cached add-time cost, got %s", l.totalcost)
+	require.Len(t, l.txCosts, 0, "txCosts cache must not leak after removal")
+}
+
+// TestRollupCostFn_ReplacementTotalCostExact verifies that replacing a
+// transaction at the same nonce fully subtracts the replaced tx's cached cost and
+// leaves totalcost equal to exactly the replacement's cost (no double counting, no
+// stale entry).
+func TestRollupCostFn_ReplacementTotalCostExact(t *testing.T) {
+	t.Parallel()
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	rc := uint256.NewInt(500_000_000_000)
+	mock := &mockRollupCostProvider{fn: constRollupCost(rc)}
+	l := newRollupList(true, mock)
+
+	tx := pricedTransaction(0, 21000, big.NewInt(1_000_000_000), key)
+	added, _ := l.Add(tx, 0)
+	require.True(t, added)
+
+	// Replace with a higher-priced tx at the same nonce (>10% bump).
+	txr := pricedTransaction(0, 21000, big.NewInt(2_000_000_000), key)
+	added, old := l.Add(txr, 10)
+	require.True(t, added, "higher-priced replacement must be accepted")
+	require.NotNil(t, old)
+	require.Equal(t, tx.Hash(), old.Hash(), "replaced tx must be the original")
+
+	want, overflow := txpool.TotalTxCost(txr, mock.RollupCostFunc())
+	require.False(t, overflow)
+	require.Equal(t, want, l.totalcost, "totalcost after replacement must equal exactly the new tx cost")
+	require.Len(t, l.txCosts, 1, "old cached cost must be evicted on replacement, only the new one remains")
+	_, oldStillCached := l.txCosts[tx.Hash()]
+	require.False(t, oldStillCached, "replaced tx must not leak a cached cost entry")
+}
+
+// TestRollupCostFn_AddOverflowDoesNotCacheRejectedTx verifies that list.Add
+// leaves no txCosts entry behind when totalcost + tx cost overflows and the tx is
+// rejected before insertion.
+func TestRollupCostFn_AddOverflowDoesNotCacheRejectedTx(t *testing.T) {
+	t.Parallel()
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	mock := &mockRollupCostProvider{fn: constRollupCost(uint256.NewInt(0))}
+	l := newRollupList(true, mock)
+	l.totalcost = new(uint256.Int).SetAllOne()
+
+	tx := pricedTransaction(0, 21000, big.NewInt(1_000_000_000), key)
+	added, old := l.Add(tx, 0)
+	require.False(t, added)
+	require.Nil(t, old)
+	require.False(t, l.Contains(tx.Nonce()), "overflow-rejected tx must not be inserted")
+	require.Len(t, l.txCosts, 0, "overflow-rejected tx must not leave a cached cost entry")
+	require.True(t, l.totalcost.Eq(new(uint256.Int).SetAllOne()), "totalcost must remain unchanged")
+}
+
+// TestRollupCostFn_RemovalPathsNoLeak checks that every removal path (Forward,
+// Cap, Filter) keeps totalcost consistent with the surviving transactions and
+// never leaks entries in the txCosts cache.
+func TestRollupCostFn_RemovalPathsNoLeak(t *testing.T) {
+	t.Parallel()
+
+	rc := uint256.NewInt(1_000_000_000)
+
+	// addThree returns a fresh list with txs at nonce 0,1,2 (all same cost) and
+	// the signed transactions, so each subtest starts from a clean state.
+	addThree := func(t *testing.T) (*list, []*types.Transaction, *mockRollupCostProvider) {
+		key, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		mock := &mockRollupCostProvider{fn: constRollupCost(rc)}
+		l := newRollupList(true, mock)
+		var txs []*types.Transaction
+		for i := 0; i < 3; i++ {
+			tx := pricedTransaction(uint64(i), 21000, big.NewInt(1_000_000_000), key)
+			added, _ := l.Add(tx, 0)
+			require.True(t, added)
+			txs = append(txs, tx)
+		}
+		require.Len(t, l.txCosts, 3)
+		return l, txs, mock
+	}
+
+	// sumCost returns the total rollup-inclusive cost of the given transactions.
+	sumCost := func(t *testing.T, mock *mockRollupCostProvider, txs ...*types.Transaction) *uint256.Int {
+		total := new(uint256.Int)
+		for _, tx := range txs {
+			c, overflow := txpool.TotalTxCost(tx, mock.RollupCostFunc())
+			require.False(t, overflow)
+			total.Add(total, c)
+		}
+		return total
+	}
+
+	t.Run("Forward", func(t *testing.T) {
+		t.Parallel()
+		l, txs, mock := addThree(t)
+		// Forward past nonce 2 drops nonce 0 and 1, keeping nonce 2.
+		dropped := l.Forward(2)
+		require.Len(t, dropped, 2)
+		require.Equal(t, sumCost(t, mock, txs[2]), l.totalcost)
+		require.Len(t, l.txCosts, 1)
+	})
+
+	t.Run("Cap", func(t *testing.T) {
+		t.Parallel()
+		l, txs, mock := addThree(t)
+		// Cap to 1 keeps the lowest-nonce tx (0) and drops nonce 1 and 2.
+		dropped := l.Cap(1)
+		require.Len(t, dropped, 2)
+		require.Equal(t, sumCost(t, mock, txs[0]), l.totalcost)
+		require.Len(t, l.txCosts, 1)
+	})
+
+	t.Run("Filter", func(t *testing.T) {
+		t.Parallel()
+		l, _, _ := addThree(t)
+		// A cost limit below every tx's cost removes them all (strict mode has no
+		// higher-nonce survivors to invalidate).
+		removed, invalids := l.Filter(uint256.NewInt(1), 30_000_000)
+		require.Len(t, removed, 3)
+		require.Len(t, invalids, 0)
+		require.True(t, l.totalcost.IsZero(), "totalcost must be 0 after removing all txs, got %s", l.totalcost)
+		require.Len(t, l.txCosts, 0, "txCosts cache must be empty after removing all txs")
+	})
 }

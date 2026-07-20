@@ -18,10 +18,13 @@ package types
 
 import (
 	"bytes"
+	"encoding/json"
+	"math/big"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -92,4 +95,41 @@ func FuzzUnpackIntoDeposit(f *testing.F) {
 			t.Errorf("roundtrip failed: want %x, got %x", enc, got)
 		}
 	})
+}
+
+func TestDepositTx(t *testing.T) {
+	depositTxStr := `{
+        "blockHash": "0x13d90e1a5788116c43535ddaf6f52aa69253ed4621e8cd5247ce94f93eaf5c8f",
+        "blockNumber": "0x3cafcfb",
+        "ethValue": "0x0",
+        "from": "0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001",
+        "gas": "0xf4240",
+        "gasPrice": "0x0",
+        "hash": "0x15ef2ac0a08b3c747ab8c938dde2164728ae3fd0c1981b0b88bee64e7c424ba8",
+        "input": "0x015d8eb900000000000000000000000000000000000000000000000000000000012ecc8700000000000000000000000000000000000000000000000000000000663eebbf000000000000000000000000000000000000000000000000000000012ce52460e091984cf3d2da0b2408a6611fbde9a4a1eb6acedfe57689df496b70f0ec0e5000000000000000000000000000000000000000000000000000000000000000050000000000000000000000002f40d796917ffb642bd2e2bdd2c762a5e40fd74900000000000000000000000000000000000000000000000000000000000000bc0000000000000000000000000000000000000000000000000000000000002710",
+        "mint": "0x0",
+        "nonce": "0x259410",
+        "r": "0x0",
+        "s": "0x0",
+        "sourceHash": "0xd375d8d3d4cc23e681a5c2f4737813f95b8aba4184c23842c029b3477515e6e0",
+        "to": "0x4200000000000000000000000000000000000015",
+        "transactionIndex": "0x0",
+        "type": "0x7e",
+        "v": "0x0",
+        "value": "0x0"
+    }`
+
+	expectFrom := common.HexToAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001")
+	expectSourceHash := common.HexToHash("0xd375d8d3d4cc23e681a5c2f4737813f95b8aba4184c23842c029b3477515e6e0")
+	var parsedTx = &Transaction{}
+	err := json.Unmarshal([]byte(depositTxStr), &parsedTx)
+
+	require.Equal(t, expectFrom, parsedTx.From())
+	require.Equal(t, expectSourceHash, parsedTx.SourceHash())
+	require.Equal(t, uint64(0), parsedTx.Mint().Uint64())
+
+	signer := LatestSignerForChainID(big.NewInt(5000))
+	from, err := signer.Sender(parsedTx)
+	require.NoError(t, err)
+	require.Equal(t, expectFrom, from)
 }
