@@ -1027,6 +1027,16 @@ func (api *BlockChainAPI) SimulateV1(ctx context.Context, opts simOpts, blockNrO
 		validate:       opts.Validation,
 		fullTx:         opts.ReturnFullTransactions,
 	}
+	if api.b.ChainConfig().IsOptimism() {
+		block, err := api.b.BlockByNumberOrHash(ctx, *blockNrOrHash)
+		if err != nil {
+			return nil, err
+		}
+		if len(block.Transactions()) > 0 {
+			// The genesis block has no transactions, so its simulation will likely fail.
+			sim.l1AttributesTx = block.Transactions()[0]
+		}
+	}
 	return sim.execute(ctx, opts.BlockStateCalls)
 }
 

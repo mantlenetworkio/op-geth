@@ -3264,6 +3264,131 @@ func TestSimulateV1TxSender(t *testing.T) {
 	require.Equal(t, sender2, summary[1].Transactions[0].From, "sender address mismatch")
 }
 
+// TestSimulateV1Arsia checks that blocks simulated on top of an Arsia block can be assembled.
+// Arsia blocks store their DA footprint in the BlobGasUsed header field, which is computed from
+// the L1 attributes deposit transaction that has to be the first transaction of the block, and
+// their EIP-1559 parameters in the header extra data, which is read when deriving the base fee of
+// the next block.
+func TestSimulateV1Arsia(t *testing.T) {
+	t.Parallel()
+	var (
+		accs      = newAccounts(2)
+		arsiaTime = uint64(50) // block 5 (time=50) is the first Arsia block
+		genBlocks = 10
+		signer    = types.HomesteadSigner{}
+		// Canyon denominator=250, elasticity=50, minBaseFee=0.
+		arsiaExtraData = eip1559.EncodeMinBaseFeeExtraData(250, 50, 0)
+		calldataScalar = uint16(100)
+		// Minimum DA size charged per transaction, see types.MinTransactionSize.
+		minDASize = uint64(100)
+	)
+	chainCfg := func() *params.ChainConfig {
+		conf := *params.OptimismTestConfig
+		conf.MantleArsiaTime = &arsiaTime
+		return &conf
+	}()
+
+	// L1 attributes deposit transactions, in Arsia format for Arsia blocks and in the pre-Arsia
+	// format, which carries no DA footprint gas scalar, for the blocks before the fork.
+	attrsTx := func(data []byte) *types.Transaction {
+		to := common.Address{0xff}
+		return types.NewTx(&types.DepositTx{Value: big.NewInt(0), Gas: params.TxGas * 2, To: &to, Data: data})
+	}
+	arsiaL1AttrData := make([]byte, types.JovianL1AttributesLen)
+	copy(arsiaL1AttrData[0:4], types.MantleArsiaL1AttributesSelector)
+	binary.BigEndian.PutUint16(arsiaL1AttrData[types.JovianL1AttributesLen-2:], calldataScalar)
+	arsiaDepositTx := attrsTx(arsiaL1AttrData)
+	preArsiaDepositTx := attrsTx(make([]byte, types.BedrockL1AttributesLen))
+
+	genesis := &core.Genesis{
+		Config: chainCfg,
+		Alloc: types.GenesisAlloc{
+			accs[0].addr: {Balance: big.NewInt(params.Ether)},
+			accs[1].addr: {Balance: big.NewInt(params.Ether)},
+		},
+	}
+	backend := newTestBackend(t, genBlocks, genesis, beacon.New(ethash.NewFaker()), func(i int, b *core.BlockGen) {
+		if blockTime := uint64((i + 1) * 10); blockTime >= arsiaTime {
+			b.AddTx(arsiaDepositTx)
+			b.SetExtra(arsiaExtraData)
+		} else {
+			b.AddTx(preArsiaDepositTx)
+		}
+		tx, _ := types.SignTx(types.NewTx(&types.LegacyTx{
+			Nonce: uint64(i), To: &accs[1].addr,
+			Value: big.NewInt(1000), Gas: params.TxGas, GasPrice: b.BaseFee(),
+		}), signer, accs[0].key)
+		b.AddTx(tx)
+		b.SetPoS()
+	})
+	api := NewBlockChainAPI(backend)
+
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	latestHeader, err := backend.HeaderByNumber(context.Background(), rpc.LatestBlockNumber)
+	require.NoError(t, err)
+	require.NotNil(t, latestHeader.BlobGasUsed, "base block should carry a DA footprint")
+
+	call := TransactionArgs{
+		From:                 &accs[0].addr,
+		To:                   &accs[1].addr,
+		Value:                (*hexutil.Big)(big.NewInt(1000)),
+		Gas:                  newUint64(params.TxGas),
+		MaxFeePerGas:         (*hexutil.Big)(new(big.Int).Mul(latestHeader.BaseFee, big.NewInt(10))),
+		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(0)),
+	}
+
+	for _, validate := range []bool{false, true} {
+		t.Run(fmt.Sprintf("validate=%t", validate), func(t *testing.T) {
+			// Simulate two blocks: the second one derives its base fee from the header of the
+			// first simulated block.
+			results, err := api.SimulateV1(context.Background(), simOpts{
+				Validation: validate,
+				BlockStateCalls: []simBlock{
+					{Calls: []TransactionArgs{call}},
+					{Calls: []TransactionArgs{call}},
+				},
+			}, &latest)
+			require.NoError(t, err)
+			require.Len(t, results, 2, "expected 2 simulated blocks")
+
+			for i, res := range results {
+				require.Len(t, res.Calls, 1, "block %d: expected 1 call result", i)
+				require.Equal(t, hexutil.Uint64(types.ReceiptStatusSuccessful), res.Calls[0].Status, "block %d: call failed: %v", i, res.Calls[0].Error)
+				// The injected L1 attributes transaction must not show up in the result, so that
+				// transactions stay aligned with the call results.
+				require.Len(t, res.Block.Transactions(), 1, "block %d: expected 1 transaction", i)
+				require.False(t, res.Block.Transactions()[0].IsDepositTx(), "block %d: L1 attributes transaction leaked into the result", i)
+				// The DA footprint of the simulated user transaction is stored in BlobGasUsed and
+				// derived from the scalar in the L1 attributes calldata of the base block.
+				require.NotNil(t, res.Block.Header().BlobGasUsed, "block %d: missing DA footprint", i)
+				require.Equal(t, minDASize*uint64(calldataScalar), *res.Block.Header().BlobGasUsed, "block %d: unexpected DA footprint", i)
+				// Arsia blocks must carry the EIP-1559 parameters in the extra data.
+				require.Equal(t, arsiaExtraData, res.Block.Extra(), "block %d: unexpected extra data", i)
+			}
+		})
+	}
+
+	// Pre-Arsia blocks have no DA footprint and no extra data, so they are unaffected. Block 1 has
+	// time=10, the block simulated on top of it stays below arsiaTime.
+	t.Run("pre-Arsia", func(t *testing.T) {
+		preArsia := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(1))
+		results, err := api.SimulateV1(context.Background(), simOpts{
+			BlockStateCalls: []simBlock{{Calls: []TransactionArgs{call}}, {Calls: []TransactionArgs{call}}},
+		}, &preArsia)
+		require.NoError(t, err)
+		require.Len(t, results, 2)
+		for i, res := range results {
+			require.Less(t, res.Block.Time(), arsiaTime, "block %d: expected a pre-Arsia block", i)
+			require.Equal(t, hexutil.Uint64(types.ReceiptStatusSuccessful), res.Calls[0].Status, "block %d: call failed: %v", i, res.Calls[0].Error)
+			require.Len(t, res.Block.Transactions(), 1, "block %d: expected 1 transaction", i)
+			require.Empty(t, res.Block.Extra(), "block %d: pre-Arsia blocks must not carry extra data", i)
+			if res.Block.BlobGasUsed() != nil {
+				require.Zero(t, *res.Block.BlobGasUsed(), "block %d: pre-Arsia blocks have no DA footprint", i)
+			}
+		}
+	})
+}
+
 func TestSignTransaction(t *testing.T) {
 	t.Parallel()
 	// Initialize test accounts
