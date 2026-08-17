@@ -270,6 +270,9 @@ func (sim *simulator) execute(ctx context.Context, blocks []simBlock) ([]*simBlo
 }
 
 func (sim *simulator) processBlock(ctx context.Context, block *simBlock, header, parent *types.Header, headers []*types.Header, timeout time.Duration) (*types.Block, []simCallResult, map[common.Hash]common.Address, error) {
+	if !sim.chainConfig.IsMantleArsia(parent.Time) && sim.chainConfig.IsMantleArsia(header.Time) {
+		return nil, nil, nil, errors.New("eth_simulateV1 does not support crossing the Mantle Arsia activation boundary")
+	}
 	// Set header fields that depend only on parent block.
 	// Parent hash is needed for evm.GetHashFn to work.
 	header.ParentHash = parent.Hash()

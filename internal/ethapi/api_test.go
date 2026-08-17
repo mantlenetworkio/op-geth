@@ -3387,6 +3387,23 @@ func TestSimulateV1Arsia(t *testing.T) {
 			}
 		}
 	})
+
+	// Reusing pre-Arsia L1 attributes and extra data after the fork would either produce an invalid
+	// block or panic while calculating the next block's base fee, so crossing the boundary is rejected.
+	t.Run("Arsia-activation-boundary", func(t *testing.T) {
+		preArsia := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(4))
+		for _, validate := range []bool{false, true} {
+			t.Run(fmt.Sprintf("validate=%t", validate), func(t *testing.T) {
+				_, err := api.SimulateV1(context.Background(), simOpts{
+					Validation: validate,
+					BlockStateCalls: []simBlock{{
+						BlockOverrides: &override.BlockOverrides{Time: newUint64(arsiaTime)},
+					}},
+				}, &preArsia)
+				require.EqualError(t, err, "eth_simulateV1 does not support crossing the Mantle Arsia activation boundary")
+			})
+		}
+	})
 }
 
 func TestSignTransaction(t *testing.T) {
