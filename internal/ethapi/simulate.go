@@ -37,6 +37,7 @@ import (
 	"github.com/ethereum/go-ethereum/internal/ethapi/override"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/ethereum/go-ethereum/trie"
 )
 
 const (
@@ -213,6 +214,9 @@ type simulator struct {
 	traceTransfers bool
 	validate       bool
 	fullTx         bool
+
+	// OP-Stack diff
+	l1AttributesTx *types.Transaction
 }
 
 // execute runs the simulation of a series of blocks.
@@ -266,6 +270,9 @@ func (sim *simulator) execute(ctx context.Context, blocks []simBlock) ([]*simBlo
 }
 
 func (sim *simulator) processBlock(ctx context.Context, block *simBlock, header, parent *types.Header, headers []*types.Header, timeout time.Duration) (*types.Block, []simCallResult, map[common.Hash]common.Address, error) {
+	if !sim.chainConfig.IsMantleArsia(parent.Time) && sim.chainConfig.IsMantleArsia(header.Time) {
+		return nil, nil, nil, errors.New("eth_simulateV1 does not support crossing the Mantle Arsia activation boundary")
+	}
 	// Set header fields that depend only on parent block.
 	// Parent hash is needed for evm.GetHashFn to work.
 	header.ParentHash = parent.Hash()
@@ -428,9 +435,18 @@ func (sim *simulator) processBlock(ctx context.Context, block *simBlock, header,
 		header.RequestsHash = &reqHash
 	}
 
+	// OP-Stack diff: inject the L1 attributes deposit transaction at the beginning of Optimism blocks.
+	// This is required because CalcDAFootprint (called by AssembleBlock for Arsia blocks) expects
+	// the first transaction to be a deposit transaction carrying the L1 attributes data.
+	isOptimism := sim.chainConfig.IsOptimism()
+	prependedTxes := txes
+	if isOptimism && sim.l1AttributesTx != nil {
+		prependedTxes = append([]*types.Transaction{sim.l1AttributesTx}, txes...)
+	}
+
 	blockBody := &types.Body{
-		Transactions: txes,
-		Withdrawals:  *block.BlockOverrides.Withdrawals, // Withdrawal is also sanitized as non-nil
+		Transactions: prependedTxes,
+		Withdrawals:  *block.BlockOverrides.Withdrawals,
 	}
 	chainHeadReader := &simChainHeadReader{ctx, sim.b}
 
@@ -438,6 +454,19 @@ func (sim *simulator) processBlock(ctx context.Context, block *simBlock, header,
 	b, err := core.AssembleBlock(sim.b.Engine(), chainHeadReader, header, sim.state, blockBody, receipts)
 	if err != nil {
 		return nil, nil, nil, err
+	}
+
+	// OP-Stack diff: rebuild the block without the injected L1 attributes transaction so that
+	// transactions and receipts stay index-aligned in the response. The header keeps the fields
+	// computed during assembly, e.g. the DA footprint stored in BlobGasUsed.
+	if isOptimism && sim.l1AttributesTx != nil {
+		b = types.NewBlock(
+			b.Header(),
+			&types.Body{Transactions: txes, Withdrawals: *block.BlockOverrides.Withdrawals},
+			receipts,
+			trie.NewStackTrie(nil),
+			sim.chainConfig,
+		)
 	}
 
 	repairLogs(callResults, b.Hash())
@@ -585,6 +614,11 @@ func (sim *simulator) makeHeaders(blocks []simBlock) ([]*types.Header, error) {
 		if sim.chainConfig.IsPostMerge(number.Uint64(), timestamp) {
 			difficulty = big.NewInt(0)
 		}
+
+		var extra []byte
+		if sim.chainConfig.IsOptimism() {
+			extra = header.Extra
+		}
 		header = overrides.MakeHeader(&types.Header{
 			UncleHash:        types.EmptyUncleHash,
 			ReceiptHash:      types.EmptyReceiptsHash,
@@ -592,6 +626,7 @@ func (sim *simulator) makeHeaders(blocks []simBlock) ([]*types.Header, error) {
 			Coinbase:         header.Coinbase,
 			Difficulty:       difficulty,
 			GasLimit:         header.GasLimit,
+			Extra:            extra,
 			WithdrawalsHash:  withdrawalsHash,
 			ParentBeaconRoot: parentBeaconRoot,
 		})
